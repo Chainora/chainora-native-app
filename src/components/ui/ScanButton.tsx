@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { THEME } from '../../theme/colors';
+import { THEME } from '../../utils/theme/colors';
 
 type ScanButtonProps = {
   label?: string;

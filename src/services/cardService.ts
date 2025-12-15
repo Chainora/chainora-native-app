@@ -1,3 +1,5 @@
+import { keccak_256 } from '@noble/hashes/sha3';
+
 import { buildSelectApdu, parseApduResponse } from '../lib/apdu';
 import { withIsoDep, IsoDepClient } from '../lib/nfc/isoDepClient';
 import { bytesToHex } from '../utils/encoding';
@@ -13,6 +15,7 @@ const INS = {
   IS_PIN_INITIALIZED: 0x14,
   GEN_KEY_PAIR: 0x20,
   GET_PUBLIC_KEY: 0x21,
+  SIGN_AUTH_MESSAGE: 0x30,
 } as const;
 
 type WalletCommandOptions = {
@@ -29,6 +32,8 @@ export type WalletActionCode =
   | 'PIN_INVALID'
   | 'KEYPAIR_FAILURE'
   | 'PUBLIC_KEY_FAILURE'
+  | 'RESET_FAILED'
+  | 'SIGN_AUTH_FAILED'
   | 'SELECT_FAILED'
   | 'PIN_STATE_UNAVAILABLE'
   | 'TRANSPORT_ERROR'
@@ -39,8 +44,22 @@ export type WalletActionResult = {
   message: string;
   statusWord?: string;
   publicKeyHex?: string;
+  ethAddress?: string;
   code?: WalletActionCode;
   step?: string;
+};
+
+const deriveEthAddress = (publicKey: Uint8Array): string => {
+  const isUncompressedWithPrefix = publicKey.length === 65 && publicKey[0] === 0x04;
+  const keyBytes = isUncompressedWithPrefix ? publicKey.slice(1) : publicKey;
+
+  if (keyBytes.length !== 64) {
+    throw new Error(`Unexpected public key length (${keyBytes.length}). Expected 64 bytes after removing format prefix.`);
+  }
+
+  const digest = keccak_256(keyBytes);
+  const addressBytes = digest.slice(-20);
+  return `0x${bytesToHex(addressBytes)}`;
 };
 
 const buildWalletCommand = ({ ins, data, p1 = 0x00, p2 = 0x00, le }: WalletCommandOptions): Uint8Array => {
@@ -95,6 +114,23 @@ const encodePin = (pin: string): Uint8Array => {
   return Uint8Array.from(trimmed.split('').map(char => char.charCodeAt(0)));
 };
 
+const encodeMessage = (value: string): Uint8Array => {
+  if (!value) {
+    return new Uint8Array();
+  }
+
+  if (typeof TextEncoder !== 'undefined') {
+    return new TextEncoder().encode(value);
+  }
+
+  const encoded = unescape(encodeURIComponent(value));
+  const bytes = new Uint8Array(encoded.length);
+  for (let index = 0; index < encoded.length; index += 1) {
+    bytes[index] = encoded.charCodeAt(index);
+  }
+  return bytes;
+};
+
 const sendWalletCommand = async (isoDep: IsoDepClient, options: WalletCommandOptions) => {
   const command = buildWalletCommand(options);
   const response = await isoDep.transceive(command);
@@ -144,14 +180,28 @@ const isPinInitialised = (payload: Uint8Array): boolean => {
 
 const buildInfoResult = (message: string, statusWord: string, publicKey?: Uint8Array): WalletActionResult => {
   const publicKeyHex = publicKey ? bytesToHex(publicKey) : undefined;
+  let ethAddress: string | undefined;
+
   if (publicKeyHex) {
     console.log('[NFC] Wallet public key fetched', { preview: `${publicKeyHex.slice(0, 16)}...${publicKeyHex.slice(-8)}` });
   }
+
+  if (publicKey) {
+    try {
+      ethAddress = deriveEthAddress(publicKey);
+      console.log('[NFC] Wallet Ethereum address derived', { preview: `${ethAddress.slice(0, 12)}...${ethAddress.slice(-6)}` });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn('[NFC] Failed to derive Ethereum address from public key', { reason });
+    }
+  }
+
   return {
     ok: true,
     message,
     statusWord,
     publicKeyHex,
+    ethAddress,
     step: 'complete',
   };
 };
@@ -236,5 +286,57 @@ export const signInWallet = async (pin: string): Promise<WalletActionResult> => 
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return transportError(message);
+  }
+};
+
+export const resetWallet = async (): Promise<WalletActionResult> => {
+  try {
+    return await withIsoDep(async isoDep => {
+      const selectError = await ensureWalletSelected(isoDep);
+      if (selectError) {
+        return selectError;
+      }
+
+      const resetResponse = await sendWalletCommand(isoDep, { ins: INS.RESET_PIN });
+      if (!resetResponse.statusWord.ok) {
+        return walletError(
+          'resetCard',
+          'Failed to reset the Chainora card.',
+          'RESET_FAILED',
+          resetResponse.statusWord.hex,
+        );
+      }
+
+      return buildInfoResult('Wallet reset successfully.', resetResponse.statusWord.hex);
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return transportError(message);
+  }
+};
+
+export const signAuthMessage = async (challenge: string): Promise<string> => {
+  try {
+    return await withIsoDep(async isoDep => {
+      const selectError = await ensureWalletSelected(isoDep);
+      if (selectError) {
+        throw new Error(selectError.message);
+      }
+
+      const payload = encodeMessage(challenge);
+      if (payload.length === 0) {
+        throw new Error('Challenge must not be empty');
+      }
+
+      const response = await sendWalletCommand(isoDep, { ins: INS.SIGN_AUTH_MESSAGE, data: payload });
+      if (!response.statusWord.ok) {
+        throw new Error(`Card rejected auth signature (${response.statusWord.hex})`);
+      }
+
+      return bytesToHex(response.data);
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to sign auth message: ${message}`);
   }
 };

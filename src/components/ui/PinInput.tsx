@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, TextInput } from 'react-native';
 
-import { THEME } from '../../theme/colors';
+import { THEME } from '../../utils/theme/colors';
 
 type PinInputProps = {
   value: string;

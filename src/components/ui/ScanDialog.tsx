@@ -5,7 +5,7 @@ import Video from 'react-native-video';
 import { AppButton } from '../AppButton';
 import { PinInput } from './PinInput';
 import { initialiseWallet, signInWallet, WalletActionResult, WalletActionCode } from '../../services/cardService';
-import { THEME } from '../../theme/colors';
+import { THEME } from '../../utils/theme/colors';
 import { ToastType } from '../Toast';
 
 export type ScanMode = 'init' | 'signin';
@@ -22,6 +22,7 @@ type ScanDialogProps = {
   onStatusChange?: (status: string) => void;
   onScanningChange?: (isScanning: boolean) => void;
   onShowToast?: (message: string, type: ToastType) => void;
+  onSuccess?: (details: { result: WalletActionResult; mode: ScanMode }) => void;
 };
 
 type ScanPhase = 'pin' | 'working' | 'success' | 'error';
@@ -67,6 +68,10 @@ const buildInfoLines = (mode: ScanMode, result: WalletActionResult): string[] =>
     lines.push(`Public key: ${formatPublicKeySummary(result.publicKeyHex)}`);
   }
 
+  if (result.ok && result.ethAddress) {
+    lines.push(`Ethereum address: ${result.ethAddress}`);
+  }
+
   const suggestion = suggestionForCode(mode, result.code);
   if (suggestion) {
     lines.push(suggestion);
@@ -86,6 +91,7 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
   onStatusChange,
   onScanningChange,
   onShowToast,
+  onSuccess,
 }) => {
   const [mode, setMode] = useState<ScanMode>('init');
   const [pinValue, setPinValue] = useState('');
@@ -234,6 +240,7 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
         setStatusMessage(result.message);
         onStatusChange?.(result.message);
         showToast('Scan completed successfully', 'success');
+        onSuccess?.({ result, mode });
       } else {
         setPhase('error');
         setStatusMessage(result.message);
@@ -253,7 +260,7 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
       onStatusChange?.(fallbackMessage);
       showToast(fallbackMessage, 'error');
     }
-  }, [isNfcEnabled, mode, onStatusChange, pinValue, showToast]);
+  }, [isNfcEnabled, mode, onStatusChange, onSuccess, pinValue, showToast]);
 
   const handleSubmitPin = useCallback(() => {
     if (pinValue.length !== PIN_LENGTH) {
