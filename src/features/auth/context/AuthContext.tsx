@@ -3,8 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type AuthSession = {
   address: string;
-  challenge: string;
-  signature?: string;
+  authenticated: boolean;
   issuedAt: string;
   expiresAt: string;
 };
@@ -17,41 +16,39 @@ export type AuthContextValue = {
   session: AuthSession | null;
   isAuthenticated: boolean;
   initializeSession: (address: string) => Promise<AuthSession>;
-  completeSession: (signature: string) => Promise<AuthSession>;
+  completeSession: () => Promise<AuthSession>;
   clearSession: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-const buildChallenge = (address: string, nonce: string) =>
-  `Chainora authentication challenge for ${address}. Nonce: ${nonce}. Sign to prove card possession.`;
-
 const nowIso = () => new Date().toISOString();
 const addMillis = (millis: number) => new Date(Date.now() + millis).toISOString();
 
-const generateNonce = () => {
-  try {
-    const array = new Uint32Array(4);
-    const cryptoApi = globalThis as typeof globalThis & {
-      crypto?: {
-        getRandomValues?: (buffer: Uint32Array) => Uint32Array;
-      };
-    };
-
-    if (typeof cryptoApi.crypto?.getRandomValues === 'function') {
-      cryptoApi.crypto.getRandomValues(array);
-    } else {
-      for (let index = 0; index < array.length; index += 1) {
-        array[index] = Math.floor(Math.random() * 0xffffffff);
-      }
-    }
-    return Array.from(array)
-      .map(value => value.toString(16).padStart(8, '0'))
-      .join('');
-  } catch {
-    const fallback = Math.random().toString(16).slice(2);
-    return fallback.padEnd(32, '0');
+const normalizeSession = (input: unknown): AuthSession | null => {
+  if (!input || typeof input !== 'object') {
+    return null;
   }
+
+  const candidate = input as Partial<AuthSession> & { address?: string; signature?: string };
+  if (!candidate.address || typeof candidate.address !== 'string') {
+    return null;
+  }
+
+  const address = candidate.address.toLowerCase();
+  const issuedAt = typeof candidate.issuedAt === 'string' ? candidate.issuedAt : nowIso();
+  const expiresAt = typeof candidate.expiresAt === 'string' ? candidate.expiresAt : addMillis(SESSION_PENDING_TTL_MS);
+  const authenticated =
+    typeof candidate.authenticated === 'boolean'
+      ? candidate.authenticated
+      : Boolean(candidate.signature && candidate.signature.length > 0);
+
+  return {
+    address,
+    authenticated,
+    issuedAt,
+    expiresAt,
+  };
 };
 
 export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
@@ -65,7 +62,8 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
         if (!stored) {
           return;
         }
-        const parsed = JSON.parse(stored) as AuthSession;
+        const raw = JSON.parse(stored) as unknown;
+        const parsed = normalizeSession(raw);
         setSession(parsed);
       } catch (error) {
         console.warn('[Auth] Failed to load session from storage', error);
@@ -110,14 +108,19 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
       const now = Date.now();
 
       if (current && current.address === normalized && currentExpiration > now) {
+        if (typeof current.authenticated !== 'boolean') {
+          const migrated = normalizeSession({ ...current });
+          if (migrated) {
+            setSession(migrated);
+            return migrated;
+          }
+        }
         return current;
       }
 
-      const nonce = generateNonce();
-      const challenge = buildChallenge(normalized, nonce);
       const next: AuthSession = {
         address: normalized,
-        challenge,
+        authenticated: false,
         issuedAt: nowIso(),
         expiresAt: addMillis(SESSION_PENDING_TTL_MS),
       };
@@ -128,14 +131,15 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
   );
 
   const completeSession = useCallback(
-    async (signature: string): Promise<AuthSession> => {
+    async (): Promise<AuthSession> => {
       if (!session) {
         throw new Error('No session active');
       }
 
       const next: AuthSession = {
         ...session,
-        signature,
+        authenticated: true,
+        issuedAt: nowIso(),
         expiresAt: addMillis(SESSION_ACTIVE_TTL_MS),
       };
       setSession(next);
@@ -147,7 +151,7 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
   const value = useMemo<AuthContextValue>(
     () => ({
       session,
-      isAuthenticated: Boolean(session?.signature && Date.parse(session.expiresAt) > Date.now()),
+      isAuthenticated: Boolean(session?.authenticated && Date.parse(session.expiresAt) > Date.now()),
       initializeSession,
       completeSession,
       clearSession,

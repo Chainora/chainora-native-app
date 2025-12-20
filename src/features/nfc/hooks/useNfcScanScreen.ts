@@ -6,11 +6,11 @@ import NfcManager from 'react-native-nfc-manager';
 import { ToastType } from '../../../components/Toast';
 import type { ScanMode } from '../../../components/ui/ScanDialog';
 import { useAuth } from '../../auth';
-import { useNfcEnabled } from '../../../hooks/useNfcEnabled';
+import { useNfcEnabled } from './useNfcEnabled';
 import { ROUTES } from '../../../navigation/routes/routes';
 import type { RootStackParamList } from '../../../navigation/routes/rootStackParamList';
 import type { WalletActionResult } from '../../../services/cardService';
-import { resetWallet, signAuthMessage } from '../../../services/cardService';
+import { resetWallet } from '../../../services/cardService';
 import { NfcAlerts, NfcScanCopy, NfcToastMessages } from '../constants/messages';
 
 export type UseNfcScanScreenParams = {
@@ -100,10 +100,9 @@ export const useNfcScanScreen = ({ navigation }: UseNfcScanScreenParams): UseNfc
       }
 
       try {
-        const session = await initializeSession(result.ethAddress);
-        const signature = await signAuthMessage(session.challenge);
-        await completeSession(signature);
-        showToast('Authentication verified via card signature.', 'success');
+        await initializeSession(result.ethAddress);
+        await completeSession();
+        showToast('Authenticated via card scan.', 'success');
       } catch (authError) {
         const message = authError instanceof Error ? authError.message : String(authError);
         showToast(message, 'error');

@@ -15,7 +15,6 @@ const INS = {
   IS_PIN_INITIALIZED: 0x14,
   GEN_KEY_PAIR: 0x20,
   GET_PUBLIC_KEY: 0x21,
-  SIGN_AUTH_MESSAGE: 0x30,
 } as const;
 
 type WalletCommandOptions = {
@@ -33,7 +32,6 @@ export type WalletActionCode =
   | 'KEYPAIR_FAILURE'
   | 'PUBLIC_KEY_FAILURE'
   | 'RESET_FAILED'
-  | 'SIGN_AUTH_FAILED'
   | 'SELECT_FAILED'
   | 'PIN_STATE_UNAVAILABLE'
   | 'TRANSPORT_ERROR'
@@ -112,23 +110,6 @@ const encodePin = (pin: string): Uint8Array => {
     throw new Error('PIN must contain 4-8 digits');
   }
   return Uint8Array.from(trimmed.split('').map(char => char.charCodeAt(0)));
-};
-
-const encodeMessage = (value: string): Uint8Array => {
-  if (!value) {
-    return new Uint8Array();
-  }
-
-  if (typeof TextEncoder !== 'undefined') {
-    return new TextEncoder().encode(value);
-  }
-
-  const encoded = unescape(encodeURIComponent(value));
-  const bytes = new Uint8Array(encoded.length);
-  for (let index = 0; index < encoded.length; index += 1) {
-    bytes[index] = encoded.charCodeAt(index);
-  }
-  return bytes;
 };
 
 const sendWalletCommand = async (isoDep: IsoDepClient, options: WalletCommandOptions) => {
@@ -312,31 +293,5 @@ export const resetWallet = async (): Promise<WalletActionResult> => {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return transportError(message);
-  }
-};
-
-export const signAuthMessage = async (challenge: string): Promise<string> => {
-  try {
-    return await withIsoDep(async isoDep => {
-      const selectError = await ensureWalletSelected(isoDep);
-      if (selectError) {
-        throw new Error(selectError.message);
-      }
-
-      const payload = encodeMessage(challenge);
-      if (payload.length === 0) {
-        throw new Error('Challenge must not be empty');
-      }
-
-      const response = await sendWalletCommand(isoDep, { ins: INS.SIGN_AUTH_MESSAGE, data: payload });
-      if (!response.statusWord.ok) {
-        throw new Error(`Card rejected auth signature (${response.statusWord.hex})`);
-      }
-
-      return bytesToHex(response.data);
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to sign auth message: ${message}`);
   }
 };

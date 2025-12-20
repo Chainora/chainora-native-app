@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { THEME } from '../utils/theme/colors';
+import { THEME } from '../types/theme/colors';
 
 export type BottomNavItem = {
   key: string;
