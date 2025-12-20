@@ -15,6 +15,7 @@ const INS = {
   IS_PIN_INITIALIZED: 0x14,
   GEN_KEY_PAIR: 0x20,
   GET_PUBLIC_KEY: 0x21,
+  SIGN_HASH: 0x22,
 } as const;
 
 type WalletCommandOptions = {
@@ -45,6 +46,11 @@ export type WalletActionResult = {
   ethAddress?: string;
   code?: WalletActionCode;
   step?: string;
+};
+
+export type WalletSignatureResult = WalletActionResult & {
+  signatureDer?: Uint8Array;
+  signatureDerHex?: string;
 };
 
 const deriveEthAddress = (publicKey: Uint8Array): string => {
@@ -187,6 +193,12 @@ const buildInfoResult = (message: string, statusWord: string, publicKey?: Uint8A
   };
 };
 
+const ensureHashLength = (hash: Uint8Array) => {
+  if (hash.length !== 32) {
+    throw new Error(`Transaction hash must be 32 bytes, received ${hash.length}`);
+  }
+};
+
 export const initialiseWallet = async (pin: string): Promise<WalletActionResult> => {
   try {
     return await withIsoDep(async isoDep => {
@@ -289,6 +301,50 @@ export const resetWallet = async (): Promise<WalletActionResult> => {
       }
 
       return buildInfoResult('Wallet reset successfully.', resetResponse.statusWord.hex);
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return transportError(message);
+  }
+};
+
+export const signTransactionHash = async (pin: string, hash: Uint8Array): Promise<WalletSignatureResult> => {
+  ensureHashLength(hash);
+
+  try {
+    return await withIsoDep(async isoDep => {
+      const selectError = await ensureWalletSelected(isoDep);
+      if (selectError) {
+        return selectError;
+      }
+
+      const verifyResponse = await sendWalletCommand(isoDep, { ins: INS.VERIFY_PIN, data: encodePin(pin) });
+      if (!verifyResponse.statusWord.ok) {
+        const code: WalletActionCode = verifyResponse.statusWord.hex === '6982' ? 'PIN_INVALID' : 'UNKNOWN';
+        const message = code === 'PIN_INVALID' ? 'PIN incorrect. Try again.' : 'PIN verification failed on the card.';
+        return walletError('verifyPinForSign', message, code, verifyResponse.statusWord.hex);
+      }
+
+      const publicKeyResponse = await sendWalletCommand(isoDep, { ins: INS.GET_PUBLIC_KEY, le: 0x00 });
+      if (!publicKeyResponse.statusWord.ok) {
+        return walletError('readPublicKey', 'Failed to retrieve the public key from the card.', 'PUBLIC_KEY_FAILURE', publicKeyResponse.statusWord.hex);
+      }
+
+      const signatureResponse = await sendWalletCommand(isoDep, { ins: INS.SIGN_HASH, data: hash });
+      if (!signatureResponse.statusWord.ok) {
+        return walletError('signHash', 'Failed to sign transaction hash.', 'UNKNOWN', signatureResponse.statusWord.hex);
+      }
+
+      const publicKeyBytes = publicKeyResponse.data;
+      const signatureBytes = signatureResponse.data;
+      const base = buildInfoResult('Transaction hash signed successfully.', signatureResponse.statusWord.hex, publicKeyBytes);
+
+      return {
+        ...base,
+        step: 'signHash',
+        signatureDer: signatureBytes,
+        signatureDerHex: bytesToHex(signatureBytes),
+      };
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

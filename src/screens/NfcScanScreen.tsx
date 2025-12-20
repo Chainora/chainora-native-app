@@ -45,7 +45,7 @@ export const NfcScanScreen: React.FC<Props> = ({ navigation }) => {
       <StatusBar barStyle="light-content" backgroundColor="#0F172A" />
       
       {/* Ambient Background */}
-      <View style={StyleSheet.absoluteFill}>
+      <View pointerEvents="none" style={StyleSheet.absoluteFill}>
         <FloatingOrb color={THEME.primary} size={300} initial={{ x: -60, y: -60 }} duration={8000} />
         <FloatingOrb
           color="#6366F1"

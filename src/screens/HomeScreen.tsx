@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Animated,
@@ -24,27 +24,28 @@ import { useWalletBalance } from '../features/wallet/hooks/useWalletBalance';
 import { ROUTES } from '../navigation/routes/routes';
 import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
 import { THEME } from '../types/theme/colors';
+import { SendTransactionDialog } from '../components/ui/SendTransactionDialog';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
 const { width, height } = Dimensions.get('window');
 
+const MONO_FONT = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'Menlo' });
+
 export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
-  
   const { ethAddress, publicKeyHex, mode } = route.params;
-  console.log(ethAddress);
   const { session, initializeSession, isAuthenticated } = useAuth();
   const balanceState = useWalletBalance(ethAddress);
-  console.log(balanceState);
-  const { animatedStyle: heroAnimation } = useEntranceAnimation({ translateInitial: 36, fadeDuration: 700 });
-  const { animatedStyle: balanceAnimation } = useEntranceAnimation({ translateInitial: 28, delay: 140 });
-  const { animatedStyle: detailAnimation } = useEntranceAnimation({ translateInitial: 24, delay: 260 });
+  const [sendVisible, setSendVisible] = useState(false);
+
+  // Entrance Animations for staggered reveal
+  const { animatedStyle: heroAnimation } = useEntranceAnimation({ translateInitial: 36, fadeDuration: 800 });
+  const { animatedStyle: balanceAnimation } = useEntranceAnimation({ translateInitial: 24, delay: 150 });
+  const { animatedStyle: detailAnimation } = useEntranceAnimation({ translateInitial: 20, delay: 300 });
 
   const truncatedPublicKey = useMemo(() => {
-    if (!publicKeyHex) {
-      return null;
-    }
-    return publicKeyHex.length > 32 ? `${publicKeyHex.slice(0, 28)}…${publicKeyHex.slice(-6)}` : publicKeyHex;
+    if (!publicKeyHex) return null;
+    return `${publicKeyHex.slice(0, 16)}...${publicKeyHex.slice(-16)}`;
   }, [publicKeyHex]);
 
   useEffect(() => {
@@ -53,42 +54,22 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
     });
   }, [ethAddress, initializeSession]);
 
-  const sessionStatus = useMemo(() => {
-    if (!session) {
-      return 'No active authentication session. Scan your Chainora card to get started.';
-    }
-    if (isAuthenticated) {
-      return 'Authenticated via recent card scan.';
-    }
-    return 'Awaiting card scan. Rescan your Chainora card to authenticate.';
-  }, [session, isAuthenticated]);
+  const openSendDialog = useCallback(() => {
+    setSendVisible(true);
+  }, []);
 
-  const sessionExpiry = useMemo(() => {
-    if (!session) {
-      return 'Unknown';
-    }
-    const millis = Date.parse(session.expiresAt) - Date.now();
-    if (Number.isNaN(millis) || millis <= 0) {
-      return 'Expired';
-    }
-    const hours = Math.floor(millis / (1000 * 60 * 60));
-    const minutes = Math.floor((millis % (1000 * 60 * 60)) / (1000 * 60));
-    return `${hours}h ${minutes}m remaining`;
-  }, [session]);
+  const closeSendDialog = useCallback(() => {
+    setSendVisible(false);
+  }, []);
 
-  const sessionUpdatedAt = useMemo(() => {
-    if (!session) {
-      return 'Unknown';
-    }
-    const timestamp = Date.parse(session.issuedAt);
-    if (Number.isNaN(timestamp)) {
-      return 'Unknown';
-    }
-    return new Date(timestamp).toLocaleString();
-  }, [session]);
+  const refreshBalance = balanceState.refresh;
+
+  const handleSendSuccess = useCallback(() => {
+    refreshBalance();
+  }, [refreshBalance]);
 
   const openComingSoon = useCallback((label: string) => {
-    Alert.alert(`${label} (coming soon)`, 'This section is under development.');
+    Alert.alert(`${label} (Coming Soon)`, 'This feature is currently being integrated into the hardware layer.');
   }, []);
 
   const quickActions = useMemo(
@@ -96,23 +77,30 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
       {
         key: 'scan',
         label: 'Scan Card',
-        description: 'Open the Chainora scanner',
-        tint: 'rgba(56, 189, 248, 0.2)',
+        description: 'Update keys',
+        color: THEME.primary,
         onPress: () => navigation.navigate(ROUTES.NfcScan),
       },
       {
         key: 'transactions',
-        label: 'Transactions',
-        description: 'View your activity history',
-        tint: 'rgba(129, 140, 248, 0.2)',
+        label: 'Activity',
+        description: 'View history',
+        color: '#818CF8',
         onPress: () => openComingSoon('Transactions'),
       },
       {
         key: 'backup',
-        label: 'Backup',
-        description: 'Review recovery guidance',
-        tint: 'rgba(16, 185, 129, 0.2)',
+        label: 'Security',
+        description: 'Recovery tools',
+        color: '#10B981',
         onPress: () => openComingSoon('Backup'),
+      },
+      {
+        key: 'settings',
+        label: 'Config',
+        description: 'App settings',
+        color: '#F59E0B',
+        onPress: () => openComingSoon('Settings'),
       },
     ],
     [navigation, openComingSoon],
@@ -122,157 +110,138 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
     <View style={styles.screen}>
       <StatusBar barStyle="light-content" backgroundColor={THEME.background} />
 
-      <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
-        <FloatingOrb color={THEME.primary} size={320} initial={{ x: -80, y: -80 }} duration={9200} />
-        <FloatingOrb
-          color="#6366F1"
-          size={260}
-          initial={{ x: width - 240, y: 80 }}
-          duration={11000}
-          drift={{ x: 30, y: -34 }}
-        />
-        <FloatingOrb
-          color="#22D3EE"
-          size={220}
-          initial={{ x: width / 3, y: height - 240 }}
-          duration={9600}
-          drift={{ x: -28, y: 32 }}
-          opacity={0.18}
-        />
+      {/* Ambient Cyber Background */}
+      <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+        <FloatingOrb color={THEME.primary} size={400} initial={{ x: -100, y: -100 }} duration={12000} />
+        <FloatingOrb color="#6366F1" size={300} initial={{ x: width - 200, y: height / 3 }} duration={15000} drift={{ x: 50, y: -50 }} />
+        <FloatingOrb color="#22D3EE" size={250} initial={{ x: 50, y: height - 250 }} duration={10000} opacity={0.1} />
       </View>
 
       <SafeAreaView style={styles.safeArea}>
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          <Animated.View style={[styles.heroCard, heroAnimation]}>
-            <View style={styles.networkPill}>
-              <Text style={styles.networkPillText}>
-                {NETWORK.name} · Chain {NETWORK.chainId}
-              </Text>
+          
+          {/* 1. Identity Card (Hero) */}
+          <Animated.View style={[styles.idCard, heroAnimation]}>
+            <View style={styles.idCardGlow} />
+            <View style={styles.idHeader}>
+              <View style={styles.statusBadge}>
+                <View style={[styles.statusDot, { backgroundColor: isAuthenticated ? THEME.success : THEME.warning }]} />
+                <Text style={styles.statusText}>{isAuthenticated ? 'SECURE' : 'RESCAN REQ.'}</Text>
+              </View>
+              <Text style={styles.idCardLabel}>IDENTITY NODE</Text>
             </View>
-            <Text style={styles.heroTitle}>Chainora Wallet</Text>
-            <Text style={styles.heroSubtitle}>
-              {mode === 'init' ? 'New wallet initialised and secured.' : 'Signed in and ready to transact.'}
-            </Text>
-            <View style={styles.heroAddressRow}>
-              <Text style={styles.heroAddressLabel}>Address</Text>
-              <Text style={styles.heroAddressValue} selectable>
-                {ethAddress}
-              </Text>
+
+            <View style={styles.idBody}>
+              <Text style={styles.idTitle}>Chainora Wallet</Text>
+              <View style={styles.addressContainer}>
+                <Text style={styles.addressLabel}>EVM ENDPOINT</Text>
+                <Text style={styles.addressValue} selectable>{ethAddress}</Text>
+              </View>
             </View>
-            <AppButton
-              label="Scan Card Again"
-              onPress={() => navigation.navigate(ROUTES.NfcScan)}
-              style={styles.heroButton}
-            />
+
+            <View style={styles.idFooter}>
+              <View style={styles.modePill}>
+                <Text style={styles.modePillText}>{mode === 'init' ? 'INITIALIZED' : 'SIGN-IN ACTIVE'}</Text>
+              </View>
+              <Text style={styles.networkName}>{NETWORK.name}</Text>
+            </View>
+            
+            {/* Tech Decoration */}
+            <View style={styles.cornerAccent} />
           </Animated.View>
 
-          <Animated.View style={[styles.card, balanceAnimation]}>
-            <View style={styles.cardHeader}>
-              <Text style={styles.sectionTitle}>Portfolio</Text>
-              <Pressable
-                onPress={balanceState.refresh}
-                disabled={balanceState.loading}
-                style={({ pressed }) => [styles.refreshButton, pressed && styles.refreshButtonPressed]}
-              >
-                <Text style={[styles.refreshLabel, balanceState.loading && styles.refreshLabelDisabled]}>
-                  {balanceState.loading ? 'Refreshing…' : 'Refresh'}
+          {/* 2. Portfolio Balance (Glassmorphic) */}
+          <Animated.View style={[styles.balanceCard, balanceAnimation]}>
+            <View style={styles.balanceHeader}>
+              <Text style={styles.cardLabel}>ASSETS</Text>
+              <Pressable onPress={balanceState.refresh} disabled={balanceState.loading}>
+                <Text style={[styles.refreshText, balanceState.loading && styles.refreshDisabled]}>
+                  {balanceState.loading ? 'SYNCING...' : 'REFRESH'}
                 </Text>
               </Pressable>
             </View>
-            <Text style={styles.balanceValue}>
-              {balanceState.loading
-                ? '···'
-                : balanceState.formatted
-                ? `${balanceState.formatted} ${NETWORK.currencySymbol}`
-                : `0.0000 ${NETWORK.currencySymbol}`}
-            </Text>
-            {balanceState.error ? <Text style={styles.errorText}>{balanceState.error}</Text> : null}
-
-            <View style={styles.quickActionsRow}>
-              {quickActions.map(action => (
-                <Pressable
-                  key={action.key}
-                  onPress={action.onPress}
-                  style={({ pressed }) => [
-                    styles.quickAction,
-                    { backgroundColor: action.tint },
-                    pressed && styles.quickActionPressed,
-                  ]}
-                >
-                  <Text style={styles.quickActionLabel}>{action.label}</Text>
-                  <Text style={styles.quickActionDescription}>{action.description}</Text>
-                </Pressable>
-              ))}
+            <View style={styles.balanceMain}>
+              <Text style={styles.balanceValue}>
+                {balanceState.loading ? '---.----' : balanceState.formatted || '0.0000'}
+              </Text>
+              <Text style={styles.currencySymbol}>{NETWORK.currencySymbol}</Text>
             </View>
+            {balanceState.error && <Text style={styles.errorText}>{balanceState.error}</Text>}
           </Animated.View>
 
-          <Animated.View style={[styles.card, detailAnimation]}>
-            <Text style={styles.sectionTitle}>Wallet Details</Text>
+          <View style={styles.sendButtonWrapper}>
+            <AppButton label="Send ETH" onPress={openSendDialog} />
+          </View>
 
-            <View style={styles.pillRow}>
-              <View style={styles.infoPill}>
-                <Text style={styles.infoPillLabel}>Network</Text>
-                <Text style={styles.infoPillValue}>{NETWORK.name}</Text>
-              </View>
-              <View style={styles.infoPill}>
-                <Text style={styles.infoPillLabel}>Chain ID</Text>
-                <Text style={styles.infoPillValue}>{NETWORK.chainId}</Text>
-              </View>
-              <View style={styles.infoPill}>
-                <Text style={styles.infoPillLabel}>Currency</Text>
-                <Text style={styles.infoPillValue}>{NETWORK.currencySymbol}</Text>
-              </View>
-            </View>
+          {/* 3. Action Grid */}
+          <View style={styles.actionGrid}>
+            {quickActions.map(action => (
+              <Pressable
+                key={action.key}
+                onPress={action.onPress}
+                style={({ pressed }) => [
+                  styles.actionTile,
+                  { borderColor: `${action.color}33` },
+                  pressed && styles.actionTilePressed,
+                ]}
+              >
+                <View style={[styles.actionIconDot, { backgroundColor: action.color }]} />
+                <Text style={styles.actionLabel}>{action.label}</Text>
+                <Text style={styles.actionSubLabel}>{action.description}</Text>
+              </Pressable>
+            ))}
+          </View>
 
-            <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Session status</Text>
-              <Text style={styles.detailValue}>{sessionStatus}</Text>
+          {/* 4. Technical Details Grid */}
+          <Animated.View style={[styles.detailsSection, detailAnimation]}>
+            <Text style={styles.cardLabel}>NODE SPECIFICATIONS</Text>
+            <View style={styles.dataGrid}>
+              <View style={styles.dataTile}>
+                <Text style={styles.dataLabel}>CHAIN ID</Text>
+                <Text style={styles.dataValue}>{NETWORK.chainId}</Text>
+              </View>
+              <View style={styles.dataTile}>
+                <Text style={styles.dataLabel}>UPTIME</Text>
+                <Text style={styles.dataValue}>99.9%</Text>
+              </View>
+              <View style={styles.dataTileFull}>
+                <Text style={styles.dataLabel}>PUBKEY_HEX</Text>
+                <Text style={styles.dataValueMono} selectable>{truncatedPublicKey}</Text>
+              </View>
+              <View style={styles.dataTileFull}>
+                <Text style={styles.dataLabel}>SESSION_LIFE</Text>
+                <Text style={styles.dataValue}>{session ? 'ACTIVE' : 'EXPIRED'}</Text>
+              </View>
             </View>
-            <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Session expiry</Text>
-              <Text style={styles.detailValue}>{sessionExpiry}</Text>
-            </View>
-            <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Last update</Text>
-              <Text style={styles.detailValue}>{sessionUpdatedAt}</Text>
-            </View>
-
-            <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Public key</Text>
-              <Text style={styles.detailValue} selectable>
-                {truncatedPublicKey ?? 'N/A'}
-              </Text>
-            </View>
-            <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Full address</Text>
-              <Text style={[styles.detailValue, styles.mono]} selectable>
-                {ethAddress}
-              </Text>
-            </View>
+            
+            <AppButton
+              label="Authenticate New Card"
+              onPress={() => navigation.navigate(ROUTES.NfcScan)}
+              variant="secondary"
+              style={styles.bottomButton}
+            />
           </Animated.View>
+
         </ScrollView>
 
         <BottomNavBar
           items={[
             { key: 'home', label: 'Home', active: true, onPress: undefined },
-            {
-              key: 'transactions',
-              label: 'Transactions',
-              onPress: () => openComingSoon('Transactions'),
-            },
-            {
-              key: 'settings',
-              label: 'Settings',
-              onPress: () => openComingSoon('Settings'),
-            },
+            { key: 'transactions', label: 'History', onPress: () => openComingSoon('History') },
+            { key: 'settings', label: 'Vault', onPress: () => openComingSoon('Vault') },
           ]}
+        />
+
+        <SendTransactionDialog
+          visible={sendVisible}
+          fromAddress={ethAddress}
+          onClose={closeSendDialog}
+          onSuccess={handleSendSuccess}
         />
       </SafeAreaView>
     </View>
   );
 };
-
-const MONO_FONT = Platform.select({ ios: 'Menlo', macos: 'Menlo', android: 'monospace', default: 'Menlo' });
 
 const styles = StyleSheet.create({
   screen: {
@@ -283,190 +252,251 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: 120,
-    paddingHorizontal: 24,
-    paddingTop: 32,
+    paddingBottom: 140,
+    paddingHorizontal: 20,
+    paddingTop: 24,
     gap: 20,
   },
-  heroCard: {
-    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+  // ID Card Styling
+  idCard: {
+    backgroundColor: 'rgba(30, 41, 59, 0.7)',
     borderRadius: 24,
     padding: 24,
     borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.2)',
-    shadowColor: THEME.shadow,
-    shadowOffset: { width: 0, height: 14 },
-    shadowOpacity: 0.35,
-    shadowRadius: 24,
-    elevation: 12,
+    borderColor: 'rgba(56, 189, 248, 0.2)',
+    overflow: 'hidden',
+    shadowColor: THEME.primary,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.1,
+    shadowRadius: 20,
+    elevation: 10,
   },
-  networkPill: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    backgroundColor: 'rgba(56, 189, 248, 0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(56, 189, 248, 0.35)',
-    marginBottom: 16,
+  idCardGlow: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: 4,
+    height: '100%',
+    backgroundColor: THEME.primary,
   },
-  networkPillText: {
-    color: THEME.primary,
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 0.6,
-  },
-  heroTitle: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: THEME.foreground,
-    marginBottom: 6,
-  },
-  heroSubtitle: {
-    color: THEME.foregroundMuted,
-    fontSize: 15,
-    lineHeight: 22,
-    marginBottom: 20,
-  },
-  heroAddressRow: {
-    marginBottom: 24,
-  },
-  heroAddressLabel: {
-    color: THEME.foregroundMuted,
-    fontSize: 12,
-    textTransform: 'uppercase',
-    letterSpacing: 1.1,
-    marginBottom: 6,
-  },
-  heroAddressValue: {
-    color: THEME.foreground,
-    fontSize: 16,
-    fontWeight: '600',
-    fontFamily: MONO_FONT,
-    lineHeight: 20,
-  },
-  heroButton: {
-    marginTop: 12,
-  },
-  card: {
-    backgroundColor: 'rgba(30, 41, 59, 0.8)',
-    borderRadius: 20,
-    padding: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.18)',
-  },
-  cardHeader: {
+  idHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 20,
   },
-  sectionTitle: {
-    fontSize: 16,
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginRight: 8,
+  },
+  statusText: {
+    color: '#F8FAFC',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  idCardLabel: {
+    color: THEME.foregroundMuted,
+    fontSize: 10,
     fontWeight: '700',
-    color: THEME.foreground,
-    letterSpacing: 0.4,
+    letterSpacing: 2,
   },
-  refreshButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+  idBody: {
+    marginBottom: 24,
+  },
+  idTitle: {
+    fontSize: 26,
+    fontWeight: '800',
+    color: '#F8FAFC',
+    marginBottom: 16,
+    letterSpacing: -0.5,
+  },
+  addressContainer: {
+    backgroundColor: 'rgba(15, 23, 42, 0.5)',
+    padding: 12,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.3)',
-    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+    borderColor: 'rgba(255,255,255,0.05)',
   },
-  refreshButtonPressed: {
-    opacity: 0.8,
+  addressLabel: {
+    color: THEME.primary,
+    fontSize: 9,
+    fontWeight: '800',
+    marginBottom: 4,
+    letterSpacing: 1,
   },
-  refreshLabel: {
+  addressValue: {
+    color: '#E2E8F0',
     fontSize: 13,
+    fontFamily: MONO_FONT,
+    lineHeight: 18,
+  },
+  idFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  modePill: {
+    backgroundColor: 'rgba(56, 189, 248, 0.15)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  modePillText: {
+    color: THEME.primary,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  networkName: {
+    color: THEME.foregroundMuted,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  cornerAccent: {
+    position: 'absolute',
+    bottom: -10,
+    right: -10,
+    width: 40,
+    height: 40,
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.2)',
+    borderRadius: 20,
+  },
+  // Balance Card
+  balanceCard: {
+    backgroundColor: 'rgba(15, 23, 42, 0.4)',
+    borderRadius: 20,
+    padding: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+  },
+  balanceHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  cardLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: THEME.foregroundMuted,
+    letterSpacing: 1.5,
+  },
+  refreshText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: THEME.primary,
+  },
+  refreshDisabled: {
+    opacity: 0.5,
+  },
+  balanceMain: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+  },
+  balanceValue: {
+    fontSize: 42,
+    fontWeight: '800',
+    color: '#F8FAFC',
+    letterSpacing: -1,
+  },
+  currencySymbol: {
+    fontSize: 18,
     fontWeight: '600',
     color: THEME.primary,
   },
-  refreshLabelDisabled: {
-    color: THEME.foregroundMuted,
-  },
-  balanceValue: {
-    fontSize: 32,
-    fontWeight: '800',
-    color: THEME.foreground,
-    letterSpacing: -0.6,
-    marginBottom: 4,
-  },
   errorText: {
-    marginTop: 8,
     color: THEME.danger,
-    fontSize: 13,
-  },
-  quickActionsRow: {
-    marginTop: 20,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  quickAction: {
-    flexBasis: '48%',
-    borderRadius: 18,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.2)',
-  },
-  quickActionPressed: {
-    opacity: 0.9,
-  },
-  quickActionLabel: {
-    color: THEME.foreground,
-    fontSize: 15,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  quickActionDescription: {
-    color: THEME.foregroundMuted,
     fontSize: 12,
-    lineHeight: 18,
+    marginTop: 8,
   },
-  pillRow: {
+  sendButtonWrapper: {
+    marginTop: -4,
+  },
+  // Action Grid
+  actionGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 12,
-    marginBottom: 16,
   },
-  infoPill: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 14,
+  actionTile: {
+    flex: 1,
+    minWidth: '45%',
+    backgroundColor: 'rgba(30, 41, 59, 0.4)',
+    borderRadius: 16,
+    padding: 16,
     borderWidth: 1,
-    borderColor: 'rgba(56, 189, 248, 0.35)',
-    backgroundColor: 'rgba(56, 189, 248, 0.12)',
   },
-  infoPillLabel: {
-    color: THEME.foregroundMuted,
-    fontSize: 11,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
+  actionTilePressed: {
+    opacity: 0.7,
+    backgroundColor: 'rgba(30, 41, 59, 0.8)',
   },
-  infoPillValue: {
-    color: THEME.primary,
-    fontSize: 14,
-    fontWeight: '700',
-    marginTop: 2,
-  },
-  detailRow: {
+  actionIconDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
     marginBottom: 12,
   },
-  detailLabel: {
+  actionLabel: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#F8FAFC',
+    marginBottom: 2,
+  },
+  actionSubLabel: {
+    fontSize: 11,
     color: THEME.foregroundMuted,
-    fontSize: 13,
+  },
+  // Details Section
+  detailsSection: {
+    backgroundColor: 'rgba(15, 23, 42, 0.4)',
+    borderRadius: 20,
+    padding: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+  },
+  dataGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 20,
+    gap: 16,
+  },
+  dataTile: {
+    width: '47%',
+  },
+  dataTileFull: {
+    width: '100%',
+  },
+  dataLabel: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: THEME.foregroundMuted,
     marginBottom: 4,
+    letterSpacing: 0.5,
   },
-  detailValue: {
-    color: THEME.foreground,
-    fontSize: 14,
-    lineHeight: 20,
+  dataValue: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#F1F5F9',
   },
-  mono: {
+  dataValueMono: {
+    fontSize: 12,
     fontFamily: MONO_FONT,
+    color: THEME.primary,
+  },
+  bottomButton: {
+    marginTop: 24,
   },
 });
+
 export default HomeScreen;
