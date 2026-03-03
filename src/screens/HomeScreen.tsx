@@ -18,7 +18,7 @@ import { AppButton } from '../components/AppButton';
 import { BottomNavBar } from '../components/BottomNavBar';
 import { FloatingOrb } from '../components/ui/animations/FloatingOrb';
 import { useEntranceAnimation } from '../components/ui/animations/useEntranceAnimation';
-import { NETWORK } from '../config/network';
+import { getActiveNetwork, getNetworkList, setActiveNetwork, type NetworkKey } from '../config/network';
 import { useAuth } from '../features/auth';
 import { useWalletBalance } from '../features/wallet/hooks/useWalletBalance';
 import { ROUTES } from '../navigation/routes/routes';
@@ -37,6 +37,8 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
   const { session, initializeSession, isAuthenticated } = useAuth();
   const balanceState = useWalletBalance(ethAddress);
   const [sendVisible, setSendVisible] = useState(false);
+  const [network, setNetwork] = useState(getActiveNetwork());
+  const networkOptions = useMemo(() => getNetworkList(), []);
 
   // Entrance Animations for staggered reveal
   const { animatedStyle: heroAnimation } = useEntranceAnimation({ translateInitial: 36, fadeDuration: 800 });
@@ -63,6 +65,15 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
   }, []);
 
   const refreshBalance = balanceState.refresh;
+
+  const handleSelectNetwork = useCallback(
+    (key: NetworkKey) => {
+      const next = setActiveNetwork(key);
+      setNetwork(next);
+      refreshBalance();
+    },
+    [refreshBalance],
+  );
 
   const handleSendSuccess = useCallback(() => {
     refreshBalance();
@@ -143,7 +154,7 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
               <View style={styles.modePill}>
                 <Text style={styles.modePillText}>{mode === 'init' ? 'INITIALIZED' : 'SIGN-IN ACTIVE'}</Text>
               </View>
-              <Text style={styles.networkName}>{NETWORK.name}</Text>
+              <Text style={styles.networkName}>{network.name}</Text>
             </View>
             
             {/* Tech Decoration */}
@@ -164,13 +175,36 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
               <Text style={styles.balanceValue}>
                 {balanceState.loading ? '---.----' : balanceState.formatted || '0.0000'}
               </Text>
-              <Text style={styles.currencySymbol}>{NETWORK.currencySymbol}</Text>
+              <Text style={styles.currencySymbol}>{network.currencySymbol}</Text>
             </View>
             {balanceState.error && <Text style={styles.errorText}>{balanceState.error}</Text>}
           </Animated.View>
 
+          <View style={styles.networkSelector}>
+            {networkOptions.map(option => (
+              <Pressable
+                key={option.key}
+                onPress={() => handleSelectNetwork(option.key)}
+                style={({ pressed }) => [
+                  styles.networkPill,
+                  option.key === network.key && styles.networkPillActive,
+                  pressed && styles.networkPillPressed,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.networkPillText,
+                    option.key === network.key && styles.networkPillTextActive,
+                  ]}
+                >
+                  {option.name}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+
           <View style={styles.sendButtonWrapper}>
-            <AppButton label="Send ETH" onPress={openSendDialog} />
+            <AppButton label={`Send ${network.currencySymbol}`} onPress={openSendDialog} />
           </View>
 
           {/* 3. Action Grid */}
@@ -198,7 +232,7 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
             <View style={styles.dataGrid}>
               <View style={styles.dataTile}>
                 <Text style={styles.dataLabel}>CHAIN ID</Text>
-                <Text style={styles.dataValue}>{NETWORK.chainId}</Text>
+                <Text style={styles.dataValue}>{network.chainId}</Text>
               </View>
               <View style={styles.dataTile}>
                 <Text style={styles.dataLabel}>UPTIME</Text>
@@ -419,6 +453,35 @@ const styles = StyleSheet.create({
     color: THEME.danger,
     fontSize: 12,
     marginTop: 8,
+  },
+  networkSelector: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: -8,
+  },
+  networkPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(15, 23, 42, 0.35)',
+  },
+  networkPillActive: {
+    borderColor: 'rgba(56, 189, 248, 0.6)',
+    backgroundColor: 'rgba(56, 189, 248, 0.18)',
+  },
+  networkPillPressed: {
+    opacity: 0.75,
+  },
+  networkPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: THEME.foregroundMuted,
+  },
+  networkPillTextActive: {
+    color: '#F8FAFC',
   },
   sendButtonWrapper: {
     marginTop: -4,

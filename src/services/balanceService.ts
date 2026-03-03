@@ -1,16 +1,18 @@
-import { NETWORK } from '../config/network';
+import { getActiveNetwork } from '../config/network';
 
 const jsonRpcRequest = async (address: string): Promise<string> => {
+  const network = getActiveNetwork();
+
   console.log('[balanceService] Fetching balance', {
     address,
-    endpoint: NETWORK.rpcUrl,
+    endpoint: network.rpcUrl,
   });
 
   const startedAt = Date.now();
 
   let response: Response;
   try {
-    response = await fetch(NETWORK.rpcUrl, {
+    response = await fetch(network.rpcUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
