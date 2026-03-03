@@ -5,6 +5,7 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -18,6 +19,7 @@ import { PinInput } from './PinInput';
 import { THEME } from '../../types/theme/colors';
 import { useNfcEnabled } from '../../features/nfc/hooks/useNfcEnabled';
 import { parseEther, sendEthTransaction, type SendEthResult } from '../../services/transactionService';
+import { getActiveNetwork, getNetworkList, setActiveNetwork, type NetworkKey } from '../../config/network';
 
 const ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/;
 const PIN_LENGTH = 4;
@@ -47,6 +49,8 @@ export const SendTransactionDialog: React.FC<SendTransactionDialogProps> = ({
   const [result, setResult] = useState<SendEthResult | null>(null);
   const [pendingWei, setPendingWei] = useState<bigint | null>(null);
   const [isSubmitting, setSubmitting] = useState(false);
+  const [network, setNetwork] = useState(getActiveNetwork());
+  const networkOptions = useMemo(() => getNetworkList(), []);
 
   useEffect(() => {
     if (!visible) {
@@ -61,9 +65,19 @@ export const SendTransactionDialog: React.FC<SendTransactionDialogProps> = ({
     setResult(null);
     setPendingWei(null);
     setSubmitting(false);
+    setNetwork(getActiveNetwork());
   }, [visible]);
 
   const isCloseDisabled = useMemo(() => phase === 'scan' && isSubmitting, [phase, isSubmitting]);
+
+  const handleSelectNetwork = useCallback(
+    (key: NetworkKey) => {
+      const next = setActiveNetwork(key);
+      setNetwork(next);
+      setError(null);
+    },
+    [],
+  );
 
   const handleValidateDetails = useCallback(() => {
     const trimmedRecipient = recipient.trim();
@@ -175,8 +189,31 @@ export const SendTransactionDialog: React.FC<SendTransactionDialogProps> = ({
 
   const renderDetails = () => (
     <View style={styles.section}>
-      <Text style={styles.title}>Send ETH</Text>
+      <Text style={styles.title}>Send {network.currencySymbol}</Text>
       <Text style={styles.subtitle}>Transfer funds using your Chainora card.</Text>
+
+      <View style={styles.networkSelector}>
+        {networkOptions.map(option => (
+          <Pressable
+            key={option.key}
+            onPress={() => handleSelectNetwork(option.key)}
+            style={({ pressed }) => [
+              styles.networkPill,
+              option.key === network.key && styles.networkPillActive,
+              pressed && styles.networkPillPressed,
+            ]}
+          >
+            <Text
+              style={[
+                styles.networkPillText,
+                option.key === network.key && styles.networkPillTextActive,
+              ]}
+            >
+              {option.name}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
 
       <View style={styles.fieldGroup}>
         <Text style={styles.fieldLabel}>Recipient Address</Text>
@@ -192,7 +229,7 @@ export const SendTransactionDialog: React.FC<SendTransactionDialogProps> = ({
       </View>
 
       <View style={styles.fieldGroup}>
-        <Text style={styles.fieldLabel}>Amount (ETH)</Text>
+        <Text style={styles.fieldLabel}>Amount ({network.currencySymbol})</Text>
         <TextInput
           value={amount}
           onChangeText={text => setAmount(text)}
@@ -319,6 +356,34 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: THEME.foregroundMuted,
     letterSpacing: 0.5,
+  },
+  networkSelector: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  networkPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(30, 41, 59, 0.4)',
+  },
+  networkPillActive: {
+    borderColor: 'rgba(56, 189, 248, 0.6)',
+    backgroundColor: 'rgba(56, 189, 248, 0.2)',
+  },
+  networkPillPressed: {
+    opacity: 0.8,
+  },
+  networkPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: THEME.foregroundMuted,
+  },
+  networkPillTextActive: {
+    color: '#F8FAFC',
   },
   input: {
     backgroundColor: 'rgba(30, 41, 59, 0.6)',
