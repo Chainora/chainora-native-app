@@ -1,6 +1,6 @@
 import { keccak_256 } from '@noble/hashes/sha3';
 
-import { NETWORK } from '../config/network';
+import { getActiveNetwork } from '../config/network';
 import { signTransactionHash } from './cardService';
 import { recoverSignature } from './transaction/signatureUtils';
 import { bytesToHex, hexToBytes } from '../utils/encoding';
@@ -45,7 +45,7 @@ const jsonRpc = async <T>(method: string, params: unknown[]): Promise<T> => {
   const timeout = setTimeout(() => controller.abort(), RPC_TIMEOUT_MS);
 
   try {
-    const response = await fetch(NETWORK.rpcUrl, {
+    const response = await fetch(getActiveNetwork().rpcUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -250,7 +250,7 @@ export const sendEthTransaction = async ({
     to: toChecksum,
     value: valueWei,
     data,
-    chainId: BigInt(NETWORK.chainId),
+    chainId: BigInt(getActiveNetwork().chainId),
   });
 
   const messageHash = keccak_256(unsigned);
@@ -264,7 +264,7 @@ export const sendEthTransaction = async ({
     messageHash,
     signatureResult.signatureDer,
     signatureResult.publicKeyHex,
-    NETWORK.chainId,
+    getActiveNetwork().chainId,
   );
 
   const signedTx = buildSignedLegacyTx({
