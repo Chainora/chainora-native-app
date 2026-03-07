@@ -1,6 +1,7 @@
 import React from 'react';
-import { SafeAreaView, StatusBar, StyleSheet, Text, View, Animated, Dimensions } from 'react-native';
+import { StatusBar, StyleSheet, Text, View, Animated, Dimensions } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Toast } from '../components/Toast';
 import { AppButton } from '../components/AppButton';
@@ -17,7 +18,7 @@ type Props = NativeStackScreenProps<RootStackParamList, typeof ROUTES.NfcScan>;
 
 const { width, height } = Dimensions.get('window');
 
-export const NfcScanScreen: React.FC<Props> = ({ navigation }) => {
+export const NfcScanScreen: React.FC<Props> = ({ navigation, route }) => {
   const {
     title,
     isEnabled,
@@ -42,20 +43,20 @@ export const NfcScanScreen: React.FC<Props> = ({ navigation }) => {
 
   return (
     <View style={styles.mainContainer}>
-      <StatusBar barStyle="light-content" backgroundColor="#0F172A" />
+      <StatusBar barStyle="light-content" backgroundColor={THEME.background} />
       
       {/* Ambient Background */}
       <View pointerEvents="none" style={StyleSheet.absoluteFill}>
         <FloatingOrb color={THEME.primary} size={300} initial={{ x: -60, y: -60 }} duration={8000} />
         <FloatingOrb
-          color="#6366F1"
+          color="#2A3140"
           size={240}
           initial={{ x: width - 220, y: height / 2.4 }}
           duration={10500}
           drift={{ x: 26, y: -32 }}
         />
         <FloatingOrb
-          color="#06B6D4"
+          color={THEME.surfaceHighlight}
           size={220}
           initial={{ x: 40, y: height - 220 }}
           duration={9500}
@@ -63,7 +64,7 @@ export const NfcScanScreen: React.FC<Props> = ({ navigation }) => {
         />
       </View>
 
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
         <Animated.View 
           style={[
             styles.contentContainer, 
@@ -77,7 +78,7 @@ export const NfcScanScreen: React.FC<Props> = ({ navigation }) => {
             </View>
             <Text style={styles.heading}>{title}</Text>
             <Text style={styles.subheading}>
-              Hold your hardware wallet near the back of your device to sign in or initialize.
+              Hold your Chainora card near the back of your device to sign in or activate.
             </Text>
           </View>
 
@@ -110,6 +111,8 @@ export const NfcScanScreen: React.FC<Props> = ({ navigation }) => {
           onScanningChange={handleScanningChange}
           onShowToast={showToast}
           onSuccess={handleScanSuccess}
+          initialMode={route?.params?.initialMode}
+          prefilledPin={route?.params?.pin}
         />
         <Toast
           message={toastMessage}
@@ -125,7 +128,7 @@ export const NfcScanScreen: React.FC<Props> = ({ navigation }) => {
 const styles = StyleSheet.create({
   mainContainer: {
     flex: 1,
-    backgroundColor: '#0F172A', // Dark Slate
+    backgroundColor: THEME.background,
   },
   safeArea: {
     flex: 1,
@@ -142,31 +145,31 @@ const styles = StyleSheet.create({
     maxWidth: 320,
   },
   badge: {
-    backgroundColor: 'rgba(56, 189, 248, 0.1)',
+    backgroundColor: 'rgba(191, 164, 106, 0.12)',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(56, 189, 248, 0.3)',
+    borderColor: 'rgba(191, 164, 106, 0.4)',
     marginBottom: 20,
   },
   badgeText: {
     color: THEME.primary,
-    fontSize: 10,
+    fontSize: THEME.typography.micro,
     fontWeight: '800',
     letterSpacing: 1.5,
   },
   heading: {
-    fontSize: 32,
+    fontSize: THEME.typography.display,
     fontWeight: '800',
-    color: '#F8FAFC',
+    color: THEME.foreground,
     marginBottom: 16,
     textAlign: 'center',
     letterSpacing: -0.5,
   },
   subheading: {
-    fontSize: 16,
-    color: '#94A3B8',
+    fontSize: THEME.typography.body,
+    color: THEME.foregroundMuted,
     textAlign: 'center',
     lineHeight: 24,
   },

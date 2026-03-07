@@ -109,12 +109,31 @@ export const useNfcScanScreen = ({ navigation }: UseNfcScanScreenParams): UseNfc
         return;
       }
 
+      if (mode === 'signin') {
+        navigation.reset({
+          index: 1,
+          routes: [
+            { name: ROUTES.NfcScan },
+            {
+              name: ROUTES.Home,
+              params: {
+                ethAddress: result.ethAddress,
+                publicKeyHex: result.publicKeyHex,
+                mode,
+              },
+            },
+          ],
+        });
+        return;
+      }
+
+      // Init flow → show activation success screen first
       navigation.reset({
         index: 1,
         routes: [
           { name: ROUTES.NfcScan },
           {
-            name: ROUTES.Home,
+            name: ROUTES.ActivateSuccess,
             params: {
               ethAddress: result.ethAddress,
               publicKeyHex: result.publicKeyHex,

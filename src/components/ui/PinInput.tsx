@@ -128,7 +128,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   cellText: {
-    fontSize: 32,
+    fontSize: THEME.typography.display,
     fontWeight: '700',
     lineHeight: 36,
     textAlign: 'center',

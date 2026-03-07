@@ -62,7 +62,7 @@ const styles = StyleSheet.create({
   // Primary: Bright Neon Blue background with Glow
   primary: {
     backgroundColor: THEME.primary,
-    shadowColor: THEME.primary, // Neon Glow
+    shadowColor: THEME.glow,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.4,
     shadowRadius: 12,
@@ -77,9 +77,9 @@ const styles = StyleSheet.create({
   },
   // Secondary: Glassmorphic dark surface
   secondary: {
-    backgroundColor: 'rgba(30, 41, 59, 0.6)', // Semi-transparent Slate 800
+    backgroundColor: 'rgba(30, 35, 46, 0.9)', // Semi-transparent gunmetal
     borderWidth: 1,
-    borderColor: 'rgba(56, 189, 248, 0.3)', // Subtle cyan border
+    borderColor: 'rgba(191, 164, 106, 0.35)', // Subtle gold border
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -99,18 +99,18 @@ const styles = StyleSheet.create({
     opacity: 0.9,
   },
   label: {
-    fontSize: 16,
+    fontSize: THEME.typography.body,
     fontWeight: '700',
     letterSpacing: 0.3,
   },
   primaryLabel: {
-    color: '#0F172A', // Dark text on bright button for high contrast (Cyberpunk style)
+    color: '#0A0B0D', // Dark text on bright gold button
   },
   secondaryLabel: {
-    color: THEME.primary, // Neon text on dark button
+    color: THEME.primary, // Gold text on dark button
   },
   textLabel: {
     color: THEME.foregroundMuted,
-    fontSize: 15,
+    fontSize: THEME.typography.subtext,
   },
 });

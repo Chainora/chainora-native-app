@@ -1,6 +1,48 @@
-export const NETWORK = {
-  name: 'localhost',
-  chainId: 31337,
-  rpcUrl: 'http://192.168.100.5:8545',
-  currencySymbol: 'ETH',
+export type NetworkKey = 'eth' | 'polygon' | 'bnb';
+
+export type NetworkConfig = {
+  key: NetworkKey;
+  name: string;
+  chainId: number;
+  rpcUrl: string;
+  currencySymbol: string;
 };
+
+const LOCAL_RPC_ETH = 'http://127.0.0.1:8545';
+const LOCAL_RPC_POLYGON = 'http://127.0.0.1:8546';
+const LOCAL_RPC_BNB = 'http://127.0.0.1:8547';
+
+export const NETWORKS: Record<NetworkKey, NetworkConfig> = {
+  eth: {
+    key: 'eth',
+    name: 'Local ETH',
+    chainId: 31337,
+    rpcUrl: LOCAL_RPC_ETH,
+    currencySymbol: 'ETH',
+  },
+  polygon: {
+    key: 'polygon',
+    name: 'Local Polygon',
+    chainId: 80002,
+    rpcUrl: LOCAL_RPC_POLYGON,
+    currencySymbol: 'MATIC',
+  },
+  bnb: {
+    key: 'bnb',
+    name: 'Local BNB',
+    chainId: 97,
+    rpcUrl: LOCAL_RPC_BNB,
+    currencySymbol: 'BNB',
+  },
+};
+
+let activeNetworkKey: NetworkKey = 'eth';
+
+export const getActiveNetwork = (): NetworkConfig => NETWORKS[activeNetworkKey];
+
+export const setActiveNetwork = (key: NetworkKey): NetworkConfig => {
+  activeNetworkKey = key;
+  return getActiveNetwork();
+};
+
+export const getNetworkList = (): NetworkConfig[] => Object.values(NETWORKS);
