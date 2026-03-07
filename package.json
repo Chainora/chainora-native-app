@@ -7,7 +7,9 @@
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "start": "react-native start",
-    "test": "jest"
+    "test": "jest",
+    "tron": "adb reverse tcp:9090 tcp:9090",
+    "device": "adb reverse tcp:8545 tcp:8545 && adb reverse tcp:8546 tcp:8546 && adb reverse tcp:8547 tcp:8547 && adb reverse tcp:9090 tcp:9090"
   },
   "dependencies": {
     "@noble/hashes": "^2.0.1",
