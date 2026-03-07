@@ -23,6 +23,8 @@ type ScanDialogProps = {
   onScanningChange?: (isScanning: boolean) => void;
   onShowToast?: (message: string, type: ToastType) => void;
   onSuccess?: (details: { result: WalletActionResult; mode: ScanMode }) => void;
+  initialMode?: ScanMode;
+  prefilledPin?: string;
 };
 
 type ScanPhase = 'pin' | 'working' | 'success' | 'error';
@@ -109,9 +111,13 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
   onScanningChange,
   onShowToast,
   onSuccess,
+  initialMode,
+  prefilledPin,
 }) => {
-  const [mode, setMode] = useState<ScanMode>('init');
+  const [mode, setMode] = useState<ScanMode>(initialMode ?? 'init');
   const [pinValue, setPinValue] = useState('');
+  const [pinStage, setPinStage] = useState<'create' | 'confirm'>('create');
+  const [confirmPinValue, setConfirmPinValue] = useState('');
   const [phase, setPhase] = useState<ScanPhase>('pin');
   const [statusMessage, setStatusMessage] = useState('Enter your 4 digit PIN to set up your wallet');
   const [infoLines, setInfoLines] = useState<string[]>([]);
@@ -129,7 +135,8 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
 
   const modeInstructions = useMemo(
     () => ({
-      init: 'Create a 4-digit PIN for your new wallet',
+      initCreate: 'Create a 4-digit PIN for your new wallet',
+      initConfirm: 'Confirm your 4-digit PIN',
       signin: 'Enter your PIN to access your wallet',
     }),
     [],
@@ -138,47 +145,47 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
   // --- Interpolations for Theming ---
   const dialogBackground = indicatorAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['#FFFFFF', '#0F172A'], // Crisp White vs Midnight Blue
+    outputRange: [THEME.surface, THEME.surface],
   });
   const dialogBorder = indicatorAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['rgba(0,0,0,0.06)', 'rgba(255,255,255,0.12)'],
+    outputRange: [THEME.border, THEME.border],
   });
   const subtitleColor = indicatorAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['#334155', '#E2E8F0'],
+    outputRange: [THEME.foreground, THEME.foreground],
   });
   const infoColor = indicatorAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['#475569', '#94A3B8'],
+    outputRange: [THEME.foregroundMuted, THEME.foregroundMuted],
   });
   const secondaryColor = indicatorAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [THEME.primary, '#60A5FA'],
+    outputRange: [THEME.primary, THEME.primary],
   });
   const tabBackground = indicatorAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['#F1F5F9', '#1E293B'],
+    outputRange: [THEME.surfaceHighlight, THEME.surfaceHighlight],
   });
   const tabIndicatorColor = indicatorAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['#FFFFFF', '#334155'],
+    outputRange: ['#252C37', '#252C37'],
   });
   const tabActiveColor = indicatorAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['#0F172A', '#F8FAFC'],
+    outputRange: [THEME.foreground, THEME.foreground],
   });
   const tabInactiveColor = indicatorAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['#94A3B8', '#64748B'],
+    outputRange: [THEME.foregroundMuted, THEME.foregroundMuted],
   });
   const pulseColor = indicatorAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['rgba(59, 130, 246, 0.15)', 'rgba(56, 189, 248, 0.15)'],
+    outputRange: ['rgba(191, 164, 106, 0.14)', 'rgba(191, 164, 106, 0.14)'],
   });
   const scannerBeamColor = indicatorAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['rgba(59, 130, 246, 0.5)', 'rgba(56, 189, 248, 0.6)'],
+    outputRange: ['rgba(191, 164, 106, 0.52)', 'rgba(191, 164, 106, 0.52)'],
   });
 
   useEffect(() => {
@@ -235,9 +242,12 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
         setMode(nextMode);
       }
       setPhase('pin');
+      setPinStage('create');
       setPinValue('');
+      setConfirmPinValue('');
       setInfoLines([]);
-      const instructions = modeInstructions[nextMode];
+      const instructions =
+        nextMode === 'init' ? modeInstructions.initCreate : modeInstructions.signin;
       setStatusMessage(instructions);
       onStatusChange?.(instructions);
       if (snapIndicator) {
@@ -249,7 +259,13 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
 
   useEffect(() => {
     if (visible) {
-      resetForMode(mode, false);
+      const startMode = initialMode ?? mode;
+      resetForMode(startMode, false);
+      if (prefilledPin) {
+        setPinValue(prefilledPin);
+        setStatusMessage('Hold your card near the device...');
+        onStatusChange?.('Hold your card near the device...');
+      }
       modalScaleAnim.setValue(0.92);
       modalOpacityAnim.setValue(0);
       Animated.parallel([
@@ -265,8 +281,8 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
       ]).start();
       return;
     }
-    resetForMode('init');
-  }, [visible, mode, resetForMode, modalScaleAnim, modalOpacityAnim]);
+    resetForMode(initialMode ?? 'init');
+  }, [visible, mode, resetForMode, modalScaleAnim, modalOpacityAnim, initialMode, prefilledPin, onStatusChange]);
 
   const handleModeChange = useCallback(
     (nextMode: ScanMode) => {
@@ -283,9 +299,17 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
     [indicatorAnim, mode, resetForMode],
   );
 
-  const handlePinChange = useCallback((value: string) => {
-    setPinValue(value.replace(/\D/g, '').slice(0, PIN_LENGTH));
-  }, []);
+  const handlePinChange = useCallback(
+    (value: string) => {
+      const next = value.replace(/\D/g, '').slice(0, PIN_LENGTH);
+      if (mode === 'init' && pinStage === 'confirm') {
+        setConfirmPinValue(next);
+      } else {
+        setPinValue(next);
+      }
+    },
+    [mode, pinStage],
+  );
 
   const beginScan = useCallback(async () => {
     if (isNfcEnabled === false) {
@@ -303,7 +327,7 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
     onStatusChange?.('Hold your card near the device...');
 
     try {
-      const result = mode === 'init' ? await initialiseWallet(pinValue) : await signInWallet(pinValue);
+      const result = mode === 'init' ? await initialiseWallet(prefilledPin ?? pinValue) : await signInWallet(prefilledPin ?? pinValue);
       if (operationTokenRef.current !== token) return;
 
       setInfoLines(buildInfoLines(mode, result));
@@ -332,16 +356,55 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
       showToast(fallbackMessage, 'error');
       shakeDialog();
     }
-  }, [isNfcEnabled, mode, onStatusChange, onSuccess, pinValue, showToast, shakeDialog]);
+  }, [isNfcEnabled, mode, onStatusChange, onSuccess, pinValue, prefilledPin, showToast, shakeDialog]);
 
   const handleSubmitPin = useCallback(() => {
-    if (pinValue.length !== PIN_LENGTH) {
-      showToast(`Enter a ${PIN_LENGTH}-digit PIN`, 'error');
-      shakeDialog();
-      return;
+    if (mode === 'init') {
+      if (pinStage === 'create') {
+        if (pinValue.length !== PIN_LENGTH) {
+          showToast(`Enter a ${PIN_LENGTH}-digit PIN`, 'error');
+          shakeDialog();
+          return;
+        }
+        setPinStage('confirm');
+        const nextMessage = modeInstructions.initConfirm;
+        setStatusMessage(nextMessage);
+        onStatusChange?.(nextMessage);
+        return;
+      }
+
+      if (confirmPinValue.length !== PIN_LENGTH) {
+        showToast(`Confirm the ${PIN_LENGTH}-digit PIN`, 'error');
+        shakeDialog();
+        return;
+      }
+
+      if (confirmPinValue !== pinValue) {
+        showToast('PINs do not match. Try again.', 'error');
+        setConfirmPinValue('');
+        shakeDialog();
+        return;
+      }
+    } else {
+      if (pinValue.length !== PIN_LENGTH) {
+        showToast(`Enter a ${PIN_LENGTH}-digit PIN`, 'error');
+        shakeDialog();
+        return;
+      }
     }
+
     beginScan();
-  }, [beginScan, pinValue.length, showToast, shakeDialog]);
+  }, [
+    beginScan,
+    confirmPinValue,
+    mode,
+    modeInstructions.initConfirm,
+    onStatusChange,
+    pinStage,
+    pinValue,
+    shakeDialog,
+    showToast,
+  ]);
 
   const handlePrimaryAction = useCallback(() => {
     if (phase === 'pin') {
@@ -351,21 +414,41 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
     beginScan();
   }, [beginScan, handleSubmitPin, phase]);
 
-  const handleResetPin = useCallback(() => {
-    resetForMode(mode, false);
-  }, [mode, resetForMode]);
+  useEffect(() => {
+    if (!visible || !prefilledPin || phase !== 'pin') return;
+    const timer = setTimeout(() => {
+      beginScan();
+    }, 180);
+    return () => clearTimeout(timer);
+  }, [beginScan, phase, prefilledPin, visible]);
 
   const themeScheme: 'light' | 'dark' = mode === 'signin' ? 'dark' : 'light';
   const shouldShowVideo = phase === 'working';
   const shouldShowSuccess = phase === 'success';
-  const showReset = phase !== 'pin';
+  const showCancel = phase !== 'success';
 
-  const primaryButtonLabel = phase === 'pin' ? 'Scan Card' : phase === 'success' ? 'Complete' : 'Try Again';
-  const disablePrimaryButton = phase === 'working' || (phase === 'pin' && pinValue.length !== PIN_LENGTH);
+  const primaryButtonLabel =
+    phase === 'pin'
+      ? prefilledPin
+        ? 'Scan Card'
+        : mode === 'init' && pinStage === 'create'
+        ? 'Continue'
+        : 'Scan Card'
+      : phase === 'success'
+      ? 'Complete'
+      : 'Try Again';
+
+  const activePinLength =
+    mode === 'init' && pinStage === 'confirm' ? confirmPinValue.length : pinValue.length;
+
+  const disablePrimaryButton =
+    phase === 'working' ||
+    (phase === 'pin' && !prefilledPin && activePinLength !== PIN_LENGTH);
 
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose} statusBarTranslucent>
       <View style={styles.backdrop}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
         <Animated.View 
           style={[
             styles.dialog, 
@@ -379,7 +462,8 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
               ]
             }
           ]}
-        > 
+        >
+          {!prefilledPin && (
           <Animated.View
             style={[styles.tabContainer, { backgroundColor: tabBackground }]}
             onLayout={event => {
@@ -418,12 +502,18 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
               );
             })}
           </Animated.View>
+          )}
 
           <View style={styles.content}>
             <AnimatedText style={[styles.subtitle, { color: subtitleColor }]}>{statusMessage}</AnimatedText>
 
-            {phase === 'pin' && (
-              <PinInput value={pinValue} onChange={handlePinChange} disabled={phase !== 'pin'} colorScheme={themeScheme} />
+            {phase === 'pin' && !prefilledPin && (
+              <PinInput
+                value={mode === 'init' && pinStage === 'confirm' ? confirmPinValue : pinValue}
+                onChange={handlePinChange}
+                disabled={phase !== 'pin'}
+                colorScheme={themeScheme}
+              />
             )}
 
             {(shouldShowVideo || shouldShowSuccess) && (
@@ -433,10 +523,19 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
                      style={[styles.pulseRing, { backgroundColor: pulseColor, transform: [{ scale: pulseAnim }] }]} 
                    />
                 )}
-                
+
+                <View style={styles.viewfinderWrapper}>
+                  {shouldShowVideo && (
+                    <>
+                      <View style={[styles.viewfinderCorner, styles.viewfinderCornerTL]} />
+                      <View style={[styles.viewfinderCorner, styles.viewfinderCornerTR]} />
+                      <View style={[styles.viewfinderCorner, styles.viewfinderCornerBL]} />
+                      <View style={[styles.viewfinderCorner, styles.viewfinderCornerBR]} />
+                    </>
+                  )}
                 <View style={styles.visualWrapper}>
                    {shouldShowSuccess ? (
-                     <SuccessIcon color={mode === 'signin' ? '#60A5FA' : THEME.primary} />
+                     <SuccessIcon color={THEME.primary} />
                    ) : (
                      <>
                       <Video
@@ -447,7 +546,7 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
                         muted
                         paused={!shouldShowVideo}
                       />
-                      {/* Scanner Beam */}
+                      <View style={styles.videoTint} />
                       <Animated.View 
                         style={[
                           styles.scannerBeam,
@@ -459,8 +558,20 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
                           }
                         ]} 
                       />
+                      <Animated.View 
+                        style={[
+                          styles.scannerBeamGlow,
+                          { 
+                            backgroundColor: scannerBeamColor,
+                            transform: [{ 
+                              translateY: scanLineAnim.interpolate({ inputRange: [0, 1], outputRange: [-20, 160] }) 
+                            }] 
+                          }
+                        ]} 
+                      />
                      </>
                    )}
+                </View>
                 </View>
               </View>
             )}
@@ -480,10 +591,10 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
                 disabled={disablePrimaryButton} 
                 variant={mode === 'signin' ? 'secondary' : 'primary'}
               />
-              {showReset && (
-                <Pressable style={styles.secondaryAction} onPress={handleResetPin} disabled={phase === 'working'}>
+              {showCancel && (
+                <Pressable style={styles.secondaryAction} onPress={onClose}>
                   <AnimatedText style={[styles.secondaryLabel, { color: secondaryColor }]}>
-                    Cancel & Reset
+                    Cancel
                   </AnimatedText>
                 </Pressable>
               )}
@@ -498,7 +609,7 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: THEME.overlay,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
@@ -511,7 +622,7 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
     paddingHorizontal: 24,
     borderWidth: 1,
-    shadowColor: '#000',
+    shadowColor: THEME.shadow,
     shadowOffset: { width: 0, height: 24 },
     shadowOpacity: 0.3,
     shadowRadius: 40,
@@ -543,7 +654,7 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   tabLabel: {
-    fontSize: 14,
+    fontSize: THEME.typography.subtext,
     fontWeight: '700',
     letterSpacing: 0.3,
   },
@@ -551,7 +662,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   subtitle: {
-    fontSize: 16,
+    fontSize: THEME.typography.body,
     fontWeight: '600',
     marginBottom: 24,
     textAlign: 'center',
@@ -572,14 +683,56 @@ const styles = StyleSheet.create({
     height: 240,
     borderRadius: 120,
   },
+  viewfinderWrapper: {
+    position: 'relative',
+    width: 140,
+    height: 140,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewfinderCorner: {
+    position: 'absolute',
+    width: 16,
+    height: 16,
+    borderColor: THEME.primary,
+    opacity: 0.9,
+  },
+  viewfinderCornerTL: {
+    top: 0,
+    left: 0,
+    borderTopWidth: 3,
+    borderLeftWidth: 3,
+    borderTopLeftRadius: 4,
+  },
+  viewfinderCornerTR: {
+    top: 0,
+    right: 0,
+    borderTopWidth: 3,
+    borderRightWidth: 3,
+    borderTopRightRadius: 4,
+  },
+  viewfinderCornerBL: {
+    bottom: 0,
+    left: 0,
+    borderBottomWidth: 3,
+    borderLeftWidth: 3,
+    borderBottomLeftRadius: 4,
+  },
+  viewfinderCornerBR: {
+    bottom: 0,
+    right: 0,
+    borderBottomWidth: 3,
+    borderRightWidth: 3,
+    borderBottomRightRadius: 4,
+  },
   visualWrapper: {
     width: 140,
     height: 140,
     borderRadius: 70,
     overflow: 'hidden',
-    backgroundColor: '#000',
+    backgroundColor: '#111418',
     borderWidth: 4,
-    borderColor: '#FFFFFF',
+    borderColor: THEME.primary,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 12 },
     shadowOpacity: 0.2,
@@ -592,24 +745,36 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  videoTint: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(10, 11, 13, 0.42)',
+  },
   scannerBeam: {
     position: 'absolute',
     width: '100%',
-    height: 6,
-    shadowColor: '#FFF',
+    height: 4,
+    left: 0,
+    shadowColor: THEME.primaryLight,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 8,
+    shadowOpacity: 0.9,
+    shadowRadius: 12,
+  },
+  scannerBeamGlow: {
+    position: 'absolute',
+    width: '100%',
+    height: 20,
+    left: 0,
+    opacity: 0.25,
   },
   successCircle: {
     width: '100%',
     height: '100%',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#111418',
     alignItems: 'center',
     justifyContent: 'center',
   },
   successCheck: {
-    fontSize: 64,
+    fontSize: THEME.typography.display,
     fontWeight: 'bold',
   },
   infoContainer: {
@@ -618,7 +783,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   infoText: {
-    fontSize: 14,
+    fontSize: THEME.typography.subtext,
     marginBottom: 8,
     textAlign: 'center',
     fontWeight: '500',
@@ -635,6 +800,6 @@ const styles = StyleSheet.create({
   },
   secondaryLabel: {
     fontWeight: '600',
-    fontSize: 15,
+    fontSize: THEME.typography.subtext,
   },
 });

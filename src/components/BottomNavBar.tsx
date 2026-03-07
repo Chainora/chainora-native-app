@@ -49,7 +49,7 @@ const styles = StyleSheet.create({
   },
   label: {
     color: THEME.foregroundMuted,
-    fontSize: 14,
+    fontSize: THEME.typography.subtext,
     fontWeight: '600',
   },
   labelActive: {

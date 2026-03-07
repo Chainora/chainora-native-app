@@ -301,13 +301,13 @@ const styles = StyleSheet.create({
     gap: 20,
   },
   title: {
-    fontSize: 24,
+    fontSize: THEME.typography.title,
     fontWeight: '800',
     color: '#F8FAFC',
     letterSpacing: -0.5,
   },
   subtitle: {
-    fontSize: 14,
+    fontSize: THEME.typography.subtext,
     color: '#94A3B8',
     lineHeight: 20,
   },
@@ -315,7 +315,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   fieldLabel: {
-    fontSize: 12,
+    fontSize: THEME.typography.caption,
     fontWeight: '700',
     color: THEME.foregroundMuted,
     letterSpacing: 0.5,
@@ -328,11 +328,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     color: '#E2E8F0',
-    fontSize: 16,
+    fontSize: THEME.typography.body,
   },
   errorText: {
     color: THEME.danger,
-    fontSize: 13,
+    fontSize: THEME.typography.caption,
   },
   secondaryAction: {
     marginTop: -8,
@@ -353,12 +353,12 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   resultLabel: {
-    fontSize: 12,
+    fontSize: THEME.typography.caption,
     fontWeight: '700',
     color: THEME.foregroundMuted,
   },
   resultValue: {
-    fontSize: 14,
+    fontSize: THEME.typography.subtext,
     color: '#F8FAFC',
     fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'Menlo' }),
   },

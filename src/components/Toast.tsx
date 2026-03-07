@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { THEME } from '../types/theme/colors';
 
 export type ToastType = 'info' | 'error' | 'success';
 
@@ -66,7 +67,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   message: {
-    fontSize: 15,
+    fontSize: THEME.typography.subtext,
     fontWeight: '600',
   },
 });

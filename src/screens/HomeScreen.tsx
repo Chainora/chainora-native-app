@@ -5,7 +5,6 @@ import {
   Dimensions,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -13,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppButton } from '../components/AppButton';
 import { BottomNavBar } from '../components/BottomNavBar';
@@ -117,7 +117,7 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
         <FloatingOrb color="#22D3EE" size={250} initial={{ x: 50, y: height - 250 }} duration={10000} opacity={0.1} />
       </View>
 
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           
           {/* 1. Identity Card (Hero) */}
@@ -259,11 +259,11 @@ const styles = StyleSheet.create({
   },
   // ID Card Styling
   idCard: {
-    backgroundColor: 'rgba(30, 41, 59, 0.7)',
+    backgroundColor: 'rgba(20, 23, 28, 0.9)',
     borderRadius: 24,
     padding: 24,
     borderWidth: 1,
-    borderColor: 'rgba(56, 189, 248, 0.2)',
+    borderColor: 'rgba(191, 164, 106, 0.3)',
     overflow: 'hidden',
     shadowColor: THEME.primary,
     shadowOffset: { width: 0, height: 10 },
@@ -300,14 +300,14 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   statusText: {
-    color: '#F8FAFC',
-    fontSize: 10,
+    color: THEME.foreground,
+    fontSize: THEME.typography.micro,
     fontWeight: '800',
     letterSpacing: 0.5,
   },
   idCardLabel: {
     color: THEME.foregroundMuted,
-    fontSize: 10,
+    fontSize: THEME.typography.micro,
     fontWeight: '700',
     letterSpacing: 2,
   },
@@ -315,29 +315,29 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   idTitle: {
-    fontSize: 26,
+    fontSize: THEME.typography.title,
     fontWeight: '800',
-    color: '#F8FAFC',
+    color: THEME.foreground,
     marginBottom: 16,
     letterSpacing: -0.5,
   },
   addressContainer: {
-    backgroundColor: 'rgba(15, 23, 42, 0.5)',
+    backgroundColor: 'rgba(14, 16, 21, 0.85)',
     padding: 12,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
+    borderColor: THEME.border,
   },
   addressLabel: {
     color: THEME.primary,
-    fontSize: 9,
+    fontSize: THEME.typography.micro,
     fontWeight: '800',
     marginBottom: 4,
     letterSpacing: 1,
   },
   addressValue: {
-    color: '#E2E8F0',
-    fontSize: 13,
+    color: '#C7CEDB',
+    fontSize: THEME.typography.caption,
     fontFamily: MONO_FONT,
     lineHeight: 18,
   },
@@ -354,12 +354,12 @@ const styles = StyleSheet.create({
   },
   modePillText: {
     color: THEME.primary,
-    fontSize: 11,
+    fontSize: THEME.typography.small,
     fontWeight: '700',
   },
   networkName: {
     color: THEME.foregroundMuted,
-    fontSize: 12,
+    fontSize: THEME.typography.caption,
     fontWeight: '600',
   },
   cornerAccent: {
@@ -374,11 +374,11 @@ const styles = StyleSheet.create({
   },
   // Balance Card
   balanceCard: {
-    backgroundColor: 'rgba(15, 23, 42, 0.4)',
+    backgroundColor: 'rgba(14, 16, 21, 0.8)',
     borderRadius: 20,
     padding: 24,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
+    borderColor: THEME.border,
   },
   balanceHeader: {
     flexDirection: 'row',
@@ -386,13 +386,13 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   cardLabel: {
-    fontSize: 11,
+    fontSize: THEME.typography.small,
     fontWeight: '800',
     color: THEME.foregroundMuted,
     letterSpacing: 1.5,
   },
   refreshText: {
-    fontSize: 11,
+    fontSize: THEME.typography.small,
     fontWeight: '700',
     color: THEME.primary,
   },
@@ -405,19 +405,19 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   balanceValue: {
-    fontSize: 42,
+    fontSize: THEME.typography.display,
     fontWeight: '800',
-    color: '#F8FAFC',
+    color: THEME.foreground,
     letterSpacing: -1,
   },
   currencySymbol: {
-    fontSize: 18,
+    fontSize: THEME.typography.body,
     fontWeight: '600',
     color: THEME.primary,
   },
   errorText: {
     color: THEME.danger,
-    fontSize: 12,
+    fontSize: THEME.typography.caption,
     marginTop: 8,
   },
   sendButtonWrapper: {
@@ -448,22 +448,22 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   actionLabel: {
-    fontSize: 15,
+    fontSize: THEME.typography.subtext,
     fontWeight: '700',
     color: '#F8FAFC',
     marginBottom: 2,
   },
   actionSubLabel: {
-    fontSize: 11,
+    fontSize: THEME.typography.small,
     color: THEME.foregroundMuted,
   },
   // Details Section
   detailsSection: {
-    backgroundColor: 'rgba(15, 23, 42, 0.4)',
+    backgroundColor: 'rgba(14, 16, 21, 0.8)',
     borderRadius: 20,
     padding: 24,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
+    borderColor: THEME.border,
   },
   dataGrid: {
     flexDirection: 'row',
@@ -478,19 +478,19 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   dataLabel: {
-    fontSize: 9,
+    fontSize: THEME.typography.micro,
     fontWeight: '800',
     color: THEME.foregroundMuted,
     marginBottom: 4,
     letterSpacing: 0.5,
   },
   dataValue: {
-    fontSize: 15,
+    fontSize: THEME.typography.subtext,
     fontWeight: '600',
     color: '#F1F5F9',
   },
   dataValueMono: {
-    fontSize: 12,
+    fontSize: THEME.typography.caption,
     fontFamily: MONO_FONT,
     color: THEME.primary,
   },
