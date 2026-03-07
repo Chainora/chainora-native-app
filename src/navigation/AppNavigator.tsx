@@ -60,7 +60,11 @@ export const AppNavigator: React.FC = () => {
           component={HomeScreen}
           options={{ headerShown: false }}
         />
-        <Stack.Screen name={ROUTES.ActivateSuccess} component={ActivateSuccessScreen} />
+        <Stack.Screen
+          name={ROUTES.ActivateSuccess}
+          component={ActivateSuccessScreen}
+          options={{ headerShown: false }}
+        />
       </Stack.Navigator>
     </NavigationContainer>
   );
