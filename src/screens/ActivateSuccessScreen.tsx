@@ -1,11 +1,9 @@
-import React from 'react';
-import { StatusBar, StyleSheet, Text, View, Animated } from 'react-native';
+import React, { useCallback, useEffect, useRef } from 'react';
+import { Alert, StatusBar, StyleSheet, Text, View, Pressable } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@react-native-vector-icons/ionicons';
 
-import { AppButton } from '../components/AppButton';
-import { FloatingOrb } from '../components/ui/animations/FloatingOrb';
-import { useEntranceAnimation } from '../components/ui/animations/useEntranceAnimation';
 import { ROUTES } from '../navigation/routes/routes';
 import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
 import { THEME } from '../types/theme/colors';
@@ -14,47 +12,85 @@ type Props = NativeStackScreenProps<RootStackParamList, typeof ROUTES.ActivateSu
 
 export const ActivateSuccessScreen: React.FC<Props> = ({ route, navigation }) => {
   const { ethAddress, publicKeyHex, mode } = route.params;
-  const { animatedStyle: cardAnimation } = useEntranceAnimation({ translateInitial: 32, fadeDuration: 700 });
-  const { animatedStyle: buttonAnimation } = useEntranceAnimation({ translateInitial: 20, delay: 200 });
+  const hasNavigatedRef = useRef(false);
 
-  const shortAddress = ethAddress ? `${ethAddress.slice(0, 6)}...${ethAddress.slice(-4)}` : '';
+  const shortAddress = `${ethAddress.slice(0, 6)}...${ethAddress.slice(-4)}`;
 
-  const handleGoHome = () => {
-    navigation.navigate(ROUTES.Home, {
-      ethAddress,
-      publicKeyHex,
-      mode,
+  const goToHome = useCallback(() => {
+    if (hasNavigatedRef.current) {
+      return;
+    }
+
+    hasNavigatedRef.current = true;
+    navigation.reset({
+      index: 0,
+      routes: [
+        {
+          name: ROUTES.Home,
+          params: {
+            ethAddress,
+            publicKeyHex,
+            mode,
+          },
+        },
+      ],
     });
-  };
+  }, [ethAddress, mode, navigation, publicKeyHex]);
+
+  useEffect(() => {
+    const timer = setTimeout(goToHome, 2200);
+    return () => clearTimeout(timer);
+  }, [goToHome]);
+
+  const handleCopyPress = useCallback(() => {
+    Alert.alert('Wallet address', ethAddress);
+  }, [ethAddress]);
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={THEME.background} />
-
-      <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-        <FloatingOrb color={THEME.success} size={320} initial={{ x: -80, y: -80 }} duration={12000} />
-        <FloatingOrb color={THEME.primary} size={260} initial={{ x: 220, y: 320 }} duration={14000} />
-      </View>
-
       <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
-        <View style={styles.content}>
-          <Animated.View style={cardAnimation}>
-            <View style={styles.iconCircle}>
-              <Text style={styles.iconCheck}>✓</Text>
-            </View>
+        <View style={styles.frame}>
+          <View style={styles.notch} />
 
+          <View style={styles.centerGroup}>
+            <View style={styles.successOuter}>
+              <View style={styles.successInner}>
+                <Ionicons name="checkmark-circle-outline" size={44} color="#1ED760" />
+              </View>
+            </View>
             <Text style={styles.title}>Wallet Activated!</Text>
             <Text style={styles.subtitle}>Your card is ready to use.</Text>
+          </View>
 
-            <View style={styles.cardInfo}>
-              <Text style={styles.cardLabel}>Wallet address</Text>
-              <Text style={styles.cardValue}>{shortAddress}</Text>
+          <View style={styles.divider} />
+
+          <View style={styles.walletCard}>
+            <View style={styles.cardTapIconWrap}>
+              <Ionicons name="wifi-outline" size={21} color="#7E8799" style={styles.cardTapIcon} />
             </View>
-          </Animated.View>
+            <View style={styles.chip} />
+            <Text style={styles.brand}>CHAINORA</Text>
+            <Text style={styles.shortAddress}>{shortAddress}</Text>
+          </View>
 
-          <Animated.View style={buttonAnimation}>
-            <AppButton label="Go to Wallet" onPress={handleGoHome} />
-          </Animated.View>
+          <View style={styles.addressBox}>
+            <View style={styles.addressTextWrap}>
+              <Text style={styles.addressLabel}>Your wallet address</Text>
+              <Text style={styles.addressValue}>{ethAddress}</Text>
+            </View>
+            <Pressable style={styles.copyButton} accessibilityRole="button" onPress={handleCopyPress}>
+              <Ionicons name="copy-outline" size={22} color="#B8C0CF" />
+            </Pressable>
+          </View>
+
+          <View style={styles.noteBox}>
+            <Text style={styles.noteText}>
+              Share this address to receive ETH. Your private key never leaves the card.
+            </Text>
+          </View>
+
+          <Text style={styles.footerBrand}>chainora</Text>
         </View>
       </SafeAreaView>
     </View>
@@ -64,62 +100,173 @@ export const ActivateSuccessScreen: React.FC<Props> = ({ route, navigation }) =>
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: THEME.background,
+    backgroundColor: '#03060A',
   },
   safeArea: {
     flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
-  content: {
+  frame: {
     flex: 1,
-    paddingHorizontal: 24,
-    paddingVertical: 24,
-    justifyContent: 'space-between',
+    borderRadius: 44,
+    borderWidth: 1,
+    borderColor: 'rgba(81, 92, 110, 0.25)',
+    backgroundColor: '#050A10',
+    paddingTop: 22,
+    paddingHorizontal: 18,
+    paddingBottom: 22,
   },
-  iconCircle: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: 'rgba(34, 197, 94, 0.12)',
+  notch: {
+    width: 150,
+    height: 42,
+    alignSelf: 'center',
+    borderRadius: 22,
+    backgroundColor: '#020306',
+    marginBottom: 30,
+  },
+  centerGroup: {
+    alignItems: 'center',
+  },
+  successOuter: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: 'rgba(30, 215, 96, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(30, 215, 96, 0.42)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 22,
+  },
+  successInner: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#16A34A',
-    marginBottom: 24,
-  },
-  iconCheck: {
-    fontSize: THEME.typography.display,
-    fontWeight: '800',
-    color: '#22C55E',
   },
   title: {
-    fontSize: THEME.typography.title,
+    fontSize: 52,
+    lineHeight: 56,
     fontWeight: '800',
-    color: THEME.foreground,
-    marginBottom: 8,
+    color: '#EAF0F8',
+    textAlign: 'center',
+    letterSpacing: -1,
   },
   subtitle: {
-    fontSize: THEME.typography.subtext,
-    color: THEME.foregroundMuted,
-    marginBottom: 24,
+    marginTop: 12,
+    fontSize: 20,
+    lineHeight: 28,
+    fontWeight: '500',
+    color: '#A5B1C2',
+    textAlign: 'center',
   },
-  cardInfo: {
-    backgroundColor: THEME.surfaceHighlight,
+  divider: {
+    height: 1,
+    backgroundColor: 'rgba(126, 138, 161, 0.16)',
+    marginTop: 34,
+  },
+  walletCard: {
+    marginTop: 24,
     borderRadius: 18,
+    minHeight: 160,
     padding: 16,
+    backgroundColor: 'rgba(3, 6, 10, 0.7)',
     borderWidth: 1,
-    borderColor: THEME.border,
+    borderColor: 'rgba(71, 82, 103, 0.24)',
   },
-  cardLabel: {
-    fontSize: THEME.typography.small,
-    fontWeight: '700',
-    color: THEME.foregroundMuted,
-    marginBottom: 4,
-    letterSpacing: 1,
+  cardTapIconWrap: {
+    alignItems: 'flex-end',
+    marginBottom: 26,
   },
-  cardValue: {
-    fontSize: THEME.typography.body,
+  cardTapIcon: {
+    transform: [{ rotate: '-90deg' }],
+  },
+  chip: {
+    width: 56,
+    height: 40,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(117, 136, 166, 0.42)',
+    backgroundColor: 'rgba(81, 104, 142, 0.2)',
+    marginBottom: 20,
+  },
+  brand: {
+    color: 'rgba(90, 109, 139, 0.3)',
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: 2,
+  },
+  shortAddress: {
+    marginTop: 8,
+    color: '#79859A',
+    fontSize: 30,
+    lineHeight: 34,
+    fontWeight: '500',
+    letterSpacing: -0.8,
+  },
+  addressBox: {
+    marginTop: 20,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#2A3A56',
+    backgroundColor: '#111A29',
+    paddingVertical: 16,
+    paddingLeft: 16,
+    paddingRight: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  addressTextWrap: {
+    flex: 1,
+  },
+  addressLabel: {
+    color: '#6E7C95',
+    fontSize: 12,
+    marginBottom: 8,
     fontWeight: '600',
-    color: THEME.foreground,
+  },
+  addressValue: {
+    color: '#E6ECF5',
+    fontSize: 30,
+    lineHeight: 36,
+    fontWeight: '700',
+    letterSpacing: -0.8,
+  },
+  copyButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 13,
+    backgroundColor: 'rgba(69, 86, 112, 0.35)',
+    borderWidth: 1,
+    borderColor: 'rgba(100, 117, 145, 0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  noteBox: {
+    marginTop: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(80, 92, 114, 0.4)',
+    backgroundColor: 'rgba(33, 42, 58, 0.75)',
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+  },
+  noteText: {
+    textAlign: 'center',
+    color: '#7E8AA2',
+    fontSize: 12,
+    lineHeight: 20,
+    fontWeight: '500',
+  },
+  footerBrand: {
+    marginTop: 20,
+    color: 'rgba(29, 39, 54, 0.45)',
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: 1.2,
   },
 });
 
