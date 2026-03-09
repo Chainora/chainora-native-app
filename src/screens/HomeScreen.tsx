@@ -1,6 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
+  AppState,
+  type AppStateStatus,
   Pressable,
   ScrollView,
   StatusBar,
@@ -8,11 +10,14 @@ import {
   Text,
   View,
 } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
+import { useIsFocused } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
 import { BottomNavBar } from '../components/BottomNavBar';
+import { EcdhBackupDialog } from '../components/ui/EcdhBackupDialog';
 import { SendTransactionDialog } from '../components/ui/SendTransactionDialog';
 import { getActiveNetwork } from '../config/network';
 import { useAuth } from '../features/auth';
@@ -22,22 +27,18 @@ import { THEME } from '../types/theme/colors';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
-type ActivityItem = {
-  id: string;
-  type: 'sent' | 'received';
-  address: string;
-  amount: string;
-  timeAgo: string;
-};
-
 const truncateAddress = (address: string) =>
   `${address.slice(0, 6)}...${address.slice(-4)}`;
 
 export const HomeScreen: React.FC<Props> = ({ route }) => {
   const { ethAddress, publicKeyHex } = route.params;
+  const isFocused = useIsFocused();
   const { initializeSession } = useAuth();
   const balanceState = useWalletBalance(ethAddress);
-  const [sendVisible, setSendVisible] = useState(false);
+  const refreshBalanceFn = balanceState.refresh;
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const [isAppActive, setIsAppActive] = useState(AppState.currentState === 'active');
+  const [dialogState, setDialogState] = useState({ send: false, backup: false });
   const network = getActiveNetwork();
 
   useEffect(() => {
@@ -46,39 +47,48 @@ export const HomeScreen: React.FC<Props> = ({ route }) => {
     });
   }, [ethAddress, initializeSession]);
 
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', nextAppState => {
+      appStateRef.current = nextAppState;
+      setIsAppActive(nextAppState === 'active');
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isFocused || !isAppActive) {
+      return;
+    }
+
+    const intervalId = setInterval(() => {
+      refreshBalanceFn();
+    }, 10_000);
+
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [refreshBalanceFn, isAppActive, isFocused]);
+
   const balanceValue = balanceState.loading
     ? '0.0000'
     : balanceState.formatted || '0.0000';
 
-  const activities = useMemo<ActivityItem[]>(
-    () => [
-      {
-        id: 'tx-1',
-        type: 'sent',
-        address: '0xAb3F...9C21',
-        amount: '-0.05',
-        timeAgo: '2h ago',
-      },
-      {
-        id: 'tx-2',
-        type: 'received',
-        address: '0x19Fe...3D44',
-        amount: '+0.20',
-        timeAgo: '1d ago',
-      },
-    ],
-    [],
-  );
-
   const openSendDialog = useCallback(() => {
-    setSendVisible(true);
+    setDialogState(prev => ({ ...prev, send: true }));
   }, []);
 
   const closeSendDialog = useCallback(() => {
-    setSendVisible(false);
+    setDialogState(prev => ({ ...prev, send: false }));
   }, []);
 
   const handleSendSuccess = useCallback(() => {
+    balanceState.refresh();
+  }, [balanceState]);
+
+  const refreshBalance = useCallback(() => {
     balanceState.refresh();
   }, [balanceState]);
 
@@ -89,6 +99,19 @@ export const HomeScreen: React.FC<Props> = ({ route }) => {
     );
   }, [ethAddress, publicKeyHex]);
 
+  const handleBackup = useCallback(() => {
+    setDialogState(prev => ({ ...prev, backup: true }));
+  }, []);
+
+  const closeBackupDialog = useCallback(() => {
+    setDialogState(prev => ({ ...prev, backup: false }));
+  }, []);
+
+  const copyAddress = useCallback(() => {
+    Clipboard.setString(ethAddress);
+    Alert.alert('Copied', 'Wallet address copied to clipboard.');
+  }, [ethAddress]);
+
   return (
     <View style={styles.screen}>
       <StatusBar barStyle="light-content" backgroundColor={THEME.background} />
@@ -97,8 +120,18 @@ export const HomeScreen: React.FC<Props> = ({ route }) => {
           <View style={styles.balanceCard}>
             <View style={styles.balanceHeader}>
               <Text style={styles.cardLabel}>TOTAL BALANCE</Text>
-              <View style={styles.liveBadge}>
-                <Text style={styles.liveText}>LIVE</Text>
+              <View style={styles.headerActions}>
+                <Pressable
+                  onPress={refreshBalance}
+                  disabled={balanceState.loading}
+                  style={[styles.refreshButton, balanceState.loading && styles.refreshButtonDisabled]}
+                >
+                  <Ionicons name="refresh-outline" size={14} color={THEME.foregroundMuted} />
+                  <Text style={styles.refreshText}>{balanceState.loading ? 'Updating' : 'Refresh'}</Text>
+                </Pressable>
+                <View style={styles.liveBadge}>
+                  <Text style={styles.liveText}>LIVE</Text>
+                </View>
               </View>
             </View>
 
@@ -112,7 +145,12 @@ export const HomeScreen: React.FC<Props> = ({ route }) => {
             <View style={styles.addressRow}>
               <View>
                 <Text style={styles.addressLabel}>Address</Text>
-                <Text style={styles.addressText}>{truncateAddress(ethAddress)}</Text>
+                <View style={styles.addressWrapper}>
+                  <Text style={styles.addressText}>{truncateAddress(ethAddress)}</Text>
+                  <Pressable onPress={copyAddress} hitSlop={12} style={styles.copyButton}>
+                    <Ionicons name="copy-outline" size={16} color={THEME.foregroundMuted} />
+                  </Pressable>
+                </View>
               </View>
 
               <Pressable onPress={openWalletDetails} style={styles.networkPill}>
@@ -139,36 +177,24 @@ export const HomeScreen: React.FC<Props> = ({ route }) => {
               <Text style={styles.actionTitle}>Wallet</Text>
               <Text style={styles.actionSubtext}>Address & keys</Text>
             </Pressable>
+
+            <Pressable style={styles.actionCard} onPress={handleBackup}>
+              <View style={styles.actionIconGold}>
+                <Ionicons name="sync-outline" size={20} color={THEME.primary} />
+              </View>
+              <Text style={styles.actionTitle}>Backup</Text>
+              <Text style={styles.actionSubtext}>Sync keys</Text>
+            </Pressable>
           </View>
 
           <Text style={styles.sectionLabel}>RECENT ACTIVITY</Text>
           <View style={styles.activityList}>
-            {activities.map(item => {
-              const sent = item.type === 'sent';
-              return (
-                <View key={item.id} style={styles.activityItem}>
-                  <View style={[styles.activityIcon, sent ? styles.activityIconSent : styles.activityIconReceived]}>
-                    <Ionicons
-                      name={sent ? 'arrow-up-outline' : 'arrow-down-outline'}
-                      size={18}
-                      color={sent ? '#FF4D4F' : '#2FD67B'}
-                    />
-                  </View>
-
-                  <View style={styles.activityMeta}>
-                    <Text style={styles.activityType}>{sent ? 'Sent' : 'Received'}</Text>
-                    <Text style={styles.activityAddress}>{item.address}</Text>
-                  </View>
-
-                  <View style={styles.activityValueCol}>
-                    <Text style={[styles.activityAmount, sent ? styles.amountSent : styles.amountReceived]}>
-                      {item.amount} {network.currencySymbol}
-                    </Text>
-                    <Text style={styles.activityTime}>{item.timeAgo}</Text>
-                  </View>
-                </View>
-              );
-            })}
+            <View style={styles.activityItem}>
+              <View style={styles.activityMeta}>
+                <Text style={styles.activityType}>No transactions yet</Text>
+                <Text style={styles.activityAddress}>Transaction history will appear here after your first transfer.</Text>
+              </View>
+            </View>
           </View>
         </ScrollView>
 
@@ -181,11 +207,13 @@ export const HomeScreen: React.FC<Props> = ({ route }) => {
         />
 
         <SendTransactionDialog
-          visible={sendVisible}
+          visible={dialogState.send}
           fromAddress={ethAddress}
           onClose={closeSendDialog}
           onSuccess={handleSendSuccess}
         />
+
+        <EcdhBackupDialog visible={dialogState.backup} onClose={closeBackupDialog} />
       </SafeAreaView>
     </View>
   );
@@ -217,6 +245,30 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 12,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  refreshButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: THEME.surface,
+  },
+  refreshButtonDisabled: {
+    opacity: 0.6,
+  },
+  refreshText: {
+    color: THEME.foregroundMuted,
+    fontSize: THEME.typography.subtext,
+    fontWeight: '600',
   },
   cardLabel: {
     color: '#7E8AA1',
@@ -274,6 +326,15 @@ const styles = StyleSheet.create({
     fontSize: THEME.typography.subtitle,
     color: THEME.foreground,
     fontWeight: '700',
+  },
+  addressWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  copyButton: {
+    padding: 2,
+    opacity: 0.8,
   },
   networkPill: {
     flexDirection: 'row',

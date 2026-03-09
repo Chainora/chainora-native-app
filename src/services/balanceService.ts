@@ -1,35 +1,84 @@
+import { Platform } from 'react-native';
+
 import { getActiveNetwork } from '../config/network';
+
+const LOCAL_HOSTS = ['127.0.0.1', 'localhost'];
+
+const buildRpcCandidates = (rpcUrl: string): string[] => {
+  const unique = new Set<string>([rpcUrl]);
+
+  try {
+    const parsed = new URL(rpcUrl);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return Array.from(unique);
+    }
+
+    const isLocalHost = LOCAL_HOSTS.includes(parsed.hostname);
+    if (!isLocalHost || Platform.OS !== 'android') {
+      return Array.from(unique);
+    }
+
+    const emulatorHosts = ['10.0.2.2', '10.0.3.2'];
+    emulatorHosts.forEach(host => {
+      const candidate = new URL(rpcUrl);
+      candidate.hostname = host;
+      unique.add(candidate.toString());
+    });
+  } catch {
+    return Array.from(unique);
+  }
+
+  return Array.from(unique);
+};
 
 const jsonRpcRequest = async (address: string): Promise<string> => {
   const network = getActiveNetwork();
+  const rpcCandidates = buildRpcCandidates(network.rpcUrl);
 
   console.log('[balanceService] Fetching balance', {
     address,
     endpoint: network.rpcUrl,
+    candidates: rpcCandidates,
   });
 
   const startedAt = Date.now();
 
-  let response: Response;
-  try {
-    response = await fetch(network.rpcUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'eth_getBalance',
-        params: [address, 'latest'],
-        id: 1,
-      }),
-    });
-  } catch (error) {
-    console.warn('[balanceService] Network request failed before response', {
-      message: (error as Error).message,
-      stack: (error as Error).stack,
-    });
-    throw new Error('Network request failed');
+  let response: Response | null = null;
+  let lastNetworkError: Error | null = null;
+
+  for (const endpoint of rpcCandidates) {
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'eth_getBalance',
+          params: [address, 'latest'],
+          id: 1,
+        }),
+      });
+
+      if (endpoint !== network.rpcUrl) {
+        console.log('[balanceService] RPC fallback endpoint succeeded', { endpoint });
+      }
+
+      break;
+    } catch (error) {
+      const typedError = error instanceof Error ? error : new Error(String(error));
+      lastNetworkError = typedError;
+      console.warn('[balanceService] Network request failed before response', {
+        endpoint,
+        message: typedError.message,
+        stack: typedError.stack,
+      });
+    }
+  }
+
+  if (!response) {
+    throw new Error(lastNetworkError?.message ?? 'Network request failed');
   }
 
   const durationMs = Date.now() - startedAt;
