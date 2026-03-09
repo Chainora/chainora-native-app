@@ -23,7 +23,7 @@ type ScanDialogProps = {
   onStatusChange?: (status: string) => void;
   onScanningChange?: (isScanning: boolean) => void;
   onShowToast?: (message: string, type: ToastType) => void;
-  onSuccess?: (details: { result: WalletActionResult; mode: ScanMode }) => void;
+  onSuccess?: (details: { result: WalletActionResult; mode: ScanMode }) => void | Promise<void>;
   initialMode?: ScanMode;
   prefilledPin?: string;
   types?: ScanDialogTypes;
@@ -370,11 +370,24 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
       setInfoLines(types === 'flow' ? buildFlowInfoLines(result, t) : buildInfoLines(mode, result, t));
 
       if (result.ok) {
+        try {
+          await Promise.resolve(onSuccess?.({ result, mode }));
+        } catch (onSuccessError) {
+          if (operationTokenRef.current !== token) return;
+          const message = onSuccessError instanceof Error ? onSuccessError.message : String(onSuccessError);
+          const fallbackMessage = `${t('scanErrorPrefix')}: ${message}`;
+          setPhase('error');
+          setStatusMessage(fallbackMessage);
+          onStatusChange?.(fallbackMessage);
+          showToast(fallbackMessage, 'error');
+          shakeDialog();
+          return;
+        }
+
         setPhase('success');
         setStatusMessage(result.message);
         onStatusChange?.(result.message);
         showToast(t('scanToastSuccess'), 'success');
-        onSuccess?.({ result, mode });
       } else {
         setPhase('error');
         setStatusMessage(result.message);
