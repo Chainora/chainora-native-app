@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { fetchEthBalance } from '../../../services/balanceService';
 
@@ -14,6 +14,8 @@ export const useWalletBalance = (address: string | undefined | null): WalletBala
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [requestId, setRequestId] = useState(0);
+  const inFlightRef = useRef(false);
+  const queuedRefreshRef = useRef(false);
 
   useEffect(() => {
     if (!address) {
@@ -23,21 +25,27 @@ export const useWalletBalance = (address: string | undefined | null): WalletBala
 
     let isMounted = true;
     const readBalance = async () => {
+      inFlightRef.current = true;
       setLoading(true);
       setError(null);
       try {
         const result = await fetchEthBalance(address);
         if (isMounted) {
-          setFormatted(result.formatted);
+          setFormatted(prev => (prev === result.formatted ? prev : result.formatted));
         }
       } catch (balanceError) {
         if (isMounted) {
           const message = balanceError instanceof Error ? balanceError.message : String(balanceError);
-          setError(message);
+          setError(prev => (prev === message ? prev : message));
         }
       } finally {
+        inFlightRef.current = false;
         if (isMounted) {
           setLoading(false);
+          if (queuedRefreshRef.current) {
+            queuedRefreshRef.current = false;
+            setRequestId(prev => prev + 1);
+          }
         }
       }
     };
@@ -50,6 +58,10 @@ export const useWalletBalance = (address: string | undefined | null): WalletBala
   }, [address, requestId]);
 
   const refresh = useCallback(() => {
+    if (inFlightRef.current) {
+      queuedRefreshRef.current = true;
+      return;
+    }
     setRequestId(prev => prev + 1);
   }, []);
 

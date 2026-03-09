@@ -6,12 +6,10 @@ export type RootStackParamList = {
   [ROUTES.Welcome]: undefined;
   [ROUTES.LoginPin]: undefined;
   [ROUTES.ActivatePin]: undefined;
-  [ROUTES.NfcScan]:
-    | {
-        initialMode?: ScanMode;
-        pin?: string;
-      }
-    | undefined;
+  [ROUTES.EcdhBackup]: undefined;
+  [ROUTES.Settings]: undefined;
+  [ROUTES.General]: undefined;
+  [ROUTES.ChangePin]: undefined;
   [ROUTES.Home]: {
     ethAddress: string;
     publicKeyHex?: string;

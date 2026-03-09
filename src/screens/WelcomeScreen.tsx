@@ -1,27 +1,26 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   StatusBar,
   StyleSheet,
   Text,
   View,
   Animated,
-  Dimensions,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppButton } from '../components/AppButton';
-import { FloatingOrb } from '../components/ui/animations/FloatingOrb';
 import { useEntranceAnimation } from '../components/ui/animations/useEntranceAnimation';
+import { useSettings } from '../features/settings';
 import { ROUTES } from '../navigation/routes/routes';
 import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
-import { THEME } from '../types/theme/colors';
+import type { ThemeTokens } from '../types/theme/colors';
 
 type Props = NativeStackScreenProps<RootStackParamList, typeof ROUTES.Welcome>;
 
-const { width, height } = Dimensions.get('window');
-
 export const WelcomeScreen: React.FC<Props> = ({ navigation }) => {
+  const { resolvedTheme, t, themeTokens } = useSettings();
+  const styles = useMemo(() => createStyles(themeTokens), [themeTokens]);
   const { animatedStyle: heroAnimation } = useEntranceAnimation({ translateInitial: 40, fadeDuration: 700 });
   const { animatedStyle: buttonsAnimation } = useEntranceAnimation({ translateInitial: 24, delay: 200 });
 
@@ -35,31 +34,10 @@ export const WelcomeScreen: React.FC<Props> = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={THEME.background} />
-
-      {/* Ambient background */}
-      <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-        <FloatingOrb
-          color={THEME.primary}
-          size={360}
-          initial={{ x: -80, y: -80 }}
-          duration={12000}
-        />
-        <FloatingOrb
-          color="#2A3140"
-          size={260}
-          initial={{ x: width - 220, y: height / 3 }}
-          duration={14000}
-          drift={{ x: 40, y: -30 }}
-        />
-        <FloatingOrb
-          color="#1E232B"
-          size={240}
-          initial={{ x: 40, y: height - 260 }}
-          duration={11000}
-          drift={{ x: -32, y: 24 }}
-        />
-      </View>
+      <StatusBar
+        barStyle={resolvedTheme === 'light' ? 'dark-content' : 'light-content'}
+        backgroundColor={themeTokens.background}
+      />
 
       <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
         <View style={styles.content}>
@@ -72,17 +50,17 @@ export const WelcomeScreen: React.FC<Props> = ({ navigation }) => {
             </View>
 
             <View style={styles.textBlock}>
-              <Text style={styles.title}>Your keys,{"\n"}on the card.</Text>
+              <Text style={styles.title}>{t('welcomeTitle')}</Text>
               <Text style={styles.subtitle}>
-                Chainora keeps your private key locked inside a physical smart card — never on your phone, never in the cloud.
+                {t('welcomeSubtitle')}
               </Text>
             </View>
           </Animated.View>
 
           <Animated.View style={[styles.actions, buttonsAnimation]}>
-            <AppButton label="Log In" onPress={handleLogin} />
+            <AppButton label={t('welcomeLoginButton')} onPress={handleLogin} />
             <View style={styles.spacer} />
-            <AppButton label="Activate New Card" onPress={handleActivate} variant="secondary" />
+            <AppButton label={t('welcomeActivateButton')} onPress={handleActivate} variant="secondary" />
           </Animated.View>
         </View>
       </SafeAreaView>
@@ -90,10 +68,10 @@ export const WelcomeScreen: React.FC<Props> = ({ navigation }) => {
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ThemeTokens) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: THEME.background,
+    backgroundColor: theme.background,
   },
   safeArea: {
     flex: 1,
@@ -113,9 +91,9 @@ const styles = StyleSheet.create({
     maxWidth: 360,
     aspectRatio: 1.5,
     borderRadius: 28,
-    backgroundColor: THEME.surfaceHighlight,
+    backgroundColor: theme.surfaceHighlight,
     borderWidth: 1,
-    borderColor: THEME.border,
+    borderColor: theme.border,
     overflow: 'hidden',
     padding: 20,
     justifyContent: 'space-between',
@@ -124,9 +102,9 @@ const styles = StyleSheet.create({
     width: 52,
     height: 36,
     borderRadius: 10,
-    backgroundColor: '#1B222C',
+    backgroundColor: theme.surface,
     borderWidth: 1,
-    borderColor: '#3B4454',
+    borderColor: theme.border,
   },
   cardWaves: {
     alignSelf: 'flex-end',
@@ -134,21 +112,21 @@ const styles = StyleSheet.create({
     height: 120,
     borderRadius: 60,
     borderWidth: 1,
-    borderColor: 'rgba(191, 164, 106, 0.5)',
+    borderColor: theme.primaryLight,
     borderStyle: 'solid',
   },
   textBlock: {
     gap: 12,
   },
   title: {
-    fontSize: THEME.typography.title,
+    fontSize: theme.typography.title,
     fontWeight: '800',
-    color: THEME.foreground,
+    color: theme.foreground,
     letterSpacing: -0.5,
   },
   subtitle: {
-    fontSize: THEME.typography.subtext,
-    color: THEME.foregroundMuted,
+    fontSize: theme.typography.subtext,
+    color: theme.foregroundMuted,
     lineHeight: 20,
   },
   actions: {

@@ -1,4 +1,4 @@
-import { keccak_256 } from '@noble/hashes/sha3';
+import { keccak_256 } from '@noble/hashes/sha3.js';
 
 import { buildSelectApdu, parseApduResponse } from '../lib/apdu';
 import { withIsoDep, IsoDepClient } from '../lib/nfc/isoDepClient';
@@ -16,6 +16,19 @@ const INS = {
   GEN_KEY_PAIR: 0x20,
   GET_PUBLIC_KEY: 0x21,
   SIGN_HASH: 0x22,
+  BACKUP_SESSION: 0x30,
+  BACKUP_EXPORT: 0x31,
+  BACKUP_IMPORT: 0x32,
+} as const;
+
+const P1_BACKUP = {
+  GET_FACTORY_CSR: 0x10,
+  SET_DEVICE_CERT: 0x11,
+  GET_DEVICE_CERT: 0x00,
+  START_LINK_PROOF: 0x01,
+  LOAD_PEER_CERT: 0x02,
+  LOAD_PEER_LINK_PROOF: 0x03,
+  CLEAR_LINK_STATE: 0x04,
 } as const;
 
 type WalletCommandOptions = {
@@ -30,12 +43,16 @@ export type WalletActionCode =
   | 'PIN_ALREADY_INITIALISED'
   | 'PIN_NOT_INITIALISED'
   | 'PIN_INVALID'
+  | 'PIN_UPDATE_FAILED'
   | 'KEYPAIR_FAILURE'
   | 'PUBLIC_KEY_FAILURE'
   | 'RESET_FAILED'
   | 'SELECT_FAILED'
   | 'PIN_STATE_UNAVAILABLE'
   | 'TRANSPORT_ERROR'
+  | 'BACKUP_INIT_FAILED'
+  | 'BACKUP_EXPORT_FAILED'
+  | 'BACKUP_IMPORT_FAILED'
   | 'UNKNOWN';
 
 export type WalletActionResult = {
@@ -199,6 +216,18 @@ const ensureHashLength = (hash: Uint8Array) => {
   }
 };
 
+const buildUpdatePinPayload = (currentPin: string, nextPin: string): Uint8Array => {
+  const currentPinBytes = encodePin(currentPin);
+  const nextPinBytes = encodePin(nextPin);
+
+  const payload = new Uint8Array(1 + currentPinBytes.length + nextPinBytes.length);
+  payload[0] = currentPinBytes.length;
+  payload.set(currentPinBytes, 1);
+  payload.set(nextPinBytes, 1 + currentPinBytes.length);
+
+  return payload;
+};
+
 export const initialiseWallet = async (pin: string): Promise<WalletActionResult> => {
   try {
     return await withIsoDep(async isoDep => {
@@ -222,22 +251,61 @@ export const initialiseWallet = async (pin: string): Promise<WalletActionResult>
         return walletError('initPin', 'PIN initialisation failed on the card.', code, initResponse.statusWord.hex);
       }
 
-      const generateResponse = await sendWalletCommand(isoDep, { ins: INS.GEN_KEY_PAIR });
-      if (!generateResponse.statusWord.ok) {
-        return walletError('generateKeyPair', 'Key pair generation failed on the card.', 'KEYPAIR_FAILURE', generateResponse.statusWord.hex);
-      }
       const verifyResponse = await sendWalletCommand(isoDep, { ins: INS.VERIFY_PIN, data: encodePin(pin) });
       if (!verifyResponse.statusWord.ok) {
         const code: WalletActionCode = verifyResponse.statusWord.hex === '6982' ? 'PIN_INVALID' : 'UNKNOWN';
         const message = code === 'PIN_INVALID' ? 'PIN incorrect. Try again.' : 'PIN verification failed on the card.';
         return walletError('verifyPin', message, code, verifyResponse.statusWord.hex);
       }
+
+      const generateResponse = await sendWalletCommand(isoDep, { ins: INS.GEN_KEY_PAIR });
+      if (!generateResponse.statusWord.ok) {
+        console.log(generateResponse);
+        return walletError('generateKeyPair', 'Key pair generation failed on the card.', 'KEYPAIR_FAILURE', generateResponse.statusWord.hex);
+      }
+      
       const publicKeyResponse = await sendWalletCommand(isoDep, { ins: INS.GET_PUBLIC_KEY, le: 0x00 });
       if (!publicKeyResponse.statusWord.ok) {
         return walletError('readPublicKey', 'Failed to retrieve the public key from the card.', 'PUBLIC_KEY_FAILURE', publicKeyResponse.statusWord.hex);
       }
-
+      
       return buildInfoResult('Wallet initialised successfully.', publicKeyResponse.statusWord.hex, publicKeyResponse.data);
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return transportError(message);
+  }
+};
+
+export const initialisePinOnly = async (pin: string): Promise<WalletActionResult> => {
+  try {
+    return await withIsoDep(async isoDep => {
+      const selectError = await ensureWalletSelected(isoDep);
+      if (selectError) {
+        return selectError;
+      }
+
+      const pinState = await sendWalletCommand(isoDep, { ins: INS.IS_PIN_INITIALIZED, le: 0x01 });
+      if (!pinState.statusWord.ok) {
+        return walletError('pinState', 'Unable to determine PIN state.', 'PIN_STATE_UNAVAILABLE', pinState.statusWord.hex);
+      }
+
+      if (isPinInitialised(pinState.data)) {
+        return walletError('pinState', 'PIN already initialised on this card.', 'PIN_ALREADY_INITIALISED', pinState.statusWord.hex);
+      }
+
+      const initResponse = await sendWalletCommand(isoDep, { ins: INS.INIT_PIN, data: encodePin(pin) });
+      if (!initResponse.statusWord.ok) {
+        const code: WalletActionCode = initResponse.statusWord.hex === '6985' ? 'PIN_ALREADY_INITIALISED' : 'UNKNOWN';
+        return walletError('initPin', 'PIN initialisation failed on the card.', code, initResponse.statusWord.hex);
+      }
+
+      return {
+        ok: true,
+        message: 'Card PIN initialised successfully.',
+        statusWord: initResponse.statusWord.hex,
+        step: 'initPinOnly',
+      };
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -275,6 +343,40 @@ export const signInWallet = async (pin: string): Promise<WalletActionResult> => 
       }
 
       return buildInfoResult('Wallet unlocked successfully.', publicKeyResponse.statusWord.hex, publicKeyResponse.data);
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return transportError(message);
+  }
+};
+
+export const changeWalletPin = async (currentPin: string, nextPin: string): Promise<WalletActionResult> => {
+  try {
+    return await withIsoDep(async isoDep => {
+      const selectError = await ensureWalletSelected(isoDep);
+      if (selectError) {
+        return selectError;
+      }
+
+      const verifyResponse = await sendWalletCommand(isoDep, { ins: INS.VERIFY_PIN, data: encodePin(currentPin) });
+      if (!verifyResponse.statusWord.ok) {
+        const code: WalletActionCode = verifyResponse.statusWord.hex === '6982' ? 'PIN_INVALID' : 'PIN_UPDATE_FAILED';
+        const message = code === 'PIN_INVALID' ? 'Current PIN is incorrect.' : 'PIN verification failed on the card.';
+        return walletError('verifyCurrentPin', message, code, verifyResponse.statusWord.hex);
+      }
+
+      const updatePayload = buildUpdatePinPayload(currentPin, nextPin);
+      const updateResponse = await sendWalletCommand(isoDep, { ins: INS.UPDATE_PIN, data: updatePayload });
+      if (!updateResponse.statusWord.ok) {
+        return walletError('updatePin', 'Failed to update PIN on the card.', 'PIN_UPDATE_FAILED', updateResponse.statusWord.hex);
+      }
+
+      return {
+        ok: true,
+        message: 'PIN changed successfully.',
+        statusWord: updateResponse.statusWord.hex,
+        step: 'updatePin',
+      };
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -344,6 +446,270 @@ export const signTransactionHash = async (pin: string, hash: Uint8Array): Promis
         step: 'signHash',
         signatureDer: signatureBytes,
         signatureDerHex: bytesToHex(signatureBytes),
+      };
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return transportError(message);
+  }
+};
+
+export type BackupDestinationData = WalletActionResult & {
+  deviceCert?: Uint8Array;
+  linkProof?: Uint8Array;
+};
+
+export const prepareBackupDestination = async (pin: string): Promise<BackupDestinationData> => {
+  try {
+    return await withIsoDep(async isoDep => {
+      const selectError = await ensureWalletSelected(isoDep);
+      if (selectError) return selectError;
+
+      const verifyResponse = await sendWalletCommand(isoDep, { ins: INS.VERIFY_PIN, data: encodePin(pin) });
+      if (!verifyResponse.statusWord.ok) {
+        return walletError('verifyPin', 'PIN verification failed.', 'PIN_INVALID', verifyResponse.statusWord.hex);
+      }
+
+      const clearState = await sendWalletCommand(isoDep, { 
+        ins: INS.BACKUP_SESSION, 
+        p1: P1_BACKUP.CLEAR_LINK_STATE 
+      });
+      if (!clearState.statusWord.ok) {
+        return walletError('clearState', 'Failed to clear session state.', 'BACKUP_INIT_FAILED', clearState.statusWord.hex);
+      }
+
+      const getCert = await sendWalletCommand(isoDep, { 
+        ins: INS.BACKUP_SESSION, 
+        p1: P1_BACKUP.GET_DEVICE_CERT 
+      });
+      if (!getCert.statusWord.ok) {
+        return walletError('getDeviceCert', 'Failed to get device certificate.', 'BACKUP_INIT_FAILED', getCert.statusWord.hex);
+      }
+      const deviceCert = getCert.data;
+
+      const getLinkProof = await sendWalletCommand(isoDep, { 
+        ins: INS.BACKUP_SESSION, 
+        p1: P1_BACKUP.START_LINK_PROOF 
+      });
+      if (!getLinkProof.statusWord.ok) {
+        return walletError('startLinkProof', 'Failed to generate link proof.', 'BACKUP_INIT_FAILED', getLinkProof.statusWord.hex);
+      }
+      const linkProof = getLinkProof.data;
+
+      return {
+        ok: true,
+        message: 'Destination prepared successfully.',
+        step: 'prepareBackupDestination',
+        deviceCert,
+        linkProof,
+      };
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return transportError(message);
+  }
+};
+
+export const initialisePinAndPrepareBackupDestination = async (pin: string): Promise<BackupDestinationData> => {
+  try {
+    return await withIsoDep(async isoDep => {
+      const selectError = await ensureWalletSelected(isoDep);
+      if (selectError) return selectError;
+
+      const pinState = await sendWalletCommand(isoDep, { ins: INS.IS_PIN_INITIALIZED, le: 0x01 });
+      if (!pinState.statusWord.ok) {
+        return walletError('pinState', 'Unable to determine PIN state.', 'PIN_STATE_UNAVAILABLE', pinState.statusWord.hex);
+      }
+
+      if (isPinInitialised(pinState.data)) {
+        return walletError('pinState', 'PIN already initialised on this card.', 'PIN_ALREADY_INITIALISED', pinState.statusWord.hex);
+      }
+
+      const initResponse = await sendWalletCommand(isoDep, { ins: INS.INIT_PIN, data: encodePin(pin) });
+      if (!initResponse.statusWord.ok) {
+        const code: WalletActionCode = initResponse.statusWord.hex === '6985' ? 'PIN_ALREADY_INITIALISED' : 'UNKNOWN';
+        return walletError('initPin', 'PIN initialisation failed on the secondary card.', code, initResponse.statusWord.hex);
+      }
+
+      const verifyResponse = await sendWalletCommand(isoDep, { ins: INS.VERIFY_PIN, data: encodePin(pin) });
+      if (!verifyResponse.statusWord.ok) {
+        const code: WalletActionCode = verifyResponse.statusWord.hex === '6982' ? 'PIN_INVALID' : 'UNKNOWN';
+        const message = code === 'PIN_INVALID' ? 'Secondary PIN incorrect. Try again.' : 'Secondary PIN verification failed on the card.';
+        return walletError('verifyPin', message, code, verifyResponse.statusWord.hex);
+      }
+
+      const clearState = await sendWalletCommand(isoDep, {
+        ins: INS.BACKUP_SESSION,
+        p1: P1_BACKUP.CLEAR_LINK_STATE,
+      });
+      if (!clearState.statusWord.ok) {
+        return walletError('clearState', 'Failed to clear session state.', 'BACKUP_INIT_FAILED', clearState.statusWord.hex);
+      }
+
+      const getCert = await sendWalletCommand(isoDep, {
+        ins: INS.BACKUP_SESSION,
+        p1: P1_BACKUP.GET_DEVICE_CERT,
+      });
+      if (!getCert.statusWord.ok) {
+        return walletError('getDeviceCert', 'Failed to get device certificate.', 'BACKUP_INIT_FAILED', getCert.statusWord.hex);
+      }
+
+      const getLinkProof = await sendWalletCommand(isoDep, {
+        ins: INS.BACKUP_SESSION,
+        p1: P1_BACKUP.START_LINK_PROOF,
+      });
+      if (!getLinkProof.statusWord.ok) {
+        return walletError('startLinkProof', 'Failed to generate link proof.', 'BACKUP_INIT_FAILED', getLinkProof.statusWord.hex);
+      }
+
+      return {
+        ok: true,
+        message: 'Secondary card initialised and prepared successfully.',
+        step: 'initPinAndPrepareBackupDestination',
+        deviceCert: getCert.data,
+        linkProof: getLinkProof.data,
+      };
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return transportError(message);
+  }
+};
+
+export type BackupExportResult = WalletActionResult & {
+  envelope?: Uint8Array;
+  sourceCert?: Uint8Array;
+  sourceLinkProof?: Uint8Array;
+};
+
+export const performBackupExport = async (
+  pin: string, 
+  peerCert: Uint8Array, 
+  peerLinkProof: Uint8Array
+): Promise<BackupExportResult> => {
+  try {
+    return await withIsoDep(async isoDep => {
+      const selectError = await ensureWalletSelected(isoDep);
+      if (selectError) return selectError;
+
+      const verifyResponse = await sendWalletCommand(isoDep, { ins: INS.VERIFY_PIN, data: encodePin(pin) });
+      if (!verifyResponse.statusWord.ok) {
+        return walletError('verifyPin', 'PIN verification failed.', 'PIN_INVALID', verifyResponse.statusWord.hex);
+      }
+      
+      const clearState = await sendWalletCommand(isoDep, { 
+        ins: INS.BACKUP_SESSION, 
+        p1: P1_BACKUP.CLEAR_LINK_STATE 
+      });
+      if (!clearState.statusWord.ok) {
+        return walletError('clearState', 'Failed to clear session state.', 'BACKUP_EXPORT_FAILED', clearState.statusWord.hex);
+      }
+
+      // Get Source Cert
+      const getCert = await sendWalletCommand(isoDep, { 
+        ins: INS.BACKUP_SESSION, 
+        p1: P1_BACKUP.GET_DEVICE_CERT 
+      });
+      if (!getCert.statusWord.ok) {
+        return walletError('sourceGetCert', 'Failed to get source certificate.', 'BACKUP_EXPORT_FAILED', getCert.statusWord.hex);
+      }
+      const sourceCert = getCert.data;
+
+      // Start Link Proof (Source)
+      const getLinkProof = await sendWalletCommand(isoDep, { 
+        ins: INS.BACKUP_SESSION, 
+        p1: P1_BACKUP.START_LINK_PROOF 
+      });
+      if (!getLinkProof.statusWord.ok) {
+        return walletError('sourceStartLinkProof', 'Source failed to start link proof.', 'BACKUP_EXPORT_FAILED', getLinkProof.statusWord.hex);
+      }
+      const sourceLinkProof = getLinkProof.data;
+
+      const loadCert = await sendWalletCommand(isoDep, { 
+        ins: INS.BACKUP_SESSION, 
+        p1: P1_BACKUP.LOAD_PEER_CERT,
+        data: peerCert 
+      });
+      if (!loadCert.statusWord.ok) {
+        return walletError('loadPeerCert', 'Failed to load destination certificate.', 'BACKUP_EXPORT_FAILED', loadCert.statusWord.hex);
+      }
+
+      const loadProof = await sendWalletCommand(isoDep, { 
+        ins: INS.BACKUP_SESSION, 
+        p1: P1_BACKUP.LOAD_PEER_LINK_PROOF,
+        data: peerLinkProof 
+      });
+      if (!loadProof.statusWord.ok) {
+        return walletError('loadPeerProof', 'Failed to load destination link proof.', 'BACKUP_EXPORT_FAILED', loadProof.statusWord.hex);
+      }
+
+      const exportCmd = await sendWalletCommand(isoDep, { ins: INS.BACKUP_EXPORT });
+      if (!exportCmd.statusWord.ok) {
+        return walletError('backupExport', 'Failed to export backup envelope.', 'BACKUP_EXPORT_FAILED', exportCmd.statusWord.hex);
+      }
+      
+      return {
+        ok: true,
+        message: 'Backup exported successfully.',
+        step: 'performBackupExport',
+        envelope: exportCmd.data,
+        sourceCert,
+        sourceLinkProof,
+      };
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return transportError(message);
+  }
+};
+
+export const performBackupImport = async (
+  pin: string,
+  peerCert: Uint8Array,
+  peerLinkProof: Uint8Array,
+  envelope: Uint8Array
+): Promise<WalletActionResult> => {
+  try {
+    return await withIsoDep(async isoDep => {
+      const selectError = await ensureWalletSelected(isoDep);
+      if (selectError) return selectError;
+
+      const verifyResponse = await sendWalletCommand(isoDep, { ins: INS.VERIFY_PIN, data: encodePin(pin) });
+      if (!verifyResponse.statusWord.ok) {
+        return walletError('verifyPin', 'PIN verification failed.', 'PIN_INVALID', verifyResponse.statusWord.hex);
+      }
+      
+      const loadCert = await sendWalletCommand(isoDep, { 
+        ins: INS.BACKUP_SESSION, 
+        p1: P1_BACKUP.LOAD_PEER_CERT,
+        data: peerCert 
+      });
+      if (!loadCert.statusWord.ok) {
+        return walletError('loadPeerCert', 'Failed to load source certificate.', 'BACKUP_IMPORT_FAILED', loadCert.statusWord.hex);
+      }
+
+      const loadProof = await sendWalletCommand(isoDep, { 
+        ins: INS.BACKUP_SESSION, 
+        p1: P1_BACKUP.LOAD_PEER_LINK_PROOF,
+        data: peerLinkProof 
+      });
+      if (!loadProof.statusWord.ok) {
+        return walletError('loadPeerProof', 'Failed to load source link proof.', 'BACKUP_IMPORT_FAILED', loadProof.statusWord.hex);
+      }
+
+      const importCmd = await sendWalletCommand(isoDep, { 
+        ins: INS.BACKUP_IMPORT, 
+        data: envelope 
+      });
+      if (!importCmd.statusWord.ok) {
+        return walletError('backupImport', 'Failed to import backup.', 'BACKUP_IMPORT_FAILED', importCmd.statusWord.hex);
+      }
+
+      return {
+        ok: true,
+        message: 'Backup imported successfully.',
+        step: 'performBackupImport',
+        statusWord: importCmd.statusWord.hex,
       };
     });
   } catch (error) {

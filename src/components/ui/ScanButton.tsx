@@ -81,6 +81,7 @@ export const ScanButton: React.FC<ScanButtonProps> = ({
       <Animated.View
         style={[
           styles.glowRing,
+          // eslint-disable-next-line react-native/no-inline-styles
           {
             opacity: disabled ? 0 : glowAnim,
             transform: [{ scale: pulseAnim }],

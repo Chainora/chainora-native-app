@@ -1,16 +1,19 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Alert, StatusBar, StyleSheet, Text, View, Pressable } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
+import { useSettings } from '../features/settings';
 import { ROUTES } from '../navigation/routes/routes';
 import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
-import { THEME } from '../types/theme/colors';
+import type { ThemeTokens } from '../types/theme/colors';
 
 type Props = NativeStackScreenProps<RootStackParamList, typeof ROUTES.ActivateSuccess>;
 
 export const ActivateSuccessScreen: React.FC<Props> = ({ route, navigation }) => {
+  const { resolvedTheme, t, themeTokens } = useSettings();
+  const styles = useMemo(() => createStyles(themeTokens), [themeTokens]);
   const { ethAddress, publicKeyHex, mode } = route.params;
   const hasNavigatedRef = useRef(false);
 
@@ -43,12 +46,15 @@ export const ActivateSuccessScreen: React.FC<Props> = ({ route, navigation }) =>
   }, [goToHome]);
 
   const handleCopyPress = useCallback(() => {
-    Alert.alert('Wallet address', ethAddress);
-  }, [ethAddress]);
+    Alert.alert(t('activateSuccessWalletAddressTitle'), ethAddress);
+  }, [ethAddress, t]);
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={THEME.background} />
+      <StatusBar
+        barStyle={resolvedTheme === 'light' ? 'dark-content' : 'light-content'}
+        backgroundColor={themeTokens.background}
+      />
       <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
         <View style={styles.frame}>
           <View style={styles.notch} />
@@ -56,18 +62,18 @@ export const ActivateSuccessScreen: React.FC<Props> = ({ route, navigation }) =>
           <View style={styles.centerGroup}>
             <View style={styles.successOuter}>
               <View style={styles.successInner}>
-                <Ionicons name="checkmark-circle-outline" size={44} color="#1ED760" />
+                <Ionicons name="checkmark-circle-outline" size={44} color={themeTokens.success} />
               </View>
             </View>
-            <Text style={styles.title}>Wallet Activated!</Text>
-            <Text style={styles.subtitle}>Your card is ready to use.</Text>
+            <Text style={styles.title}>{t('activateSuccessWalletActivated')}</Text>
+            <Text style={styles.subtitle}>{t('activateSuccessCardReady')}</Text>
           </View>
 
           <View style={styles.divider} />
 
           <View style={styles.walletCard}>
             <View style={styles.cardTapIconWrap}>
-              <Ionicons name="wifi-outline" size={21} color="#7E8799" style={styles.cardTapIcon} />
+              <Ionicons name="wifi-outline" size={21} color={themeTokens.foregroundMuted} style={styles.cardTapIcon} />
             </View>
             <View style={styles.chip} />
             <Text style={styles.brand}>CHAINORA</Text>
@@ -76,17 +82,17 @@ export const ActivateSuccessScreen: React.FC<Props> = ({ route, navigation }) =>
 
           <View style={styles.addressBox}>
             <View style={styles.addressTextWrap}>
-              <Text style={styles.addressLabel}>Your wallet address</Text>
+              <Text style={styles.addressLabel}>{t('activateSuccessAddressLabel')}</Text>
               <Text style={styles.addressValue}>{ethAddress}</Text>
             </View>
             <Pressable style={styles.copyButton} accessibilityRole="button" onPress={handleCopyPress}>
-              <Ionicons name="copy-outline" size={22} color="#B8C0CF" />
+              <Ionicons name="copy-outline" size={22} color={themeTokens.foregroundMuted} />
             </Pressable>
           </View>
 
           <View style={styles.noteBox}>
             <Text style={styles.noteText}>
-              Share this address to receive ETH. Your private key never leaves the card.
+              {t('activateSuccessShareNote')}
             </Text>
           </View>
 
@@ -97,10 +103,10 @@ export const ActivateSuccessScreen: React.FC<Props> = ({ route, navigation }) =>
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ThemeTokens) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#03060A',
+    backgroundColor: theme.background,
   },
   safeArea: {
     flex: 1,
@@ -111,8 +117,8 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 44,
     borderWidth: 1,
-    borderColor: 'rgba(81, 92, 110, 0.25)',
-    backgroundColor: '#050A10',
+    borderColor: theme.border,
+    backgroundColor: theme.surface,
     paddingTop: 22,
     paddingHorizontal: 18,
     paddingBottom: 22,
@@ -122,7 +128,7 @@ const styles = StyleSheet.create({
     height: 42,
     alignSelf: 'center',
     borderRadius: 22,
-    backgroundColor: '#020306',
+    backgroundColor: theme.background,
     marginBottom: 30,
   },
   centerGroup: {
@@ -132,9 +138,9 @@ const styles = StyleSheet.create({
     width: 100,
     height: 100,
     borderRadius: 50,
-    backgroundColor: 'rgba(30, 215, 96, 0.12)',
+    backgroundColor: theme.glow,
     borderWidth: 1,
-    borderColor: 'rgba(30, 215, 96, 0.42)',
+    borderColor: theme.success,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 22,
@@ -150,7 +156,7 @@ const styles = StyleSheet.create({
     fontSize: 52,
     lineHeight: 56,
     fontWeight: '800',
-    color: '#EAF0F8',
+    color: theme.foreground,
     textAlign: 'center',
     letterSpacing: -1,
   },
@@ -159,12 +165,12 @@ const styles = StyleSheet.create({
     fontSize: 20,
     lineHeight: 28,
     fontWeight: '500',
-    color: '#A5B1C2',
+    color: theme.foregroundMuted,
     textAlign: 'center',
   },
   divider: {
     height: 1,
-    backgroundColor: 'rgba(126, 138, 161, 0.16)',
+    backgroundColor: theme.border,
     marginTop: 34,
   },
   walletCard: {
@@ -172,9 +178,9 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     minHeight: 160,
     padding: 16,
-    backgroundColor: 'rgba(3, 6, 10, 0.7)',
+    backgroundColor: theme.surfaceHighlight,
     borderWidth: 1,
-    borderColor: 'rgba(71, 82, 103, 0.24)',
+    borderColor: theme.border,
   },
   cardTapIconWrap: {
     alignItems: 'flex-end',
@@ -188,19 +194,19 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(117, 136, 166, 0.42)',
-    backgroundColor: 'rgba(81, 104, 142, 0.2)',
+    borderColor: theme.border,
+    backgroundColor: theme.surface,
     marginBottom: 20,
   },
   brand: {
-    color: 'rgba(90, 109, 139, 0.3)',
+    color: theme.foregroundMuted,
     fontSize: 22,
     fontWeight: '800',
     letterSpacing: 2,
   },
   shortAddress: {
     marginTop: 8,
-    color: '#79859A',
+    color: theme.foregroundMuted,
     fontSize: 30,
     lineHeight: 34,
     fontWeight: '500',
@@ -210,8 +216,8 @@ const styles = StyleSheet.create({
     marginTop: 20,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#2A3A56',
-    backgroundColor: '#111A29',
+    borderColor: theme.border,
+    backgroundColor: theme.surfaceHighlight,
     paddingVertical: 16,
     paddingLeft: 16,
     paddingRight: 12,
@@ -223,13 +229,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   addressLabel: {
-    color: '#6E7C95',
+    color: theme.foregroundMuted,
     fontSize: 12,
     marginBottom: 8,
     fontWeight: '600',
   },
   addressValue: {
-    color: '#E6ECF5',
+    color: theme.foreground,
     fontSize: 30,
     lineHeight: 36,
     fontWeight: '700',
@@ -239,9 +245,9 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 13,
-    backgroundColor: 'rgba(69, 86, 112, 0.35)',
+    backgroundColor: theme.surface,
     borderWidth: 1,
-    borderColor: 'rgba(100, 117, 145, 0.5)',
+    borderColor: theme.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -249,21 +255,21 @@ const styles = StyleSheet.create({
     marginTop: 14,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(80, 92, 114, 0.4)',
-    backgroundColor: 'rgba(33, 42, 58, 0.75)',
+    borderColor: theme.border,
+    backgroundColor: theme.surface,
     paddingVertical: 16,
     paddingHorizontal: 18,
   },
   noteText: {
     textAlign: 'center',
-    color: '#7E8AA2',
+    color: theme.foregroundMuted,
     fontSize: 12,
     lineHeight: 20,
     fontWeight: '500',
   },
   footerBrand: {
     marginTop: 20,
-    color: 'rgba(29, 39, 54, 0.45)',
+    color: theme.foregroundMuted,
     fontSize: 22,
     fontWeight: '800',
     letterSpacing: 1.2,

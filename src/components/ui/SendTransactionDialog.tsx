@@ -16,6 +16,7 @@ import NfcManager from 'react-native-nfc-manager';
 
 import { AppButton } from '../AppButton';
 import { PinInput } from './PinInput';
+import { useSettings } from '../../features/settings';
 import { THEME } from '../../types/theme/colors';
 import { useNfcEnabled } from '../../features/nfc/hooks/useNfcEnabled';
 import { parseEther, sendEthTransaction, type SendEthResult } from '../../services/transactionService';
@@ -39,6 +40,7 @@ export const SendTransactionDialog: React.FC<SendTransactionDialogProps> = ({
   onClose,
   onSuccess,
 }) => {
+  const { t } = useSettings();
   const { isEnabled } = useNfcEnabled();
   const [phase, setPhase] = useState<Phase>('details');
   const [recipient, setRecipient] = useState('');
@@ -84,30 +86,30 @@ export const SendTransactionDialog: React.FC<SendTransactionDialogProps> = ({
     const trimmedAmount = amount.trim();
 
     if (!ADDRESS_REGEX.test(trimmedRecipient)) {
-      setError('Enter a valid 42 character Ethereum address.');
+      setError(t('sendErrorInvalidAddress'));
       return;
     }
 
     if (trimmedAmount.length === 0) {
-      setError('Enter an amount to send.');
+      setError(t('sendErrorAmountRequired'));
       return;
     }
 
     try {
       const wei = parseEther(trimmedAmount);
       if (wei <= 0n) {
-        setError('Amount must be greater than zero.');
+        setError(t('sendErrorAmountPositive'));
         return;
       }
       setPendingWei(wei);
       setError(null);
       setPhase('pin');
-      setStatus('Enter your PIN to authorise the transfer.');
+      setStatus(t('sendStatusAuthorize'));
     } catch (parseError) {
       const message = parseError instanceof Error ? parseError.message : String(parseError);
       setError(message);
     }
-  }, [recipient, amount]);
+  }, [amount, recipient, t]);
 
   const handleBackToDetails = useCallback(() => {
     if (isSubmitting) {
@@ -139,12 +141,12 @@ export const SendTransactionDialog: React.FC<SendTransactionDialogProps> = ({
 
   const handleSignTransaction = useCallback(async () => {
     if (pin.length < PIN_LENGTH) {
-      setError(`Enter a ${PIN_LENGTH}-digit PIN.`);
+      setError(t('sendErrorPinLength'));
       return;
     }
 
     if (!pendingWei) {
-      setError('Enter transaction details first.');
+      setError(t('sendErrorMissingDetails'));
       setPhase('details');
       return;
     }
@@ -155,7 +157,7 @@ export const SendTransactionDialog: React.FC<SendTransactionDialogProps> = ({
 
     setSubmitting(true);
     setPhase('scan');
-    setStatus('Hold your Chainora card near the device to sign.');
+    setStatus(t('sendStatusHoldCard'));
     setError(null);
 
     try {
@@ -167,7 +169,7 @@ export const SendTransactionDialog: React.FC<SendTransactionDialogProps> = ({
       });
 
       setResult(outcome);
-      setStatus('Transaction signed and broadcast successfully.');
+      setStatus(t('sendStatusSuccess'));
       setPhase('result');
       onSuccess?.(outcome);
     } catch (signError) {
@@ -178,7 +180,7 @@ export const SendTransactionDialog: React.FC<SendTransactionDialogProps> = ({
     } finally {
       setSubmitting(false);
     }
-  }, [pin, pendingWei, ensureNfcReady, fromAddress, recipient, onSuccess]);
+  }, [pin, pendingWei, ensureNfcReady, fromAddress, recipient, onSuccess, t]);
 
   const handleClose = useCallback(() => {
     if (isCloseDisabled) {
@@ -189,8 +191,8 @@ export const SendTransactionDialog: React.FC<SendTransactionDialogProps> = ({
 
   const renderDetails = () => (
     <View style={styles.section}>
-      <Text style={styles.title}>Send {network.currencySymbol}</Text>
-      <Text style={styles.subtitle}>Transfer funds using your Chainora card.</Text>
+      <Text style={styles.title}>{t('sendTitle')} {network.currencySymbol}</Text>
+      <Text style={styles.subtitle}>{t('sendSubtitle')}</Text>
 
       <View style={styles.networkSelector}>
         {networkOptions.map(option => (
@@ -216,11 +218,11 @@ export const SendTransactionDialog: React.FC<SendTransactionDialogProps> = ({
       </View>
 
       <View style={styles.fieldGroup}>
-        <Text style={styles.fieldLabel}>Recipient Address</Text>
+        <Text style={styles.fieldLabel}>{t('sendRecipientLabel')}</Text>
         <TextInput
           value={recipient}
           onChangeText={text => setRecipient(text)}
-          placeholder="0x..."
+          placeholder={t('sendRecipientPlaceholder')}
           placeholderTextColor="#64748B"
           autoCapitalize="none"
           autoCorrect={false}
@@ -229,11 +231,11 @@ export const SendTransactionDialog: React.FC<SendTransactionDialogProps> = ({
       </View>
 
       <View style={styles.fieldGroup}>
-        <Text style={styles.fieldLabel}>Amount ({network.currencySymbol})</Text>
+        <Text style={styles.fieldLabel}>{t('sendAmountLabel')} ({network.currencySymbol})</Text>
         <TextInput
           value={amount}
           onChangeText={text => setAmount(text)}
-          placeholder="0.01"
+          placeholder={t('sendAmountPlaceholder')}
           placeholderTextColor="#64748B"
           keyboardType="decimal-pad"
           style={styles.input}
@@ -242,49 +244,49 @@ export const SendTransactionDialog: React.FC<SendTransactionDialogProps> = ({
 
       {error && <Text style={styles.errorText}>{error}</Text>}
 
-      <AppButton label="Continue" onPress={handleValidateDetails} />
-      <AppButton label="Cancel" onPress={handleClose} variant="text" style={styles.secondaryAction} />
+      <AppButton label={t('sendContinue')} onPress={handleValidateDetails} />
+      <AppButton label={t('commonCancel')} onPress={handleClose} variant="text" style={styles.secondaryAction} />
     </View>
   );
 
   const renderPin = () => (
     <View style={styles.section}>
-      <Text style={styles.title}>Authorise Transfer</Text>
-      <Text style={styles.subtitle}>{status || 'Enter your card PIN to continue.'}</Text>
+      <Text style={styles.title}>{t('sendStatusAuthorize')}</Text>
+      <Text style={styles.subtitle}>{status || t('sendStatusEnterPin')}</Text>
 
       <PinInput value={pin} onChange={setPin} autoFocus length={PIN_LENGTH} />
 
       {error && <Text style={styles.errorText}>{error}</Text>}
 
-      <AppButton label="Start Scan" onPress={handleSignTransaction} disabled={isSubmitting} />
-      <AppButton label="Back" onPress={handleBackToDetails} variant="text" style={styles.secondaryAction} />
+      <AppButton label={t('sendStartScan')} onPress={handleSignTransaction} disabled={isSubmitting} />
+      <AppButton label={t('sendBack')} onPress={handleBackToDetails} variant="text" style={styles.secondaryAction} />
     </View>
   );
 
   const renderScan = () => (
     <View style={styles.section}>
-      <Text style={styles.title}>Ready To Scan</Text>
-      <Text style={styles.subtitle}>{status || 'Hold the card near your device until the scan completes.'}</Text>
+      <Text style={styles.title}>{t('sendReadyToScan')}</Text>
+      <Text style={styles.subtitle}>{status || t('sendStatusHoldCard')}</Text>
       <View style={styles.loadingArea}>
         <ActivityIndicator size="large" color={THEME.primary} />
       </View>
-      <AppButton label="Scanning..." disabled style={styles.disabledButton} />
+      <AppButton label={t('sendScanning')} disabled style={styles.disabledButton} />
     </View>
   );
 
   const renderResult = () => (
     <View style={styles.section}>
-      <Text style={styles.title}>Transaction Sent</Text>
+      <Text style={styles.title}>{t('sendTransactionSent')}</Text>
       <Text style={styles.subtitle}>{status}</Text>
       {result && (
         <View style={styles.resultCard}>
-          <Text style={styles.resultLabel}>Transaction Hash</Text>
+          <Text style={styles.resultLabel}>{t('sendTxHash')}</Text>
           <Text style={styles.resultValue} selectable>
             {result.transactionHash}
           </Text>
         </View>
       )}
-      <AppButton label="Done" onPress={handleClose} />
+      <AppButton label={t('sendDone')} onPress={handleClose} />
     </View>
   );
 
