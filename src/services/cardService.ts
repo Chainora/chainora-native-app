@@ -43,6 +43,7 @@ export type WalletActionCode =
   | 'PIN_ALREADY_INITIALISED'
   | 'PIN_NOT_INITIALISED'
   | 'PIN_INVALID'
+  | 'PIN_UPDATE_FAILED'
   | 'KEYPAIR_FAILURE'
   | 'PUBLIC_KEY_FAILURE'
   | 'RESET_FAILED'
@@ -215,6 +216,18 @@ const ensureHashLength = (hash: Uint8Array) => {
   }
 };
 
+const buildUpdatePinPayload = (currentPin: string, nextPin: string): Uint8Array => {
+  const currentPinBytes = encodePin(currentPin);
+  const nextPinBytes = encodePin(nextPin);
+
+  const payload = new Uint8Array(1 + currentPinBytes.length + nextPinBytes.length);
+  payload[0] = currentPinBytes.length;
+  payload.set(currentPinBytes, 1);
+  payload.set(nextPinBytes, 1 + currentPinBytes.length);
+
+  return payload;
+};
+
 export const initialiseWallet = async (pin: string): Promise<WalletActionResult> => {
   try {
     return await withIsoDep(async isoDep => {
@@ -330,6 +343,40 @@ export const signInWallet = async (pin: string): Promise<WalletActionResult> => 
       }
 
       return buildInfoResult('Wallet unlocked successfully.', publicKeyResponse.statusWord.hex, publicKeyResponse.data);
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return transportError(message);
+  }
+};
+
+export const changeWalletPin = async (currentPin: string, nextPin: string): Promise<WalletActionResult> => {
+  try {
+    return await withIsoDep(async isoDep => {
+      const selectError = await ensureWalletSelected(isoDep);
+      if (selectError) {
+        return selectError;
+      }
+
+      const verifyResponse = await sendWalletCommand(isoDep, { ins: INS.VERIFY_PIN, data: encodePin(currentPin) });
+      if (!verifyResponse.statusWord.ok) {
+        const code: WalletActionCode = verifyResponse.statusWord.hex === '6982' ? 'PIN_INVALID' : 'PIN_UPDATE_FAILED';
+        const message = code === 'PIN_INVALID' ? 'Current PIN is incorrect.' : 'PIN verification failed on the card.';
+        return walletError('verifyCurrentPin', message, code, verifyResponse.statusWord.hex);
+      }
+
+      const updatePayload = buildUpdatePinPayload(currentPin, nextPin);
+      const updateResponse = await sendWalletCommand(isoDep, { ins: INS.UPDATE_PIN, data: updatePayload });
+      if (!updateResponse.statusWord.ok) {
+        return walletError('updatePin', 'Failed to update PIN on the card.', 'PIN_UPDATE_FAILED', updateResponse.statusWord.hex);
+      }
+
+      return {
+        ok: true,
+        message: 'PIN changed successfully.',
+        statusWord: updateResponse.statusWord.hex,
+        step: 'updatePin',
+      };
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

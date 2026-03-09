@@ -14,6 +14,8 @@ type FloatingOrbProps = {
   duration?: number;
   style?: StyleProp<ViewStyle>;
   opacity?: number;
+  motion?: 'float' | 'rise';
+  riseDistance?: number;
 };
 
 export const FloatingOrb: React.FC<FloatingOrbProps> = ({
@@ -24,6 +26,8 @@ export const FloatingOrb: React.FC<FloatingOrbProps> = ({
   duration = 9000,
   style,
   opacity = 0.15,
+  motion = 'float',
+  riseDistance = 320,
 }) => {
   const position = useRef(new Animated.ValueXY(initial)).current;
   const initialX = initial.x;
@@ -32,6 +36,28 @@ export const FloatingOrb: React.FC<FloatingOrbProps> = ({
   const driftY = drift.y;
 
   useEffect(() => {
+    if (motion === 'rise') {
+      const upward = {
+        x: initialX + driftX,
+        y: initialY - Math.abs(riseDistance),
+      };
+
+      const riseLoop = Animated.loop(
+        Animated.timing(position, {
+          toValue: upward,
+          duration,
+          useNativeDriver: true,
+        }),
+      );
+
+      position.setValue({ x: initialX, y: initialY });
+      riseLoop.start();
+
+      return () => {
+        riseLoop.stop();
+      };
+    }
+
     const forward = {
       x: initialX + driftX,
       y: initialY + driftY,
@@ -65,7 +91,7 @@ export const FloatingOrb: React.FC<FloatingOrbProps> = ({
     return () => {
       loop.stop();
     };
-  }, [driftX, driftY, duration, initialX, initialY, position]);
+  }, [driftX, driftY, duration, initialX, initialY, motion, position, riseDistance]);
 
   return (
     <Animated.View

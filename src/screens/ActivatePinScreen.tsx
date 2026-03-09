@@ -1,14 +1,20 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { StatusBar, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
 import { PinKeypad } from '../components/ui/PinKeypad';
+import { ScanDialog } from '../components/ui/ScanDialog';
 import { StepProgressBar } from '../components/ui/StepProgressBar';
+import { useAuth } from '../features/auth';
+import { useNfcEnabled } from '../features/nfc/hooks/useNfcEnabled';
+import { useSettings } from '../features/settings';
+import { useToast } from '../features/toast';
 import { ROUTES } from '../navigation/routes/routes';
 import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
-import { THEME } from '../types/theme/colors';
+import type { WalletActionResult } from '../services/cardService';
+import type { ThemeTokens } from '../types/theme/colors';
 
 const PIN_LENGTH = 4;
 const TOTAL_STEPS = 2;
@@ -21,10 +27,17 @@ type Props = NativeStackScreenProps<
 >;
 
 export const ActivatePinScreen: React.FC<Props> = ({ navigation }) => {
+  const { initializeSession, completeSession } = useAuth();
+  const { isEnabled } = useNfcEnabled();
+  const { resolvedTheme, t, themeTokens } = useSettings();
+  const styles = useMemo(() => createStyles(themeTokens), [themeTokens]);
+  const { showToast } = useToast();
   const [step, setStep] = useState<Step>('create');
   const [createPin, setCreatePin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [scanVisible, setScanVisible] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const currentStepNumber = step === 'create' ? 1 : 2;
   const pinValue = step === 'create' ? createPin : confirmPin;
@@ -36,28 +49,10 @@ export const ActivatePinScreen: React.FC<Props> = ({ navigation }) => {
         if (prev.length >= PIN_LENGTH) {
           return prev;
         }
-
-        const next = `${prev}${digit}`;
-        if (next.length === PIN_LENGTH) {
-          if (step === 'create') {
-            setErrorMessage('');
-            setStep('confirm');
-            setConfirmPin('');
-          } else if (next === createPin) {
-            navigation.navigate(ROUTES.NfcScan, {
-              initialMode: 'init',
-              pin: createPin,
-            });
-          } else {
-            setErrorMessage('PINs do not match. Try again.');
-            return '';
-          }
-        }
-
-        return next;
+        return `${prev}${digit}`;
       });
     },
-    [createPin, navigation, setPinValue, step],
+    [setPinValue],
   );
 
   const handleBackspace = useCallback(() => {
@@ -65,16 +60,82 @@ export const ActivatePinScreen: React.FC<Props> = ({ navigation }) => {
     setPinValue(prev => prev.slice(0, -1));
   }, [setPinValue]);
 
-  const stepSubtitle = `Step ${currentStepNumber} of ${TOTAL_STEPS} — Secure your wallet`;
-  const title = step === 'create' ? 'Choose a 4-digit PIN' : 'Confirm your PIN';
+  const handleSubmit = useCallback(() => {
+    if (step === 'create') {
+      if (createPin.length !== PIN_LENGTH) {
+        return;
+      }
+      setErrorMessage('');
+      setStep('confirm');
+      return;
+    }
+
+    if (confirmPin.length !== PIN_LENGTH) {
+      return;
+    }
+
+    if (confirmPin !== createPin) {
+      setErrorMessage(t('activatePinsNotMatch'));
+      setConfirmPin('');
+      return;
+    }
+
+    setErrorMessage('');
+    setScanVisible(true);
+  }, [confirmPin, createPin, step, t]);
+
+  const closeScanDialog = useCallback(() => {
+    if (submitting) {
+      return;
+    }
+    setScanVisible(false);
+  }, [submitting]);
+
+  const handleScanSuccess = useCallback(
+    async ({ result }: { result: WalletActionResult }) => {
+      if (!result.ethAddress) {
+        return;
+      }
+
+      setSubmitting(true);
+      try {
+        await initializeSession(result.ethAddress);
+        await completeSession();
+        setScanVisible(false);
+        navigation.reset({
+          index: 0,
+          routes: [
+            {
+              name: ROUTES.ActivateSuccess,
+              params: {
+                ethAddress: result.ethAddress,
+                publicKeyHex: result.publicKeyHex,
+                mode: 'init',
+              },
+            },
+          ],
+        });
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [completeSession, initializeSession, navigation],
+  );
+
+  const stepSubtitle = `${t('commonStep')} ${currentStepNumber} ${t('commonOf')} ${TOTAL_STEPS} — ${t('activateSecureWalletSuffix')}`;
+  const title = step === 'create' ? t('activateChoosePinTitle') : t('activateConfirmPinTitle');
   const bodyText =
     step === 'create'
-      ? 'This PIN protects your card. Never share it.'
-      : 'Re-enter your PIN to confirm.';
+      ? t('activateChoosePinBody')
+      : t('activateConfirmPinBody');
+  const canSubmit = pinValue.length === PIN_LENGTH;
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={THEME.background} />
+      <StatusBar
+        barStyle={resolvedTheme === 'light' ? 'dark-content' : 'light-content'}
+        backgroundColor={themeTokens.background}
+      />
       <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
         <View style={styles.content}>
           <Text style={styles.stepSubtitle}>{stepSubtitle}</Text>
@@ -92,7 +153,7 @@ export const ActivatePinScreen: React.FC<Props> = ({ navigation }) => {
                     : 'checkmark-done-outline'
                 }
                 size={42}
-                color={THEME.primary}
+                color={themeTokens.primary}
               />
             </View>
             <Text style={styles.title}>{title}</Text>
@@ -116,25 +177,40 @@ export const ActivatePinScreen: React.FC<Props> = ({ navigation }) => {
           )}
 
           <View style={styles.keypadWrapper}>
-            <PinKeypad onDigit={handleDigit} onBackspace={handleBackspace} />
+            <PinKeypad
+              onDigit={handleDigit}
+              onBackspace={handleBackspace}
+              onSubmit={handleSubmit}
+              submitDisabled={!canSubmit || submitting}
+            />
           </View>
 
           <View style={styles.securityNote}>
-            <Ionicons name="lock-closed" size={18} color={THEME.primary} />
+            <Ionicons name="lock-closed" size={18} color={themeTokens.primary} />
             <Text style={styles.securityNoteText}>
-              Your PIN is stored on the card, not on your phone or any server.
+              {t('activateSecurityNote')}
             </Text>
           </View>
         </View>
+
+        <ScanDialog
+          visible={scanVisible}
+          isNfcEnabled={isEnabled}
+          onClose={closeScanDialog}
+          onSuccess={handleScanSuccess}
+          onShowToast={showToast}
+          initialMode="init"
+          prefilledPin={createPin}
+        />
       </SafeAreaView>
     </View>
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ThemeTokens) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: THEME.background,
+    backgroundColor: theme.background,
   },
   safeArea: {
     flex: 1,
@@ -147,8 +223,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   stepSubtitle: {
-    fontSize: THEME.typography.subtext,
-    color: THEME.foregroundMuted,
+    fontSize: theme.typography.subtext,
+    color: theme.foregroundMuted,
     marginBottom: 4,
     alignSelf: 'flex-start',
   },
@@ -161,29 +237,29 @@ const styles = StyleSheet.create({
     width: 78,
     height: 78,
     borderRadius: 20,
-    backgroundColor: '#1D2330',
+    backgroundColor: theme.surfaceHighlight,
     borderWidth: 1,
-    borderColor: 'rgba(191, 164, 106, 0.24)',
+    borderColor: theme.primaryLight,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 10,
-    shadowColor: THEME.shadow,
+    shadowColor: theme.shadow,
     shadowOffset: { width: 0, height: 14 },
     shadowOpacity: 0.22,
     shadowRadius: 24,
     elevation: 10,
   },
   title: {
-    fontSize: THEME.typography.title,
+    fontSize: theme.typography.title,
     lineHeight: 28,
     fontWeight: '800',
-    color: THEME.foreground,
+    color: theme.foreground,
     marginBottom: 6,
     textAlign: 'center',
   },
   bodyText: {
-    fontSize: THEME.typography.subtext,
-    color: THEME.foregroundMuted,
+    fontSize: theme.typography.subtext,
+    color: theme.foregroundMuted,
     textAlign: 'center',
     paddingHorizontal: 16,
   },
@@ -197,11 +273,11 @@ const styles = StyleSheet.create({
     height: 16,
     borderRadius: 8,
     borderWidth: 2,
-    borderColor: '#29334A',
+    borderColor: theme.border,
   },
   dotFilled: {
-    backgroundColor: THEME.primary,
-    borderColor: THEME.primaryLight,
+    backgroundColor: theme.primary,
+    borderColor: theme.primaryLight,
   },
   keypadWrapper: {
     marginTop: 4,
@@ -209,8 +285,8 @@ const styles = StyleSheet.create({
   },
   errorText: {
     minHeight: 22,
-    color: THEME.danger,
-    fontSize: THEME.typography.subtext,
+    color: theme.danger,
+    fontSize: theme.typography.subtext,
     fontWeight: '600',
     textAlign: 'center',
   },
@@ -221,17 +297,17 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     paddingHorizontal: 16,
     paddingVertical: 10,
-    backgroundColor: THEME.surfaceHighlight,
+    backgroundColor: theme.surfaceHighlight,
     borderWidth: 1,
-    borderColor: THEME.border,
+    borderColor: theme.border,
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 12,
   },
   securityNoteText: {
     flex: 1,
-    color: '#6D7891',
-    fontSize: THEME.typography.subtext,
+    color: theme.foregroundMuted,
+    fontSize: theme.typography.subtext,
     lineHeight: 20,
   },
 });

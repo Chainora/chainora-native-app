@@ -1,11 +1,11 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { NavigationProp, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
-import { styles } from './styles';
-import { THEME } from '../../../types/theme/colors';
+import { useSettings } from '../../../features/settings';
+import { createStyles } from './styles';
 
 export type HeaderProps = {
   title?: string;
@@ -20,6 +20,8 @@ export default function Header({
   showBackButton = true,
   rightSlot,
 }: HeaderProps) {
+  const { t, themeTokens } = useSettings();
+  const styles = useMemo(() => createStyles(themeTokens), [themeTokens]);
   const navigation =
     useNavigation<NavigationProp<Record<string, object | undefined>>>();
   const insets = useSafeAreaInsets();
@@ -31,9 +33,9 @@ export default function Header({
           style={styles.backButton}
           onPress={() => navigation.goBack()}
           accessibilityRole="button"
-          accessibilityLabel="Go back"
+          accessibilityLabel={t('commonBack')}
         >
-          <Ionicons name="chevron-back" size={22} color={THEME.foreground} />
+          <Ionicons name="chevron-back" size={22} color={themeTokens.foreground} />
         </Pressable>
       ) : (
         <View style={styles.backButton} />

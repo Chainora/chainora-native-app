@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { THEME } from '../../types/theme/colors';
+import { useSettings } from '../../features/settings';
+import type { ThemeTokens } from '../../types/theme/colors';
 
 type StepProgressBarProps = {
   currentStep: number;
@@ -12,6 +13,8 @@ export const StepProgressBar: React.FC<StepProgressBarProps> = ({
   currentStep,
   totalSteps,
 }) => {
+  const { themeTokens } = useSettings();
+  const styles = useMemo(() => createStyles(themeTokens), [themeTokens]);
   const steps = Array.from({ length: totalSteps }, (_, index) => index + 1);
 
   return (
@@ -32,7 +35,7 @@ export const StepProgressBar: React.FC<StepProgressBarProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ThemeTokens) => StyleSheet.create({
   container: {
     flexDirection: 'row',
     gap: 12,
@@ -43,9 +46,9 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 8,
     borderRadius: 999,
-    backgroundColor: '#1A2130',
+    backgroundColor: theme.surface,
   },
   segmentFilled: {
-    backgroundColor: THEME.primary,
+    backgroundColor: theme.primary,
   },
 });

@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, StyleProp, ViewStyle } from 'react-native';
 
-import { THEME } from '../types/theme/colors';
+import { useSettings } from '../features/settings';
+import type { ThemeTokens } from '../types/theme/colors';
 
 type ButtonVariant = 'primary' | 'secondary' | 'text';
 
@@ -20,6 +21,9 @@ export const AppButton: React.FC<AppButtonProps> = ({
   variant = 'primary',
   style,
 }) => {
+  const { themeTokens } = useSettings();
+  const styles = useMemo(() => createStyles(themeTokens), [themeTokens]);
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -50,7 +54,7 @@ export const AppButton: React.FC<AppButtonProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ThemeTokens) => StyleSheet.create({
   base: {
     width: '100%',
     paddingVertical: 16,
@@ -61,8 +65,8 @@ const styles = StyleSheet.create({
   },
   // Primary: Bright Neon Blue background with Glow
   primary: {
-    backgroundColor: THEME.primary,
-    shadowColor: THEME.glow,
+    backgroundColor: theme.primary,
+    shadowColor: theme.glow,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.4,
     shadowRadius: 12,
@@ -77,10 +81,10 @@ const styles = StyleSheet.create({
   },
   // Secondary: Glassmorphic dark surface
   secondary: {
-    backgroundColor: 'rgba(30, 35, 46, 0.9)', // Semi-transparent gunmetal
+    backgroundColor: theme.surfaceHighlight,
     borderWidth: 1,
-    borderColor: 'rgba(191, 164, 106, 0.35)', // Subtle gold border
-    shadowColor: '#000',
+    borderColor: theme.primaryLight,
+    shadowColor: theme.shadow,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
@@ -99,7 +103,7 @@ const styles = StyleSheet.create({
     opacity: 0.9,
   },
   label: {
-    fontSize: THEME.typography.body,
+    fontSize: theme.typography.body,
     fontWeight: '700',
     letterSpacing: 0.3,
   },
@@ -107,10 +111,10 @@ const styles = StyleSheet.create({
     color: '#0A0B0D', // Dark text on bright gold button
   },
   secondaryLabel: {
-    color: THEME.primary, // Gold text on dark button
+    color: theme.primary,
   },
   textLabel: {
-    color: THEME.foregroundMuted,
-    fontSize: THEME.typography.subtext,
+    color: theme.foregroundMuted,
+    fontSize: theme.typography.subtext,
   },
 });

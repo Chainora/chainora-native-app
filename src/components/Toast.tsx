@@ -1,6 +1,8 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { THEME } from '../types/theme/colors';
+
+import { useSettings } from '../features/settings';
+import type { ThemeTokens } from '../types/theme/colors';
 
 export type ToastType = 'info' | 'error' | 'success';
 
@@ -25,6 +27,9 @@ export const Toast: React.FC<ToastProps> = ({
   onTimeout,
   duration = 3000,
 }) => {
+  const { themeTokens } = useSettings();
+  const styles = useMemo(() => createStyles(themeTokens), [themeTokens]);
+
   useEffect(() => {
     if (!visible) {
       return;
@@ -55,7 +60,7 @@ export const Toast: React.FC<ToastProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ThemeTokens) => StyleSheet.create({
   container: {
     position: 'absolute',
     bottom: 32,
@@ -65,9 +70,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderRadius: 12,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: theme.border,
   },
   message: {
-    fontSize: THEME.typography.subtext,
+    fontSize: theme.typography.subtext,
     fontWeight: '600',
   },
 });

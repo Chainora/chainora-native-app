@@ -2,7 +2,10 @@ export const ROUTES = {
   Welcome: 'Welcome',
   LoginPin: 'LoginPin',
   ActivatePin: 'ActivatePin',
-  NfcScan: 'NfcScan',
+  EcdhBackup: 'EcdhBackup',
+  Settings: 'Settings',
+  General: 'General',
+  ChangePin: 'ChangePin',
   Home: 'Home',
   ActivateSuccess: 'ActivateSuccess',
 } as const;

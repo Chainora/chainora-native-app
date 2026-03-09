@@ -4,14 +4,15 @@ import Video from 'react-native-video';
 
 import { AppButton } from '../AppButton';
 import { PinInput } from './PinInput';
+import { useSettings } from '../../features/settings';
 import { initialiseWallet, signInWallet, WalletActionResult, WalletActionCode } from '../../services/cardService';
 import { THEME } from '../../types/theme/colors';
 import { ToastType } from '../Toast';
 
 export type ScanMode = 'init' | 'signin';
+export type ScanDialogTypes = 'auth' | 'flow';
 
 type ModeOption = {
-  label: string;
   value: ScanMode;
 };
 
@@ -25,6 +26,8 @@ type ScanDialogProps = {
   onSuccess?: (details: { result: WalletActionResult; mode: ScanMode }) => void;
   initialMode?: ScanMode;
   prefilledPin?: string;
+  types?: ScanDialogTypes;
+  onFlowScan?: () => Promise<WalletActionResult>;
 };
 
 type ScanPhase = 'pin' | 'working' | 'success' | 'error';
@@ -32,8 +35,8 @@ type ScanPhase = 'pin' | 'working' | 'success' | 'error';
 const PIN_LENGTH = 4;
 
 const MODE_OPTIONS: ModeOption[] = [
-  { label: 'Init Wallet', value: 'init' },
-  { label: 'Sign In', value: 'signin' },
+  { value: 'init' },
+  { value: 'signin' },
 ];
 
 const AnimatedText = Animated.createAnimatedComponent(Text);
@@ -50,39 +53,65 @@ const formatPublicKeySummary = (value: string) => {
   return `${value.slice(0, 12)}...${value.slice(-12)}`;
 };
 
-const suggestionForCode = (mode: ScanMode, code?: WalletActionCode): string | null => {
+const suggestionForCode = (
+  mode: ScanMode,
+  code: WalletActionCode | undefined,
+  translate: (key: any) => string,
+): string | null => {
   switch (code) {
     case 'PIN_ALREADY_INITIALISED':
-      return 'Switch to Sign In mode to continue.';
+      return translate('scanHintSwitchToSignin');
     case 'PIN_NOT_INITIALISED':
-      return 'Run Init Wallet first, then try signing in.';
+      return translate('scanHintRunInitFirst');
     case 'PIN_INVALID':
-      return 'Double-check the PIN and try again.';
+      return translate('scanHintPinInvalid');
     case 'TRANSPORT_ERROR':
-      return 'Keep the card close to the device until the scan finishes.';
+      return translate('scanHintKeepCardClose');
     default:
       return null;
   }
 };
 
-const buildInfoLines = (mode: ScanMode, result: WalletActionResult): string[] => {
+const buildInfoLines = (
+  mode: ScanMode,
+  result: WalletActionResult,
+  translate: (key: any) => string,
+): string[] => {
   const lines: string[] = [];
 
   if (result.ok && result.publicKeyHex) {
-    lines.push(`Public Key: ${formatPublicKeySummary(result.publicKeyHex)}`);
+    lines.push(`${translate('scanInfoPublicKey')}: ${formatPublicKeySummary(result.publicKeyHex)}`);
   }
 
   if (result.ok && result.ethAddress) {
-    lines.push(`Address: ${result.ethAddress}`);
+    lines.push(`${translate('scanInfoAddress')}: ${result.ethAddress}`);
   }
 
-  const suggestion = suggestionForCode(mode, result.code);
+  const suggestion = suggestionForCode(mode, result.code, translate);
   if (suggestion) {
     lines.push(suggestion);
   }
 
   if (result.statusWord) {
-    lines.push(`Status: ${result.statusWord}`);
+    lines.push(`${translate('scanInfoStatus')}: ${result.statusWord}`);
+  }
+
+  return lines;
+};
+
+const buildFlowInfoLines = (result: WalletActionResult, translate: (key: any) => string): string[] => {
+  const lines: string[] = [];
+
+  if (result.publicKeyHex) {
+    lines.push(`${translate('scanInfoPublicKey')}: ${formatPublicKeySummary(result.publicKeyHex)}`);
+  }
+
+  if (result.ethAddress) {
+    lines.push(`${translate('scanInfoAddress')}: ${result.ethAddress}`);
+  }
+
+  if (result.statusWord) {
+    lines.push(`${translate('scanInfoStatus')}: ${result.statusWord}`);
   }
 
   return lines;
@@ -113,13 +142,16 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
   onSuccess,
   initialMode,
   prefilledPin,
+  types = 'auth',
+  onFlowScan,
 }) => {
+  const { t } = useSettings();
   const [mode, setMode] = useState<ScanMode>(initialMode ?? 'init');
   const [pinValue, setPinValue] = useState('');
   const [pinStage, setPinStage] = useState<'create' | 'confirm'>('create');
   const [confirmPinValue, setConfirmPinValue] = useState('');
   const [phase, setPhase] = useState<ScanPhase>('pin');
-  const [statusMessage, setStatusMessage] = useState('Enter your 4 digit PIN to set up your wallet');
+  const [statusMessage, setStatusMessage] = useState(t('scanStatusEnterSetup'));
   const [infoLines, setInfoLines] = useState<string[]>([]);
   
   // Animation Values
@@ -135,11 +167,11 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
 
   const modeInstructions = useMemo(
     () => ({
-      initCreate: 'Create a 4-digit PIN for your new wallet',
-      initConfirm: 'Confirm your 4-digit PIN',
-      signin: 'Enter your PIN to access your wallet',
+      initCreate: t('scanStatusCreatePin'),
+      initConfirm: t('scanStatusConfirmPin'),
+      signin: t('scanStatusEnterPinSignIn'),
     }),
-    [],
+    [t],
   );
 
   // --- Interpolations for Theming ---
@@ -263,8 +295,8 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
       resetForMode(startMode, false);
       if (prefilledPin) {
         setPinValue(prefilledPin);
-        setStatusMessage('Hold your card near the device...');
-        onStatusChange?.('Hold your card near the device...');
+        setStatusMessage(t('scanStatusHoldCard'));
+        onStatusChange?.(t('scanStatusHoldCard'));
       }
       modalScaleAnim.setValue(0.92);
       modalOpacityAnim.setValue(0);
@@ -313,8 +345,8 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
 
   const beginScan = useCallback(async () => {
     if (isNfcEnabled === false) {
-      Alert.alert('NFC Disabled', 'Please enable NFC in your system settings to continue.');
-      showToast('NFC is disabled', 'error');
+      Alert.alert(t('scanNfcDisabledTitle'), t('scanNfcDisabledMessage'));
+      showToast(t('scanToastNfcDisabled'), 'error');
       shakeDialog();
       return;
     }
@@ -323,20 +355,25 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
     operationTokenRef.current = token;
     setPhase('working');
     setInfoLines([]);
-    setStatusMessage('Hold your card near the device...');
-    onStatusChange?.('Hold your card near the device...');
+    setStatusMessage(t('scanStatusHoldCard'));
+    onStatusChange?.(t('scanStatusHoldCard'));
 
     try {
-      const result = mode === 'init' ? await initialiseWallet(prefilledPin ?? pinValue) : await signInWallet(prefilledPin ?? pinValue);
+      const result =
+        types === 'flow' && onFlowScan
+          ? await onFlowScan()
+          : mode === 'init'
+          ? await initialiseWallet(prefilledPin ?? pinValue)
+          : await signInWallet(prefilledPin ?? pinValue);
       if (operationTokenRef.current !== token) return;
 
-      setInfoLines(buildInfoLines(mode, result));
+      setInfoLines(types === 'flow' ? buildFlowInfoLines(result, t) : buildInfoLines(mode, result, t));
 
       if (result.ok) {
         setPhase('success');
         setStatusMessage(result.message);
         onStatusChange?.(result.message);
-        showToast('Success!', 'success');
+        showToast(t('scanToastSuccess'), 'success');
         onSuccess?.({ result, mode });
       } else {
         setPhase('error');
@@ -348,7 +385,7 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
     } catch (error) {
       if (operationTokenRef.current !== token) return;
       const message = error instanceof Error ? error.message : String(error);
-      const fallbackMessage = `Scan failed: ${message}`;
+      const fallbackMessage = `${t('scanErrorPrefix')}: ${message}`;
       setInfoLines([]);
       setPhase('error');
       setStatusMessage(fallbackMessage);
@@ -356,13 +393,18 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
       showToast(fallbackMessage, 'error');
       shakeDialog();
     }
-  }, [isNfcEnabled, mode, onStatusChange, onSuccess, pinValue, prefilledPin, showToast, shakeDialog]);
+  }, [isNfcEnabled, mode, onFlowScan, onStatusChange, onSuccess, pinValue, prefilledPin, showToast, shakeDialog, t, types]);
 
   const handleSubmitPin = useCallback(() => {
+    if (types === 'flow') {
+      beginScan();
+      return;
+    }
+
     if (mode === 'init') {
       if (pinStage === 'create') {
         if (pinValue.length !== PIN_LENGTH) {
-          showToast(`Enter a ${PIN_LENGTH}-digit PIN`, 'error');
+          showToast(t('scanErrorEnterPin4'), 'error');
           shakeDialog();
           return;
         }
@@ -374,20 +416,20 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
       }
 
       if (confirmPinValue.length !== PIN_LENGTH) {
-        showToast(`Confirm the ${PIN_LENGTH}-digit PIN`, 'error');
+        showToast(t('scanErrorConfirmPin4'), 'error');
         shakeDialog();
         return;
       }
 
       if (confirmPinValue !== pinValue) {
-        showToast('PINs do not match. Try again.', 'error');
+        showToast(t('scanErrorPinsMismatch'), 'error');
         setConfirmPinValue('');
         shakeDialog();
         return;
       }
     } else {
       if (pinValue.length !== PIN_LENGTH) {
-        showToast(`Enter a ${PIN_LENGTH}-digit PIN`, 'error');
+        showToast(t('scanErrorEnterPin4'), 'error');
         shakeDialog();
         return;
       }
@@ -404,6 +446,8 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
     pinValue,
     shakeDialog,
     showToast,
+    t,
+    types,
   ]);
 
   const handlePrimaryAction = useCallback(() => {
@@ -429,21 +473,23 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
 
   const primaryButtonLabel =
     phase === 'pin'
-      ? prefilledPin
-        ? 'Scan Card'
+      ? types === 'flow'
+        ? t('scanPrimaryScanCard')
+        : prefilledPin
+        ? t('scanPrimaryScanCard')
         : mode === 'init' && pinStage === 'create'
-        ? 'Continue'
-        : 'Scan Card'
+        ? t('scanPrimaryContinue')
+        : t('scanPrimaryScanCard')
       : phase === 'success'
-      ? 'Complete'
-      : 'Try Again';
+      ? t('scanPrimaryComplete')
+      : t('scanPrimaryTryAgain');
 
   const activePinLength =
     mode === 'init' && pinStage === 'confirm' ? confirmPinValue.length : pinValue.length;
 
   const disablePrimaryButton =
     phase === 'working' ||
-    (phase === 'pin' && !prefilledPin && activePinLength !== PIN_LENGTH);
+    (phase === 'pin' && types !== 'flow' && !prefilledPin && activePinLength !== PIN_LENGTH);
 
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose} statusBarTranslucent>
@@ -463,7 +509,7 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
             }
           ]}
         >
-          {!prefilledPin && (
+          {!prefilledPin && types !== 'flow' && (
           <Animated.View
             style={[styles.tabContainer, { backgroundColor: tabBackground }]}
             onLayout={event => {
@@ -496,7 +542,7 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
                   <AnimatedText
                     style={[styles.tabLabel, selected ? { color: tabActiveColor } : { color: tabInactiveColor }]}
                   >
-                    {option.label}
+                    {option.value === 'init' ? t('scanTabInit') : t('scanTabSignIn')}
                   </AnimatedText>
                 </Pressable>
               );
@@ -507,7 +553,7 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
           <View style={styles.content}>
             <AnimatedText style={[styles.subtitle, { color: subtitleColor }]}>{statusMessage}</AnimatedText>
 
-            {phase === 'pin' && !prefilledPin && (
+            {phase === 'pin' && !prefilledPin && types !== 'flow' && (
               <PinInput
                 value={mode === 'init' && pinStage === 'confirm' ? confirmPinValue : pinValue}
                 onChange={handlePinChange}
@@ -594,7 +640,7 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
               {showCancel && (
                 <Pressable style={styles.secondaryAction} onPress={onClose}>
                   <AnimatedText style={[styles.secondaryLabel, { color: secondaryColor }]}>
-                    Cancel
+                    {t('commonCancel')}
                   </AnimatedText>
                 </Pressable>
               )}

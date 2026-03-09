@@ -1,20 +1,33 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { StatusBar, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
+import { ScanDialog } from '../components/ui/ScanDialog';
 import { PinKeypad } from '../components/ui/PinKeypad';
+import { useAuth } from '../features/auth';
+import { useNfcEnabled } from '../features/nfc/hooks/useNfcEnabled';
+import { useSettings } from '../features/settings';
+import { useToast } from '../features/toast';
 import { ROUTES } from '../navigation/routes/routes';
 import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
-import { THEME } from '../types/theme/colors';
+import type { WalletActionResult } from '../services/cardService';
+import type { ThemeTokens } from '../types/theme/colors';
 
 const PIN_LENGTH = 4;
 
 type Props = NativeStackScreenProps<RootStackParamList, typeof ROUTES.LoginPin>;
 
 export const LoginPinScreen: React.FC<Props> = ({ navigation }) => {
+  const { initializeSession, completeSession } = useAuth();
+  const { isEnabled } = useNfcEnabled();
+  const { resolvedTheme, t, themeTokens } = useSettings();
+  const styles = useMemo(() => createStyles(themeTokens), [themeTokens]);
+  const { showToast } = useToast();
   const [pinValue, setPinValue] = useState('');
+  const [scanVisible, setScanVisible] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const handleDigit = useCallback(
     (digit: string) => {
@@ -22,36 +35,74 @@ export const LoginPinScreen: React.FC<Props> = ({ navigation }) => {
         if (prev.length >= PIN_LENGTH) {
           return prev;
         }
-
-        const next = `${prev}${digit}`;
-        if (next.length === PIN_LENGTH) {
-          navigation.navigate(ROUTES.NfcScan, {
-            initialMode: 'signin',
-            pin: next,
-          });
-        }
-
-        return next;
+        return `${prev}${digit}`;
       });
     },
-    [navigation],
+    [],
   );
 
   const handleBackspace = useCallback(() => {
     setPinValue(prev => prev.slice(0, -1));
   }, []);
 
+  const openScanDialog = useCallback(() => {
+    setScanVisible(true);
+  }, []);
+
+  const closeScanDialog = useCallback(() => {
+    if (submitting) {
+      return;
+    }
+    setScanVisible(false);
+  }, [submitting]);
+
+  const handleScanSuccess = useCallback(
+    async ({ result }: { result: WalletActionResult }) => {
+      if (!result.ethAddress) {
+        return;
+      }
+
+      setSubmitting(true);
+      try {
+        await initializeSession(result.ethAddress);
+        await completeSession();
+        setScanVisible(false);
+        navigation.reset({
+          index: 0,
+          routes: [
+            {
+              name: ROUTES.Home,
+              params: {
+                ethAddress: result.ethAddress,
+                publicKeyHex: result.publicKeyHex,
+                mode: 'signin',
+              },
+            },
+          ],
+        });
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [completeSession, initializeSession, navigation],
+  );
+
+  const canSubmit = pinValue.length === PIN_LENGTH;
+
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={THEME.background} />
+      <StatusBar
+        barStyle={resolvedTheme === 'light' ? 'dark-content' : 'light-content'}
+        backgroundColor={themeTokens.background}
+      />
       <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
         <View style={styles.content}>
           <View style={styles.header}>
             <View style={styles.iconWrapper}>
-              <Ionicons name="wifi-outline" size={40} color={THEME.primary} />
+              <Ionicons name="wifi-outline" size={40} color={themeTokens.primary} />
             </View>
-            <Text style={styles.title}>Welcome back</Text>
-            <Text style={styles.subtitle}>Enter your PIN to unlock</Text>
+            <Text style={styles.title}>{t('loginWelcomeBack')}</Text>
+            <Text style={styles.subtitle}>{t('loginEnterPinSubtitle')}</Text>
           </View>
 
           <View style={styles.dotsRow}>
@@ -64,18 +115,33 @@ export const LoginPinScreen: React.FC<Props> = ({ navigation }) => {
           </View>
 
           <View style={styles.keypadWrapper}>
-            <PinKeypad onDigit={handleDigit} onBackspace={handleBackspace} />
+            <PinKeypad
+              onDigit={handleDigit}
+              onBackspace={handleBackspace}
+              onSubmit={openScanDialog}
+              submitDisabled={!canSubmit || submitting}
+            />
           </View>
         </View>
+
+        <ScanDialog
+          visible={scanVisible}
+          isNfcEnabled={isEnabled}
+          onClose={closeScanDialog}
+          onSuccess={handleScanSuccess}
+          onShowToast={showToast}
+          initialMode="signin"
+          prefilledPin={pinValue}
+        />
       </SafeAreaView>
     </View>
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ThemeTokens) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: THEME.background,
+    backgroundColor: theme.background,
   },
   safeArea: {
     flex: 1,
@@ -96,29 +162,29 @@ const styles = StyleSheet.create({
     width: 88,
     height: 88,
     borderRadius: 24,
-    backgroundColor: '#1D2330',
+    backgroundColor: theme.surfaceHighlight,
     borderWidth: 1,
-    borderColor: 'rgba(191, 164, 106, 0.28)',
+    borderColor: theme.primaryLight,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 18,
-    shadowColor: THEME.shadow,
+    shadowColor: theme.shadow,
     shadowOffset: { width: 0, height: 14 },
     shadowOpacity: 0.22,
     shadowRadius: 24,
     elevation: 10,
   },
   title: {
-    fontSize: THEME.typography.title,
+    fontSize: theme.typography.title,
     lineHeight: 30,
     fontWeight: '800',
-    color: THEME.foreground,
+    color: theme.foreground,
     marginBottom: 12,
     textAlign: 'center',
   },
   subtitle: {
-    fontSize: THEME.typography.subtext,
-    color: THEME.foregroundMuted,
+    fontSize: theme.typography.subtext,
+    color: theme.foregroundMuted,
     textAlign: 'center',
   },
   dotsRow: {
@@ -131,11 +197,11 @@ const styles = StyleSheet.create({
     height: 16,
     borderRadius: 8,
     borderWidth: 2,
-    borderColor: '#29334A',
+    borderColor: theme.border,
   },
   dotFilled: {
-    backgroundColor: THEME.primary,
-    borderColor: THEME.primaryLight,
+    backgroundColor: theme.primary,
+    borderColor: theme.primaryLight,
   },
   keypadWrapper: {
     marginTop: 8,
