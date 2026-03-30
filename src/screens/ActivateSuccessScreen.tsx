@@ -1,9 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
-import { Alert, StatusBar, StyleSheet, Text, View, Pressable } from 'react-native';
+import React, { useCallback, useMemo, useRef } from 'react';
+import { Alert, StatusBar, StyleSheet, Text, View, Pressable, ScrollView } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
+import { AppButton } from '../components/AppButton';
 import { useSettings } from '../features/settings';
 import { ROUTES } from '../navigation/routes/routes';
 import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
@@ -40,11 +41,6 @@ export const ActivateSuccessScreen: React.FC<Props> = ({ route, navigation }) =>
     });
   }, [ethAddress, mode, navigation, publicKeyHex]);
 
-  useEffect(() => {
-    const timer = setTimeout(goToHome, 2200);
-    return () => clearTimeout(timer);
-  }, [goToHome]);
-
   const handleCopyPress = useCallback(() => {
     Alert.alert(t('activateSuccessWalletAddressTitle'), ethAddress);
   }, [ethAddress, t]);
@@ -57,46 +53,54 @@ export const ActivateSuccessScreen: React.FC<Props> = ({ route, navigation }) =>
       />
       <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
         <View style={styles.frame}>
-          <View style={styles.notch} />
-
-          <View style={styles.centerGroup}>
-            <View style={styles.successOuter}>
-              <View style={styles.successInner}>
-                <Ionicons name="checkmark-circle-outline" size={44} color={themeTokens.success} />
+          <ScrollView
+            contentContainerStyle={styles.frameContent}
+            showsVerticalScrollIndicator={false}
+            bounces
+          >
+            <View style={styles.centerGroup}>
+              <View style={styles.successOuter}>
+                <View style={styles.successInner}>
+                  <Ionicons name="checkmark-circle-outline" size={44} color={themeTokens.success} />
+                </View>
               </View>
+              <Text style={styles.title}>{t('activateSuccessWalletActivated')}</Text>
+              <Text style={styles.subtitle}>{t('activateSuccessCardReady')}</Text>
             </View>
-            <Text style={styles.title}>{t('activateSuccessWalletActivated')}</Text>
-            <Text style={styles.subtitle}>{t('activateSuccessCardReady')}</Text>
-          </View>
 
-          <View style={styles.divider} />
+            <View style={styles.divider} />
 
-          <View style={styles.walletCard}>
-            <View style={styles.cardTapIconWrap}>
-              <Ionicons name="wifi-outline" size={21} color={themeTokens.foregroundMuted} style={styles.cardTapIcon} />
+            <View style={styles.walletCard}>
+              <View style={styles.cardTapIconWrap}>
+                <Ionicons name="wifi-outline" size={21} color={themeTokens.foregroundMuted} style={styles.cardTapIcon} />
+              </View>
+              <View style={styles.chip} />
+              <Text style={styles.brand}>CHAINORA</Text>
+              <Text style={styles.shortAddress}>{shortAddress}</Text>
             </View>
-            <View style={styles.chip} />
-            <Text style={styles.brand}>CHAINORA</Text>
-            <Text style={styles.shortAddress}>{shortAddress}</Text>
-          </View>
 
-          <View style={styles.addressBox}>
-            <View style={styles.addressTextWrap}>
-              <Text style={styles.addressLabel}>{t('activateSuccessAddressLabel')}</Text>
-              <Text style={styles.addressValue}>{ethAddress}</Text>
+            <View style={styles.addressBox}>
+              <View style={styles.addressTextWrap}>
+                <Text style={styles.addressLabel}>{t('activateSuccessAddressLabel')}</Text>
+                <Text style={styles.addressValue}>{ethAddress}</Text>
+              </View>
+              <Pressable style={styles.copyButton} accessibilityRole="button" onPress={handleCopyPress}>
+                <Ionicons name="copy-outline" size={22} color={themeTokens.foregroundMuted} />
+              </Pressable>
             </View>
-            <Pressable style={styles.copyButton} accessibilityRole="button" onPress={handleCopyPress}>
-              <Ionicons name="copy-outline" size={22} color={themeTokens.foregroundMuted} />
-            </Pressable>
-          </View>
 
-          <View style={styles.noteBox}>
-            <Text style={styles.noteText}>
-              {t('activateSuccessShareNote')}
-            </Text>
-          </View>
+            <View style={styles.noteBox}>
+              <Text style={styles.noteText}>
+                {t('activateSuccessShareNote')}
+              </Text>
+            </View>
 
-          <Text style={styles.footerBrand}>chainora</Text>
+            <View style={styles.footerActions}>
+              <AppButton label={t('commonDone')} onPress={goToHome} />
+            </View>
+
+            <Text style={styles.footerBrand}>chainora</Text>
+          </ScrollView>
         </View>
       </SafeAreaView>
     </View>
@@ -123,13 +127,8 @@ const createStyles = (theme: ThemeTokens) => StyleSheet.create({
     paddingHorizontal: 18,
     paddingBottom: 22,
   },
-  notch: {
-    width: 150,
-    height: 42,
-    alignSelf: 'center',
-    borderRadius: 22,
-    backgroundColor: theme.background,
-    marginBottom: 30,
+  frameContent: {
+    paddingBottom: 8,
   },
   centerGroup: {
     alignItems: 'center',
@@ -267,8 +266,12 @@ const createStyles = (theme: ThemeTokens) => StyleSheet.create({
     lineHeight: 20,
     fontWeight: '500',
   },
+  footerActions: {
+    marginTop: 16,
+    width: '100%',
+  },
   footerBrand: {
-    marginTop: 20,
+    marginTop: 14,
     color: theme.foregroundMuted,
     fontSize: 22,
     fontWeight: '800',
