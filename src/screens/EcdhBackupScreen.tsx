@@ -29,10 +29,16 @@ import type { ThemeTokens } from '../types/theme/colors';
 
 type Props = NativeStackScreenProps<RootStackParamList, typeof ROUTES.EcdhBackup>;
 
-type StepKey = 'mainAuth1' | 'secondaryInit' | 'mainAuth2' | 'secondaryAuth';
+type StepKey =
+  | 'pinMain'
+  | 'pinSecondary'
+  | 'scanMainAuth'
+  | 'scanSecondaryInit'
+  | 'scanMainExport'
+  | 'scanSecondaryImport';
 
 const PIN_LENGTH = 4;
-const TOTAL_STEPS = 4;
+const TOTAL_STEPS = 6;
 
 const formatFailure = (message: string, statusWord?: string) =>
   statusWord ? `${message} (SW: ${statusWord})` : message;
@@ -43,15 +49,10 @@ export const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
   const styles = useMemo(() => createStyles(themeTokens), [themeTokens]);
   const { showToast } = useToast();
   const [stepIndex, setStepIndex] = useState(0);
-  const [pins, setPins] = useState<Record<StepKey, string>>({
-    mainAuth1: '',
-    secondaryInit: '',
-    mainAuth2: '',
-    secondaryAuth: '',
-  });
+  const [mainPin, setMainPin] = useState('');
+  const [secondaryPin, setSecondaryPin] = useState('');
   const [statusMessage, setStatusMessage] = useState(t('ecdhInitialStatus'));
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [autofillHint, setAutofillHint] = useState<string | null>(null);
   const [scanVisible, setScanVisible] = useState(false);
   const [done, setDone] = useState(false);
 
@@ -61,38 +62,49 @@ export const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
   const [sourceLinkProof, setSourceLinkProof] = useState<Uint8Array | null>(null);
   const [envelope, setEnvelope] = useState<Uint8Array | null>(null);
 
-  const flowSteps: Array<{ key: StepKey; title: string; prompt: string; swipeHint: string }> = useMemo(
+  const flowSteps: Array<{ key: StepKey; title: string; prompt: string }> = useMemo(
     () => [
       {
-        key: 'mainAuth1',
+        key: 'pinMain',
         title: t('ecdhStepMainAuthTitle'),
         prompt: t('ecdhStepMainAuthPrompt'),
-        swipeHint: t('ecdhStepMainAuthSwipe'),
       },
       {
-        key: 'secondaryInit',
+        key: 'pinSecondary',
         title: t('ecdhStepSecondaryInitTitle'),
         prompt: t('ecdhStepSecondaryInitPrompt'),
-        swipeHint: t('ecdhStepSecondaryInitSwipe'),
       },
       {
-        key: 'mainAuth2',
+        key: 'scanMainAuth',
+        title: t('ecdhStepMainAuthTitle'),
+        prompt: t('ecdhStepMainAuthSwipe'),
+      },
+      {
+        key: 'scanSecondaryInit',
+        title: t('ecdhStepSecondaryInitTitle'),
+        prompt: t('ecdhStepSecondaryInitSwipe'),
+      },
+      {
+        key: 'scanMainExport',
         title: t('ecdhStepExportTitle'),
-        prompt: t('ecdhStepExportPrompt'),
-        swipeHint: t('ecdhStepExportSwipe'),
+        prompt: t('ecdhStepExportSwipe'),
       },
       {
-        key: 'secondaryAuth',
+        key: 'scanSecondaryImport',
         title: t('ecdhStepImportTitle'),
-        prompt: t('ecdhStepImportPrompt'),
-        swipeHint: t('ecdhStepImportSwipe'),
+        prompt: t('ecdhStepImportSwipe'),
       },
     ],
     [t],
   );
 
   const currentStep = flowSteps[stepIndex];
-  const currentPin = pins[currentStep.key];
+  const isPinStep = currentStep.key === 'pinMain' || currentStep.key === 'pinSecondary';
+  const currentPin = currentStep.key === 'pinMain' ? mainPin : secondaryPin;
+  const scanPin =
+    currentStep.key === 'scanMainAuth' || currentStep.key === 'scanMainExport'
+      ? mainPin
+      : secondaryPin;
 
   useEffect(() => {
     navigation.setOptions({
@@ -105,39 +117,47 @@ export const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
     if (done) {
       return t('ecdhBackupCompleted');
     }
-    return `${currentStep.prompt} -> ${currentStep.swipeHint}`;
-  }, [currentStep.prompt, currentStep.swipeHint, done, t]);
+    return currentStep.prompt;
+  }, [currentStep.prompt, done, t]);
 
   const handleDigit = useCallback(
     (digit: string) => {
-      setPins(prev => {
-        const currentValue = prev[currentStep.key];
-        if (currentValue.length >= PIN_LENGTH) {
-          return prev;
-        }
-        return { ...prev, [currentStep.key]: `${currentValue}${digit}` };
-      });
-      setAutofillHint(null);
+      if (!isPinStep || digit.length === 0) {
+        return;
+      }
+
+      if (currentStep.key === 'pinMain') {
+        setMainPin(prev => (prev.length >= PIN_LENGTH ? prev : `${prev}${digit}`));
+      } else {
+        setSecondaryPin(prev => (prev.length >= PIN_LENGTH ? prev : `${prev}${digit}`));
+      }
       setErrorMessage(null);
     },
-    [currentStep.key],
+    [currentStep.key, isPinStep],
   );
 
   const handleBackspace = useCallback(() => {
-    setPins(prev => ({ ...prev, [currentStep.key]: prev[currentStep.key].slice(0, -1) }));
-    setAutofillHint(null);
-    setErrorMessage(null);
-  }, [currentStep.key]);
-
-  const executeCurrentStep = useCallback(async (): Promise<WalletActionResult> => {
-    setStatusMessage(`${currentStep.swipeHint}...`);
-
-    if (stepIndex === 0) {
-      return signInWallet(currentPin);
+    if (!isPinStep) {
+      return;
     }
 
-    if (stepIndex === 1) {
-      const result = await initialisePinAndPrepareBackupDestination(currentPin);
+    if (currentStep.key === 'pinMain') {
+      setMainPin(prev => prev.slice(0, -1));
+    } else {
+      setSecondaryPin(prev => prev.slice(0, -1));
+    }
+    setErrorMessage(null);
+  }, [currentStep.key, isPinStep]);
+
+  const executeCurrentStep = useCallback(async (): Promise<WalletActionResult> => {
+    setStatusMessage(`${currentStep.prompt}...`);
+
+    if (currentStep.key === 'scanMainAuth') {
+      return signInWallet(mainPin);
+    }
+
+    if (currentStep.key === 'scanSecondaryInit') {
+      const result = await initialisePinAndPrepareBackupDestination(secondaryPin);
       if (result.ok && result.deviceCert && result.linkProof) {
         setDestCert(result.deviceCert);
         setDestLinkProof(result.linkProof);
@@ -145,7 +165,7 @@ export const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
       return result;
     }
 
-    if (stepIndex === 2) {
+    if (currentStep.key === 'scanMainExport') {
       if (!destCert || !destLinkProof) {
         return {
           ok: false,
@@ -154,7 +174,7 @@ export const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
         };
       }
 
-      const result = await performBackupExport(currentPin, destCert, destLinkProof);
+      const result = await performBackupExport(mainPin, destCert, destLinkProof);
       if (result.ok && result.envelope && result.sourceCert && result.sourceLinkProof) {
         setEnvelope(result.envelope);
         setSourceCert(result.sourceCert);
@@ -171,8 +191,19 @@ export const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
       };
     }
 
-    return performBackupImport(currentPin, sourceCert, sourceLinkProof, envelope);
-  }, [currentPin, currentStep.swipeHint, destCert, destLinkProof, envelope, sourceCert, sourceLinkProof, stepIndex, t]);
+    return performBackupImport(secondaryPin, sourceCert, sourceLinkProof, envelope);
+  }, [
+    currentStep.key,
+    currentStep.prompt,
+    destCert,
+    destLinkProof,
+    envelope,
+    mainPin,
+    secondaryPin,
+    sourceCert,
+    sourceLinkProof,
+    t,
+  ]);
 
   const handleFlowScanSuccess = useCallback(
     ({ result }: { result: WalletActionResult }) => {
@@ -185,32 +216,16 @@ export const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
 
       setErrorMessage(null);
 
-      if (stepIndex === 3) {
+      if (stepIndex === flowSteps.length - 1) {
         setDone(true);
         setStatusMessage(t('ecdhImportCompleted'));
         return;
       }
 
-      if (stepIndex === 1) {
-        setPins(prev => ({
-          ...prev,
-          mainAuth2: prev.mainAuth1,
-        }));
-        setAutofillHint(t('ecdhAutofillMainPin'));
-      }
-
-      if (stepIndex === 2) {
-        setPins(prev => ({
-          ...prev,
-          secondaryAuth: prev.secondaryInit,
-        }));
-        setAutofillHint(t('ecdhAutofillSecondaryPin'));
-      }
-
       setStepIndex(prev => prev + 1);
       setStatusMessage(t('ecdhStepSuccessNext'));
     },
-    [stepIndex, t],
+    [flowSteps.length, stepIndex, t],
   );
 
   const handleRunStep = useCallback(() => {
@@ -219,17 +234,24 @@ export const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
       return;
     }
 
-    if (currentPin.length !== PIN_LENGTH) {
-      setErrorMessage(t('ecdhPinLengthError'));
+    if (isPinStep) {
+      if (currentPin.length !== PIN_LENGTH) {
+        setErrorMessage(t('ecdhPinLengthError'));
+        return;
+      }
+
+      setErrorMessage(null);
+      setStatusMessage(t('ecdhStepSuccessNext'));
+      setStepIndex(prev => prev + 1);
       return;
     }
 
     setErrorMessage(null);
     setScanVisible(true);
-  }, [currentPin, done, navigation]);
+  }, [currentPin, done, isPinStep, navigation, t]);
 
   const currentStepNumber = done ? TOTAL_STEPS : stepIndex + 1;
-  const canSubmit = done || currentPin.length === PIN_LENGTH;
+  const canSubmit = done || !isPinStep || currentPin.length === PIN_LENGTH;
 
   return (
     <View style={styles.container}>
@@ -250,15 +272,13 @@ export const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
             <Text style={styles.bodyText}>{progressText}</Text>
           </View>
 
-          {!done && (
+          {!done && isPinStep && (
             <>
               <View style={styles.dotsRow}>
                 {Array.from({ length: PIN_LENGTH }, (_, index) => (
                   <View key={index} style={[styles.dot, index < currentPin.length && styles.dotFilled]} />
                 ))}
               </View>
-
-              {autofillHint && <Text style={styles.autofillHintText}>{autofillHint}</Text>}
 
               <View style={styles.keypadWrapper}>
                 <PinKeypad
@@ -269,6 +289,12 @@ export const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
                 />
               </View>
             </>
+          )}
+
+          {!done && !isPinStep && (
+            <View style={styles.scanActionWrap}>
+              <AppButton label={t('scanPrimaryScanCard')} onPress={handleRunStep} />
+            </View>
           )}
 
           {statusMessage.length > 0 && <Text style={styles.statusText}>{statusMessage}</Text>}
@@ -290,7 +316,7 @@ export const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
           onSuccess={handleFlowScanSuccess}
           onShowToast={showToast}
           initialMode="signin"
-          prefilledPin={currentPin}
+          prefilledPin={scanPin}
           types="flow"
           onFlowScan={executeCurrentStep}
         />
@@ -360,12 +386,6 @@ const createStyles = (theme: ThemeTokens) => StyleSheet.create({
     gap: 16,
     marginBottom: 10,
   },
-  autofillHintText: {
-    color: theme.primaryLight,
-    fontSize: theme.typography.small,
-    textAlign: 'center',
-    marginBottom: 8,
-  },
   dot: {
     width: 16,
     height: 16,
@@ -379,6 +399,11 @@ const createStyles = (theme: ThemeTokens) => StyleSheet.create({
   },
   keypadWrapper: {
     marginTop: 4,
+    marginBottom: 12,
+  },
+  scanActionWrap: {
+    width: '100%',
+    marginTop: 10,
     marginBottom: 12,
   },
   statusText: {

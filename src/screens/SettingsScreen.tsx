@@ -6,6 +6,7 @@ import { Ionicons } from '@react-native-vector-icons/ionicons';
 
 import { useAuth } from '../features/auth';
 import { useSettings } from '../features/settings';
+import { clearRecentActivities } from '../features/wallet/recentActivityStorage';
 import { ROUTES } from '../navigation/routes/routes';
 import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
 import type { ThemeTokens } from '../types/theme/colors';
@@ -52,6 +53,26 @@ export const SettingsScreen: React.FC<Props> = ({ navigation }) => {
     ]);
   }, [clearSession, navigation, t]);
 
+  const handleDeleteCache = useCallback(() => {
+    Alert.alert(t('settingsDeleteCacheAlertTitle'), t('settingsDeleteCacheAlertMessage'), [
+      { text: t('commonCancel'), style: 'cancel' },
+      {
+        text: t('settingsDeleteCacheTitle'),
+        style: 'destructive',
+        onPress: () => {
+          clearRecentActivities()
+            .then(() => {
+              Alert.alert(t('settingsDeleteCacheSuccessTitle'), t('settingsDeleteCacheSuccessMessage'));
+            })
+            .catch(error => {
+              const message = error instanceof Error ? error.message : String(error);
+              Alert.alert(t('settingsDeleteCacheFailedTitle'), message);
+            });
+        },
+      },
+    ]);
+  }, [t]);
+
   return (
     <View style={styles.container}>
       <StatusBar
@@ -93,6 +114,17 @@ export const SettingsScreen: React.FC<Props> = ({ navigation }) => {
             <Ionicons name="chevron-forward" size={18} color={themeTokens.foregroundMuted} />
           </Pressable>
 
+          <Pressable style={[styles.optionCard, styles.dangerCard]} onPress={handleDeleteCache}>
+            <View style={[styles.iconWrapper, styles.dangerIconWrapper]}>
+              <Ionicons name="trash-outline" size={20} color={themeTokens.danger} />
+            </View>
+            <View style={styles.optionTextCol}>
+              <Text style={[styles.optionTitle, styles.dangerTitle]}>{t('settingsDeleteCacheTitle')}</Text>
+              <Text style={styles.optionSubtitle}>{t('settingsDeleteCacheSubtitle')}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={themeTokens.foregroundMuted} />
+          </Pressable>
+          
           <Pressable style={styles.optionCard} onPress={handleLogout}>
             <View style={styles.iconWrapper}>
               <Ionicons name="log-out-outline" size={20} color={themeTokens.primary} />
@@ -103,6 +135,7 @@ export const SettingsScreen: React.FC<Props> = ({ navigation }) => {
             </View>
             <Ionicons name="chevron-forward" size={18} color={themeTokens.foregroundMuted} />
           </Pressable>
+
         </View>
       </SafeAreaView>
     </View>
@@ -156,6 +189,16 @@ const createStyles = (theme: ThemeTokens) =>
       color: theme.foregroundMuted,
       fontSize: theme.typography.subtext,
       marginTop: 2,
+    },
+    dangerCard: {
+      borderColor: `${theme.danger}55`,
+    },
+    dangerIconWrapper: {
+      borderColor: `${theme.danger}66`,
+      backgroundColor: `${theme.danger}1A`,
+    },
+    dangerTitle: {
+      color: theme.danger,
     },
   });
 

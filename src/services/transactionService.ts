@@ -211,6 +211,10 @@ const fetchGasPrice = async (): Promise<bigint> => {
   return hexToBigInt(result);
 };
 
+export const fetchSuggestedGasPriceWei = async (): Promise<bigint> => {
+  return fetchGasPrice();
+};
+
 const sendRawTransaction = async (payloadHex: string): Promise<string> =>
   jsonRpc<string>('eth_sendRawTransaction', [payloadHex]);
 

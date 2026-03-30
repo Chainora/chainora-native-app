@@ -1,8 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   AppState,
-  type AppStateStatus,
   Pressable,
   ScrollView,
   StatusBar,
@@ -16,16 +15,27 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
+import { RecentActivitySection } from '../components/home/RecentActivitySection';
 import { SendTransactionDialog } from '../components/ui/SendTransactionDialog';
+import { WalletDetailsDialog } from '../components/ui/WalletDetailsDialog';
 import { getActiveNetwork } from '../config/network';
 import { useAuth } from '../features/auth';
 import { useSettings } from '../features/settings';
+import {
+  addRecentActivity,
+  getRecentActivitiesByWallet,
+  type RecentActivity,
+} from '../features/wallet/recentActivityStorage';
 import { useWalletBalance } from '../features/wallet/hooks/useWalletBalance';
 import { ROUTES } from '../navigation/routes/routes';
 import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
 import type { ThemeTokens } from '../types/theme/colors';
+import type { SendTransactionSuccessPayload } from '../components/ui/SendTransactionDialog';
+import { syncWalletActivities } from '../services/activitySyncService';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
+const BALANCE_POLL_INTERVAL_MS = 15_000;
+const ACTIVITY_POLL_INTERVAL_MS = 30_000;
 
 const truncateAddress = (address: string) =>
   `${address.slice(0, 6)}...${address.slice(-4)}`;
@@ -38,9 +48,9 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
   const { initializeSession } = useAuth();
   const balanceState = useWalletBalance(ethAddress);
   const refreshBalanceFn = balanceState.refresh;
-  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const [isAppActive, setIsAppActive] = useState(AppState.currentState === 'active');
-  const [dialogState, setDialogState] = useState({ send: false });
+  const [dialogState, setDialogState] = useState({ send: false, walletDetails: false });
+  const [activities, setActivities] = useState<RecentActivity[]>([]);
   const network = getActiveNetwork();
 
   useEffect(() => {
@@ -51,7 +61,6 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', nextAppState => {
-      appStateRef.current = nextAppState;
       setIsAppActive(nextAppState === 'active');
     });
 
@@ -60,19 +69,41 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
     };
   }, []);
 
+  const loadRecentActivity = useCallback(async () => {
+    try {
+      await syncWalletActivities(ethAddress);
+      const next = await getRecentActivitiesByWallet(ethAddress);
+      setActivities(next);
+    } catch (error) {
+      console.warn('[Home] Failed to load recent activity', error);
+    }
+  }, [ethAddress]);
+
   useEffect(() => {
     if (!isFocused || !isAppActive) {
       return;
     }
 
-    const intervalId = setInterval(() => {
+    const balanceIntervalId = setInterval(() => {
       refreshBalanceFn();
-    }, 10_000);
+    }, BALANCE_POLL_INTERVAL_MS);
+
+    const activityIntervalId = setInterval(() => {
+      loadRecentActivity();
+    }, ACTIVITY_POLL_INTERVAL_MS);
 
     return () => {
-      clearInterval(intervalId);
+      clearInterval(balanceIntervalId);
+      clearInterval(activityIntervalId);
     };
-  }, [refreshBalanceFn, isAppActive, isFocused]);
+  }, [loadRecentActivity, refreshBalanceFn, isAppActive, isFocused]);
+
+  useEffect(() => {
+    if (!isFocused) {
+      return;
+    }
+    loadRecentActivity();
+  }, [isFocused, loadRecentActivity]);
 
   const balanceValue = balanceState.loading
     ? '0.0000'
@@ -86,20 +117,35 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
     setDialogState(prev => ({ ...prev, send: false }));
   }, []);
 
-  const handleSendSuccess = useCallback(() => {
+  const handleSendSuccess = useCallback(async (payload: SendTransactionSuccessPayload) => {
     balanceState.refresh();
-  }, [balanceState]);
+    try {
+      await addRecentActivity({
+        transactionHash: payload.result.transactionHash,
+        fromAddress: ethAddress,
+        toAddress: payload.recipient,
+        amountDisplay: payload.amountDisplay,
+        currencySymbol: payload.currencySymbol,
+        networkName: payload.networkName,
+      });
+      const next = await getRecentActivitiesByWallet(ethAddress);
+      setActivities(next);
+    } catch (error) {
+      console.warn('[Home] Failed to persist recent activity', error);
+    }
+  }, [balanceState, ethAddress]);
 
   const refreshBalance = useCallback(() => {
     balanceState.refresh();
   }, [balanceState]);
 
   const openWalletDetails = useCallback(() => {
-    Alert.alert(
-      t('homeWalletAlertTitle'),
-      `${t('homeAddressLine')}: ${ethAddress}\n\n${t('homePublicKeyLine')}: ${publicKeyHex ? `${publicKeyHex.slice(0, 24)}...` : t('homeUnavailable')}`,
-    );
-  }, [ethAddress, publicKeyHex, t]);
+    setDialogState(prev => ({ ...prev, walletDetails: true }));
+  }, []);
+
+  const closeWalletDetails = useCallback(() => {
+    setDialogState(prev => ({ ...prev, walletDetails: false }));
+  }, []);
 
   const handleBackup = useCallback(() => {
     navigation.navigate(ROUTES.Settings);
@@ -130,9 +176,6 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
                   <Ionicons name="refresh-outline" size={14} color={themeTokens.foregroundMuted} />
                   <Text style={styles.refreshText}>{balanceState.loading ? t('homeUpdating') : t('homeRefresh')}</Text>
                 </Pressable>
-                <View style={styles.liveBadge}>
-                  <Text style={styles.liveText}>{t('homeLive')}</Text>
-                </View>
               </View>
             </View>
 
@@ -170,13 +213,6 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
               <Text style={styles.actionTitle}>{t('homeSendEth')}</Text>
             </Pressable>
 
-            <Pressable style={styles.actionCard} onPress={openWalletDetails}>
-              <View style={styles.actionIconGreen}>
-                <Ionicons name="shield-checkmark-outline" size={20} color={themeTokens.success} />
-              </View>
-              <Text style={styles.actionTitle}>{t('homeWalletDetails')}</Text>
-            </Pressable>
-
             <Pressable style={styles.actionCard} onPress={handleBackup}>
               <View style={styles.actionIconGold}>
                 <Ionicons name="settings-outline" size={20} color={themeTokens.primary} />
@@ -185,22 +221,23 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
             </Pressable>
           </View>
 
-          <Text style={styles.sectionLabel}>{t('homeRecentActivity')}</Text>
-          <View style={styles.activityList}>
-            <View style={styles.activityItem}>
-              <View style={styles.activityMeta}>
-                <Text style={styles.activityType}>{t('homeNoTransactions')}</Text>
-                <Text style={styles.activityAddress}>{t('homeNoTransactionsDesc')}</Text>
-              </View>
-            </View>
-          </View>
+          <RecentActivitySection activities={activities} />
         </ScrollView>
 
         <SendTransactionDialog
           visible={dialogState.send}
           fromAddress={ethAddress}
+          availableAmount={balanceValue}
           onClose={closeSendDialog}
           onSuccess={handleSendSuccess}
+        />
+
+        <WalletDetailsDialog
+          visible={dialogState.walletDetails}
+          onClose={closeWalletDetails}
+          address={ethAddress}
+          publicKeyHex={publicKeyHex}
+          networkName={network.name}
         />
 
       </SafeAreaView>
@@ -392,63 +429,6 @@ const createStyles = (theme: ThemeTokens) => StyleSheet.create({
   actionSubtext: {
     color: theme.foregroundMuted,
     fontSize: theme.typography.body,
-  },
-  activityList: {
-    gap: 12,
-  },
-  activityItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: '#111722',
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: theme.border,
-    padding: 14,
-  },
-  activityIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  activityIconSent: {
-    backgroundColor: 'rgba(255, 77, 79, 0.1)',
-  },
-  activityIconReceived: {
-    backgroundColor: 'rgba(47, 214, 123, 0.1)',
-  },
-  activityMeta: {
-    flex: 1,
-  },
-  activityType: {
-    color: theme.foreground,
-    fontSize: theme.typography.body,
-    fontWeight: '700',
-  },
-  activityAddress: {
-    color: theme.foregroundMuted,
-    fontSize: theme.typography.subtext,
-    marginTop: 2,
-  },
-  activityValueCol: {
-    alignItems: 'flex-end',
-  },
-  activityAmount: {
-    fontSize: theme.typography.body,
-    fontWeight: '700',
-  },
-  amountSent: {
-    color: '#FF4D4F',
-  },
-  amountReceived: {
-    color: '#2FD67B',
-  },
-  activityTime: {
-    color: theme.foregroundMuted,
-    fontSize: theme.typography.subtext,
-    marginTop: 2,
   },
 });
 
