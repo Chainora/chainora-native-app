@@ -15,6 +15,9 @@ export type RootStackParamList = {
     publicKeyHex?: string;
     mode: ScanMode;
   };
+  [ROUTES.QRScanner]: {
+    ethAddress: string;
+  };
   [ROUTES.ActivateSuccess]: {
     ethAddress: string;
     publicKeyHex?: string;

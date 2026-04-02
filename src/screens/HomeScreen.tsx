@@ -256,7 +256,7 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
   }, [navigation]);
 
   const handleScanQr = () => {
-    Alert.alert(t('homeScanQrTitle'), t('homeScanQrSubtitle'));
+    navigation.navigate(ROUTES.QRScanner, { ethAddress });
   };
 
   const copyAddress = useCallback(() => {

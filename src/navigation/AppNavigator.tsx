@@ -17,6 +17,7 @@ import EcdhBackupScreen from '../screens/EcdhBackupScreen.tsx';
 import SettingsScreen from '../screens/SettingsScreen';
 import GeneralScreen from '../screens/GeneralScreen';
 import ChangePinScreen from '../screens/ChangePinScreen';
+import QRScannerScreen from '../screens/QRScannerScreen';
 import Header from '../components/layout/header';
 import { useSettings } from '../features/settings';
 import type { RootStackParamList } from './routes/rootStackParamList';
@@ -83,6 +84,7 @@ export const AppNavigator: React.FC = () => {
           <Stack.Screen name={ROUTES.Settings} component={SettingsScreen} />
           <Stack.Screen name={ROUTES.General} component={GeneralScreen} />
           <Stack.Screen name={ROUTES.ChangePin} component={ChangePinScreen} />
+          <Stack.Screen name={ROUTES.QRScanner} component={QRScannerScreen} />
           <Stack.Screen
             name={ROUTES.Home}
             component={HomeScreen}

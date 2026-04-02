@@ -96,8 +96,10 @@ const derToSignature = (der: Uint8Array): Signature => {
   const firstInteger = parseDerInteger(derSequence, seqOffset);
   const secondInteger = parseDerInteger(derSequence, firstInteger.nextOffset);
 
-  if (secondInteger.nextOffset !== derSequence.length) {
-    throw new Error('Unexpected bytes after DER signature');
+  // Some cards append TLV/padding bytes inside the reported sequence.
+  // For ECDSA recovery we only need the first two INTEGER values (r, s).
+  if (secondInteger.nextOffset < seqOffset || secondInteger.nextOffset > derSequence.length) {
+    throw new Error('Malformed DER signature payload');
   }
 
   const rBytes = padTo32Bytes(firstInteger.value);

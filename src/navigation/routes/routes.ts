@@ -7,6 +7,7 @@ export const ROUTES = {
   General: 'General',
   ChangePin: 'ChangePin',
   Home: 'Home',
+  QRScanner: 'QRScanner',
   ActivateSuccess: 'ActivateSuccess',
 } as const;
 
