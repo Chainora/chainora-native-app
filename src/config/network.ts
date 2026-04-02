@@ -1,4 +1,4 @@
-export type NetworkKey = 'eth' | 'polygon' | 'bnb';
+export type NetworkKey = 'eth' | 'polygon' | 'bnb' | 'chainora';
 
 export type NetworkConfig = {
   key: NetworkKey;
@@ -11,6 +11,7 @@ export type NetworkConfig = {
 const LOCAL_RPC_ETH = 'http://127.0.0.1:8545';
 const LOCAL_RPC_POLYGON = 'http://127.0.0.1:8546';
 const LOCAL_RPC_BNB = 'http://127.0.0.1:8547';
+const CHAINORA_RPC = 'http://23.94.63.207:8545';
 
 export const NETWORKS: Record<NetworkKey, NetworkConfig> = {
   eth: {
@@ -34,9 +35,16 @@ export const NETWORKS: Record<NetworkKey, NetworkConfig> = {
     rpcUrl: LOCAL_RPC_BNB,
     currencySymbol: 'BNB',
   },
+  chainora: {
+    key: 'chainora',
+    name: 'Chainora Testnet',
+    chainId: 1123337227327254,
+    rpcUrl: CHAINORA_RPC,
+    currencySymbol: 'tCNR',
+  },
 };
 
-let activeNetworkKey: NetworkKey = 'eth';
+let activeNetworkKey: NetworkKey = 'chainora';
 
 export const getActiveNetwork = (): NetworkConfig => NETWORKS[activeNetworkKey];
 

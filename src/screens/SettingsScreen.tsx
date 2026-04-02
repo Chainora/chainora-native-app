@@ -9,6 +9,7 @@ import { useSettings } from '../features/settings';
 import { clearRecentActivities } from '../features/wallet/recentActivityStorage';
 import { ROUTES } from '../navigation/routes/routes';
 import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
+import { clearActivitySyncState } from '../services/activitySyncService';
 import type { ThemeTokens } from '../types/theme/colors';
 
 type Props = NativeStackScreenProps<RootStackParamList, typeof ROUTES.Settings>;
@@ -60,7 +61,7 @@ export const SettingsScreen: React.FC<Props> = ({ navigation }) => {
         text: t('settingsDeleteCacheTitle'),
         style: 'destructive',
         onPress: () => {
-          clearRecentActivities()
+          Promise.all([clearRecentActivities(), clearActivitySyncState()])
             .then(() => {
               Alert.alert(t('settingsDeleteCacheSuccessTitle'), t('settingsDeleteCacheSuccessMessage'));
             })

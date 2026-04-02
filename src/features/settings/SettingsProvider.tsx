@@ -3,8 +3,16 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { useColorScheme } from 'react-native';
 
 import { translate, type LocaleKey } from '../../locales';
+import { setActiveNetwork } from '../../config/network';
 import { resolveThemeTokens } from '../../types/theme/colors';
-import type { AppCurrency, AppLanguage, AppSettings, ResolvedTheme, ThemePreference } from './types';
+import type {
+  AppCurrency,
+  AppLanguage,
+  AppNetwork,
+  AppSettings,
+  ResolvedTheme,
+  ThemePreference,
+} from './types';
 
 const STORAGE_KEY = '@chainora/settings';
 
@@ -12,6 +20,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   language: 'en',
   currency: 'bnb',
   theme: 'system',
+  network: 'chainora',
 };
 
 type SettingsContextValue = {
@@ -22,6 +31,7 @@ type SettingsContextValue = {
   setLanguage: (language: AppLanguage) => void;
   setCurrency: (currency: AppCurrency) => void;
   setTheme: (theme: ThemePreference) => void;
+  setNetwork: (network: AppNetwork) => void;
   t: (key: LocaleKey) => string;
 };
 
@@ -42,6 +52,7 @@ const parseStoredSettings = (raw: string | null): AppSettings => {
         parsed.theme === 'dark' || parsed.theme === 'light' || parsed.theme === 'system'
           ? parsed.theme
           : 'system',
+      network: parsed.network === 'eth' ? 'eth' : 'chainora',
     };
   } catch {
     return DEFAULT_SETTINGS;
@@ -61,7 +72,9 @@ export const SettingsProvider: React.FC<React.PropsWithChildren> = ({ children }
       if (!mounted) {
         return;
       }
-      setSettings(parseStoredSettings(raw));
+      const parsed = parseStoredSettings(raw);
+      setActiveNetwork(parsed.network);
+      setSettings(parsed);
       setHydrated(true);
     };
 
@@ -112,6 +125,14 @@ export const SettingsProvider: React.FC<React.PropsWithChildren> = ({ children }
     [updateSettings],
   );
 
+  const setNetwork = useCallback(
+    (network: AppNetwork) => {
+      setActiveNetwork(network);
+      updateSettings(prev => ({ ...prev, network }));
+    },
+    [updateSettings],
+  );
+
   const resolvedTheme: ResolvedTheme =
     settings.theme === 'system'
       ? systemColorScheme === 'light'
@@ -137,9 +158,10 @@ export const SettingsProvider: React.FC<React.PropsWithChildren> = ({ children }
       setLanguage,
       setCurrency,
       setTheme,
+      setNetwork,
       t,
     }),
-    [hydrated, resolvedTheme, setCurrency, setLanguage, setTheme, settings, t, themeTokens],
+    [hydrated, resolvedTheme, setCurrency, setLanguage, setNetwork, setTheme, settings, t, themeTokens],
   );
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;

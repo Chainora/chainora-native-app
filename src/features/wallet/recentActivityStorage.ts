@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getActiveNetwork, type NetworkKey } from '../../config/network';
 
 const STORAGE_KEY = '@chainora/recentActivities';
 const MAX_ACTIVITIES = 30;
@@ -6,6 +7,7 @@ const MAX_ACTIVITIES = 30;
 export type RecentActivity = {
   id: string;
   walletAddress: string;
+  networkKey: NetworkKey;
   kind: 'send' | 'receive';
   transactionHash: string;
   fromAddress: string;
@@ -26,6 +28,7 @@ const isRecentActivity = (value: unknown): value is RecentActivity => {
     (activity.kind === 'send' || activity.kind === 'receive') &&
     typeof activity.id === 'string' &&
     typeof activity.walletAddress === 'string' &&
+    typeof activity.networkKey === 'string' &&
     typeof activity.transactionHash === 'string' &&
     typeof activity.fromAddress === 'string' &&
     typeof activity.toAddress === 'string' &&
@@ -77,6 +80,7 @@ const parseStoredActivities = (raw: string | null): RecentActivity[] => {
           return {
             id: legacy.id,
             walletAddress: legacy.fromAddress.toLowerCase(),
+            networkKey: getActiveNetwork().key,
             kind: 'send',
             transactionHash: legacy.transactionHash,
             fromAddress: legacy.fromAddress.toLowerCase(),
@@ -110,11 +114,15 @@ export const getRecentActivities = async (): Promise<RecentActivity[]> => {
 export const getRecentActivitiesByWallet = async (walletAddress: string): Promise<RecentActivity[]> => {
   const all = await getRecentActivities();
   const normalized = walletAddress.toLowerCase();
-  return all.filter(item => item.walletAddress === normalized).slice(0, MAX_ACTIVITIES);
+  const networkKey = getActiveNetwork().key;
+  return all
+    .filter(item => item.walletAddress === normalized && item.networkKey === networkKey)
+    .slice(0, MAX_ACTIVITIES);
 };
 
 export type AddRecentActivityParams = {
   transactionHash: string;
+  networkKey: NetworkKey;
   fromAddress: string;
   toAddress: string;
   amountDisplay: string;
@@ -125,8 +133,8 @@ export type AddRecentActivityParams = {
 const buildId = (hash: string, kind: 'send' | 'receive', walletAddress: string) =>
   `${Date.now()}-${kind}-${walletAddress.slice(2, 8)}-${hash.slice(2, 10)}`;
 
-const buildItemKey = (item: Pick<RecentActivity, 'transactionHash' | 'walletAddress' | 'kind'>) =>
-  `${item.transactionHash}:${item.walletAddress}:${item.kind}`;
+const buildItemKey = (item: Pick<RecentActivity, 'transactionHash' | 'walletAddress' | 'kind' | 'networkKey'>) =>
+  `${item.transactionHash}:${item.walletAddress}:${item.kind}:${item.networkKey}`;
 
 export const addRecentActivities = async (
   inputs: AddRecentActivityParams[],
@@ -141,8 +149,8 @@ export const addRecentActivities = async (
   for (const input of inputs) {
     const fromAddress = input.fromAddress.toLowerCase();
     const toAddress = input.toAddress.toLowerCase();
-    removeKeys.add(`${input.transactionHash}:${fromAddress}:send`);
-    removeKeys.add(`${input.transactionHash}:${toAddress}:receive`);
+    removeKeys.add(`${input.transactionHash}:${fromAddress}:send:${input.networkKey}`);
+    removeKeys.add(`${input.transactionHash}:${toAddress}:receive:${input.networkKey}`);
   }
 
   const filteredExisting = existing.filter(item => !removeKeys.has(buildItemKey(item)));
@@ -159,6 +167,7 @@ export const addRecentActivities = async (
     const sentItem: RecentActivity = {
       id: buildId(input.transactionHash, 'send', fromAddress),
       walletAddress: fromAddress,
+      networkKey: input.networkKey,
       kind: 'send',
       transactionHash: input.transactionHash,
       fromAddress,
@@ -172,6 +181,7 @@ export const addRecentActivities = async (
     const receivedItem: RecentActivity = {
       id: buildId(input.transactionHash, 'receive', toAddress),
       walletAddress: toAddress,
+      networkKey: input.networkKey,
       kind: 'receive',
       transactionHash: input.transactionHash,
       fromAddress,

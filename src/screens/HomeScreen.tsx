@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   AppState,
@@ -36,6 +36,8 @@ import { syncWalletActivities } from '../services/activitySyncService';
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 const BALANCE_POLL_INTERVAL_MS = 15_000;
 const ACTIVITY_POLL_INTERVAL_MS = 30_000;
+const POST_SEND_BALANCE_REFETCH_DELAY_MS = 3_500;
+const POST_SEND_ACTIVITY_REFETCH_DELAY_MS = 3_500;
 
 const truncateAddress = (address: string) =>
   `${address.slice(0, 6)}...${address.slice(-4)}`;
@@ -48,10 +50,39 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
   const { initializeSession } = useAuth();
   const balanceState = useWalletBalance(ethAddress);
   const refreshBalanceFn = balanceState.refresh;
+  const network = getActiveNetwork();
   const [isAppActive, setIsAppActive] = useState(AppState.currentState === 'active');
+  const wasAppActiveRef = useRef(isAppActive);
+  const lastNetworkKeyRef = useRef(network.key);
+  const activityInFlightRef = useRef(false);
+  const queuedActivityRefreshRef = useRef(false);
+  const activitySignatureRef = useRef('');
+  const postSendBalanceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const postSendActivityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
   const [dialogState, setDialogState] = useState({ send: false, walletDetails: false });
   const [activities, setActivities] = useState<RecentActivity[]>([]);
-  const network = getActiveNetwork();
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      if (postSendBalanceTimeoutRef.current) {
+        clearTimeout(postSendBalanceTimeoutRef.current);
+      }
+      if (postSendActivityTimeoutRef.current) {
+        clearTimeout(postSendActivityTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const setActivitiesIfChanged = useCallback((next: RecentActivity[]) => {
+    const signature = next.map(item => item.id).join('|');
+    if (activitySignatureRef.current === signature) {
+      return;
+    }
+    activitySignatureRef.current = signature;
+    setActivities(next);
+  }, []);
 
   useEffect(() => {
     initializeSession(ethAddress).catch(error => {
@@ -70,14 +101,36 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
   }, []);
 
   const loadRecentActivity = useCallback(async () => {
+    if (activityInFlightRef.current) {
+      queuedActivityRefreshRef.current = true;
+      return;
+    }
+
+    activityInFlightRef.current = true;
     try {
+      // Render cached local activity first for instant UI response after login.
+      const cached = await getRecentActivitiesByWallet(ethAddress);
+      if (mountedRef.current) {
+        setActivitiesIfChanged(cached);
+      }
+
       await syncWalletActivities(ethAddress);
       const next = await getRecentActivitiesByWallet(ethAddress);
-      setActivities(next);
+      if (mountedRef.current) {
+        setActivitiesIfChanged(next);
+      }
     } catch (error) {
       console.warn('[Home] Failed to load recent activity', error);
+    } finally {
+      activityInFlightRef.current = false;
+      if (queuedActivityRefreshRef.current) {
+        queuedActivityRefreshRef.current = false;
+        setTimeout(() => {
+          loadRecentActivity();
+        }, 0);
+      }
     }
-  }, [ethAddress]);
+  }, [ethAddress, setActivitiesIfChanged]);
 
   useEffect(() => {
     if (!isFocused || !isAppActive) {
@@ -105,9 +158,42 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
     loadRecentActivity();
   }, [isFocused, loadRecentActivity]);
 
-  const balanceValue = balanceState.loading
-    ? '0.0000'
-    : balanceState.formatted || '0.0000';
+  useEffect(() => {
+    if (!isFocused) {
+      wasAppActiveRef.current = isAppActive;
+      return;
+    }
+
+    const becameActive = !wasAppActiveRef.current && isAppActive;
+    wasAppActiveRef.current = isAppActive;
+    if (!becameActive) {
+      return;
+    }
+
+    // Single refresh pass when app returns from background.
+    refreshBalanceFn();
+    loadRecentActivity();
+  }, [isAppActive, isFocused, loadRecentActivity, refreshBalanceFn]);
+
+  useEffect(() => {
+    if (!isFocused || !isAppActive) {
+      return;
+    }
+
+    if (lastNetworkKeyRef.current === network.key) {
+      return;
+    }
+
+    // Refresh immediately after switching network so displayed balance matches selected chain.
+    lastNetworkKeyRef.current = network.key;
+    refreshBalanceFn();
+    loadRecentActivity();
+  }, [isAppActive, isFocused, loadRecentActivity, network.key, refreshBalanceFn]);
+
+  const balanceValue = useMemo(
+    () => balanceState.formatted || '0.0000',
+    [balanceState.formatted],
+  );
 
   const openSendDialog = useCallback(() => {
     setDialogState(prev => ({ ...prev, send: true }));
@@ -119,9 +205,18 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const handleSendSuccess = useCallback(async (payload: SendTransactionSuccessPayload) => {
     balanceState.refresh();
+
+    if (postSendBalanceTimeoutRef.current) {
+      clearTimeout(postSendBalanceTimeoutRef.current);
+    }
+    postSendBalanceTimeoutRef.current = setTimeout(() => {
+      balanceState.refresh();
+    }, POST_SEND_BALANCE_REFETCH_DELAY_MS);
+
     try {
       await addRecentActivity({
         transactionHash: payload.result.transactionHash,
+        networkKey: network.key,
         fromAddress: ethAddress,
         toAddress: payload.recipient,
         amountDisplay: payload.amountDisplay,
@@ -129,11 +224,20 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
         networkName: payload.networkName,
       });
       const next = await getRecentActivitiesByWallet(ethAddress);
-      setActivities(next);
+      if (mountedRef.current) {
+        setActivitiesIfChanged(next);
+      }
+
+      if (postSendActivityTimeoutRef.current) {
+        clearTimeout(postSendActivityTimeoutRef.current);
+      }
+      postSendActivityTimeoutRef.current = setTimeout(() => {
+        loadRecentActivity();
+      }, POST_SEND_ACTIVITY_REFETCH_DELAY_MS);
     } catch (error) {
       console.warn('[Home] Failed to persist recent activity', error);
     }
-  }, [balanceState, ethAddress]);
+  }, [balanceState, ethAddress, loadRecentActivity, network.key, setActivitiesIfChanged]);
 
   const refreshBalance = useCallback(() => {
     balanceState.refresh();
@@ -150,6 +254,10 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
   const handleBackup = useCallback(() => {
     navigation.navigate(ROUTES.Settings);
   }, [navigation]);
+
+  const handleScanQr = () => {
+    Alert.alert(t('homeScanQrTitle'), t('homeScanQrSubtitle'));
+  };
 
   const copyAddress = useCallback(() => {
     Clipboard.setString(ethAddress);
@@ -211,6 +319,13 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
                 <Ionicons name="paper-plane-outline" size={20} color={themeTokens.primary} />
               </View>
               <Text style={styles.actionTitle}>{t('homeSendEth')}</Text>
+            </Pressable>
+
+            <Pressable style={styles.actionCard} onPress={handleScanQr}>
+              <View style={styles.actionIconGold}>
+                <Ionicons name="qr-code-outline" size={20} color={themeTokens.primary} />
+              </View>
+              <Text style={styles.actionTitle}>{t('homeScanQrTitle')}</Text>
             </Pressable>
 
             <Pressable style={styles.actionCard} onPress={handleBackup}>

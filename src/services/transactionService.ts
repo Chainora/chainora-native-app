@@ -1,12 +1,15 @@
 import { keccak_256 } from '@noble/hashes/sha3.js';
+import { getAddress } from 'viem';
 
 import { getActiveNetwork } from '../config/network';
 import { signTransactionHash } from './cardService';
 import { recoverSignature } from './transaction/signatureUtils';
+import { getPublicViemClient } from './web3Client';
 import { bytesToHex, hexToBytes } from '../utils/encoding';
 
-const RPC_TIMEOUT_MS = 10_000;
 const LEGACY_GAS_LIMIT = 21_000n;
+const GAS_ESTIMATE_BUFFER_NUMERATOR = 12n;
+const GAS_ESTIMATE_BUFFER_DENOMINATOR = 10n;
 const ZERO_BYTES = new Uint8Array(0);
 
 export type SendEthParams = {
@@ -40,69 +43,7 @@ export const parseEther = (value: string): bigint => {
   return wholeWei + fractionWei;
 };
 
-const jsonRpc = async <T>(method: string, params: unknown[]): Promise<T> => {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), RPC_TIMEOUT_MS);
-
-  try {
-    const response = await fetch(getActiveNetwork().rpcUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      const message = await response.text();
-      throw new Error(`RPC ${method} failed with status ${response.status}: ${message}`);
-    }
-
-    const payload = (await response.json()) as { result?: T; error?: { message?: string } };
-    if (payload.error) {
-      throw new Error(payload.error.message ?? `RPC ${method} returned an error`);
-    }
-    if (payload.result === undefined) {
-      throw new Error(`RPC ${method} returned no result`);
-    }
-
-    return payload.result;
-  } finally {
-    clearTimeout(timeout);
-  }
-};
-
-const hexToBigInt = (value: string): bigint => {
-  const sanitized = value.startsWith('0x') ? value.slice(2) : value;
-  if (sanitized.length === 0) {
-    return 0n;
-  }
-  return BigInt(`0x${sanitized}`);
-};
-
-const toChecksumAddress = (address: string): string => {
-  const hex = address.startsWith('0x') ? address.slice(2) : address;
-  if (hex.length !== 40) {
-    throw new Error('Ethereum address must contain 40 hex characters');
-  }
-  const lower = hex.toLowerCase();
-  const ascii = new Uint8Array(lower.length);
-  for (let index = 0; index < lower.length; index += 1) {
-    ascii[index] = lower.charCodeAt(index);
-  }
-  const hash = keccak_256(ascii);
-  const hashHex = bytesToHex(hash).toLowerCase();
-  let result = '0x';
-  for (let index = 0; index < lower.length; index += 1) {
-    const character = lower[index];
-    const shouldUppercase = parseInt(hashHex[index], 16) >= 8;
-    result += shouldUppercase ? character.toUpperCase() : character;
-  }
-  return result;
-};
-
-const sanitizeAddress = (address: string): string => toChecksumAddress(address);
+const sanitizeAddress = (address: string): string => getAddress(address);
 
 const concat = (...chunks: Uint8Array[]): Uint8Array => {
   const total = chunks.reduce((sum, item) => sum + item.length, 0);
@@ -202,21 +143,55 @@ const buildSignedLegacyTx = (params: {
 };
 
 const fetchNonce = async (address: string): Promise<bigint> => {
-  const result = await jsonRpc<string>('eth_getTransactionCount', [address, 'pending']);
-  return hexToBigInt(result);
+  const network = getActiveNetwork();
+  const client = getPublicViemClient(network);
+  const nonce = await client.getTransactionCount({
+    address: getAddress(address),
+    blockTag: 'pending',
+  });
+  return BigInt(nonce);
 };
 
 const fetchGasPrice = async (): Promise<bigint> => {
-  const result = await jsonRpc<string>('eth_gasPrice', []);
-  return hexToBigInt(result);
+  const network = getActiveNetwork();
+  const client = getPublicViemClient(network);
+  return client.getGasPrice();
+};
+
+const applyGasEstimateBuffer = (estimate: bigint): bigint =>
+  (estimate * GAS_ESTIMATE_BUFFER_NUMERATOR + (GAS_ESTIMATE_BUFFER_DENOMINATOR - 1n)) /
+  GAS_ESTIMATE_BUFFER_DENOMINATOR;
+
+const estimateGasLimit = async (params: {
+  from: string;
+  to: string;
+  valueWei: bigint;
+  data: Uint8Array;
+}): Promise<bigint | null> => {
+  try {
+    const network = getActiveNetwork();
+    const client = getPublicViemClient(network);
+    const estimated = await client.estimateGas({
+      account: getAddress(params.from),
+      to: getAddress(params.to),
+      value: params.valueWei,
+      data: (`0x${bytesToHex(params.data)}` as `0x${string}`),
+    });
+    return estimated;
+  } catch {
+    return null;
+  }
 };
 
 export const fetchSuggestedGasPriceWei = async (): Promise<bigint> => {
   return fetchGasPrice();
 };
 
-const sendRawTransaction = async (payloadHex: string): Promise<string> =>
-  jsonRpc<string>('eth_sendRawTransaction', [payloadHex]);
+const sendRawTransaction = async (payloadHex: string): Promise<string> => {
+  const network = getActiveNetwork();
+  const client = getPublicViemClient(network);
+  return client.sendRawTransaction({ serializedTransaction: payloadHex as `0x${string}` });
+};
 
 const ensureHexData = (dataHex?: string): Uint8Array => {
   if (!dataHex) {
@@ -244,8 +219,19 @@ export const sendEthTransaction = async ({
 
   const resolvedNonce = nonce ?? (await fetchNonce(fromChecksum));
   const resolvedGasPrice = gasPriceWei ?? (await fetchGasPrice());
-  const resolvedGasLimit = gasLimitWei ?? LEGACY_GAS_LIMIT;
   const data = ensureHexData(dataHex);
+  const estimatedGasLimit = await estimateGasLimit({
+    from: fromChecksum,
+    to: toChecksum,
+    valueWei,
+    data,
+  });
+  const baselineGasLimit = gasLimitWei ?? LEGACY_GAS_LIMIT;
+  const resolvedGasLimit = estimatedGasLimit
+    ? baselineGasLimit > estimatedGasLimit
+      ? baselineGasLimit
+      : applyGasEstimateBuffer(estimatedGasLimit)
+    : baselineGasLimit;
 
   const unsigned = buildUnsignedLegacyTx({
     nonce: resolvedNonce,

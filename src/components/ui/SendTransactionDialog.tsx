@@ -246,29 +246,43 @@ export const SendTransactionDialog: React.FC<SendTransactionDialogProps> = ({
 
   const handleFlowScan = useCallback(async (): Promise<WalletActionResult> => {
     if (!pendingTxConfig) {
-      throw new Error(t('sendErrorMissingDetails'));
+      return {
+        ok: false,
+        message: t('sendErrorMissingDetails'),
+      };
     }
 
-    const outcome = await sendEthTransaction({
-      from: fromAddress,
-      to: recipient.trim(),
-      valueWei: pendingTxConfig.valueWei,
-      pin,
-      gasPriceWei: pendingTxConfig.gasPriceWei,
-      gasLimitWei: pendingTxConfig.gasLimitWei,
-    });
+    try {
+      const outcome = await sendEthTransaction({
+        from: fromAddress,
+        to: recipient.trim(),
+        valueWei: pendingTxConfig.valueWei,
+        pin,
+        gasPriceWei: pendingTxConfig.gasPriceWei,
+        gasLimitWei: pendingTxConfig.gasLimitWei,
+      });
 
-    pendingResultRef.current = outcome;
-    return {
-      ok: true,
-      message: t('sendStatusSuccess'),
-    };
+      pendingResultRef.current = outcome;
+      return {
+        ok: true,
+        message: t('sendStatusSuccess'),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        ok: false,
+        message,
+      };
+    }
   }, [fromAddress, pendingTxConfig, pin, recipient, t]);
 
   const handleScanSuccess = useCallback(async () => {
     const outcome = pendingResultRef.current;
     if (!outcome) {
-      throw new Error(t('sendErrorMissingDetails'));
+      setScanDialogVisible(false);
+      setError(t('sendErrorMissingDetails'));
+      setPhase('review');
+      return;
     }
 
     setResult(outcome);

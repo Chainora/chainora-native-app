@@ -48,7 +48,7 @@ const OptionGroup: React.FC<{
 };
 
 export const GeneralScreen: React.FC<Props> = () => {
-  const { settings, resolvedTheme, setCurrency, setLanguage, setTheme, t, themeTokens } = useSettings();
+  const { settings, resolvedTheme, setCurrency, setLanguage, setNetwork, setTheme, t, themeTokens } = useSettings();
   const styles = useMemo(() => createStyles(themeTokens), [themeTokens]);
 
   const languageOptions: OptionItem[] = [
@@ -66,6 +66,11 @@ export const GeneralScreen: React.FC<Props> = () => {
     { value: 'dark', label: t('themeDark') },
     { value: 'light', label: t('themeLight') },
     { value: 'system', label: t('themeSystem') },
+  ];
+
+  const networkOptions: OptionItem[] = [
+    { value: 'chainora', label: t('networkChainoraTestnet') },
+    { value: 'eth', label: t('networkEth') },
   ];
 
   return (
@@ -97,6 +102,14 @@ export const GeneralScreen: React.FC<Props> = () => {
             options={themeOptions}
             selected={settings.theme}
             onSelect={value => setTheme(value as 'dark' | 'light' | 'system')}
+            theme={themeTokens}
+          />
+
+          <OptionGroup
+            title={t('generalNetwork')}
+            options={networkOptions}
+            selected={settings.network}
+            onSelect={value => setNetwork(value as 'eth' | 'chainora')}
             theme={themeTokens}
           />
 

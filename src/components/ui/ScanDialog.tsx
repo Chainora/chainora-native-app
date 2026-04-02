@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Animated, Easing, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Animated, Easing, Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import NfcManager from 'react-native-nfc-manager';
 import Video from 'react-native-video';
 
 import { AppButton } from '../AppButton';
@@ -267,6 +268,20 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
     ]).start();
   }, [shakeAnim]);
 
+  const openNfcSettings = useCallback(async () => {
+    try {
+      const manager = NfcManager as unknown as { goToNfcSetting?: () => Promise<void> };
+      if (manager.goToNfcSetting) {
+        await manager.goToNfcSetting();
+        return;
+      }
+
+      await Linking.openSettings();
+    } catch {
+      showToast(t('scanOpenSettingsFail'), 'error');
+    }
+  }, [showToast, t]);
+
   const resetForMode = useCallback(
     (nextMode: ScanMode, snapIndicator = true) => {
       operationTokenRef.current += 1;
@@ -314,7 +329,7 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
       return;
     }
     resetForMode(initialMode ?? 'init');
-  }, [visible, mode, resetForMode, modalScaleAnim, modalOpacityAnim, initialMode, prefilledPin, onStatusChange]);
+  }, [visible, mode, resetForMode, modalScaleAnim, modalOpacityAnim, initialMode, prefilledPin, onStatusChange, t]);
 
   const handleModeChange = useCallback(
     (nextMode: ScanMode) => {
@@ -345,7 +360,14 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
 
   const beginScan = useCallback(async () => {
     if (isNfcEnabled === false) {
-      Alert.alert(t('scanNfcDisabledTitle'), t('scanNfcDisabledMessage'));
+      Alert.alert(t('scanNfcDisabledTitle'), t('scanNfcDisabledMessage'), [
+        {
+          text: t('scanOpenSettings'),
+          onPress: () => {
+            void openNfcSettings();
+          },
+        },
+      ]);
       showToast(t('scanToastNfcDisabled'), 'error');
       shakeDialog();
       return;
@@ -406,7 +428,20 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
       showToast(fallbackMessage, 'error');
       shakeDialog();
     }
-  }, [isNfcEnabled, mode, onFlowScan, onStatusChange, onSuccess, pinValue, prefilledPin, showToast, shakeDialog, t, types]);
+  }, [
+    isNfcEnabled,
+    mode,
+    onFlowScan,
+    onStatusChange,
+    onSuccess,
+    openNfcSettings,
+    pinValue,
+    prefilledPin,
+    showToast,
+    shakeDialog,
+    t,
+    types,
+  ]);
 
   const handleSubmitPin = useCallback(() => {
     if (types === 'flow') {

@@ -1,106 +1,16 @@
-import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getAddress } from 'viem';
 
 import { getActiveNetwork } from '../config/network';
 import {
   addRecentActivities,
   type AddRecentActivityParams,
 } from '../features/wallet/recentActivityStorage';
+import { getPublicViemClient } from './web3Client';
 
-const LOCAL_HOSTS = ['127.0.0.1', 'localhost'];
 const INITIAL_SCAN_LIMIT = 40n;
-const INCREMENTAL_SCAN_LIMIT = 40n;
 const CURSOR_PREFIX = '@chainora/activitySyncCursor';
 const inFlightSyncs = new Map<string, Promise<void>>();
-
-type RpcTransaction = {
-  hash: string;
-  from: string;
-  to: string | null;
-  value: string;
-};
-
-type RpcBlock = {
-  transactions?: RpcTransaction[];
-};
-
-const buildRpcCandidates = (rpcUrl: string): string[] => {
-  const unique = new Set<string>([rpcUrl]);
-
-  try {
-    const parsed = new URL(rpcUrl);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return Array.from(unique);
-    }
-
-    const isLocalHost = LOCAL_HOSTS.includes(parsed.hostname);
-    if (!isLocalHost || Platform.OS !== 'android') {
-      return Array.from(unique);
-    }
-
-    ['10.0.2.2', '10.0.3.2'].forEach(host => {
-      const candidate = new URL(rpcUrl);
-      candidate.hostname = host;
-      unique.add(candidate.toString());
-    });
-  } catch {
-    return Array.from(unique);
-  }
-
-  return Array.from(unique);
-};
-
-const jsonRpc = async <T>(method: string, params: unknown[]): Promise<T> => {
-  const network = getActiveNetwork();
-  const candidates = buildRpcCandidates(network.rpcUrl);
-  let lastError: Error | null = null;
-
-  for (const endpoint of candidates) {
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 1,
-          method,
-          params,
-        }),
-      });
-
-      if (!response.ok) {
-        const bodyText = await response.text();
-        throw new Error(`RPC ${method} failed (${response.status}): ${bodyText}`);
-      }
-
-      const payload = (await response.json()) as { result?: T; error?: { message?: string } };
-      if (payload.error) {
-        throw new Error(payload.error.message ?? `RPC ${method} failed`);
-      }
-
-      if (payload.result === undefined) {
-        throw new Error(`RPC ${method} returned no result`);
-      }
-
-      return payload.result;
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
-    }
-  }
-
-  throw lastError ?? new Error(`RPC ${method} failed`);
-};
-
-const hexToBigInt = (value: string): bigint => {
-  if (!value || value === '0x') {
-    return 0n;
-  }
-  return BigInt(value);
-};
-
-const toHexBlock = (value: bigint): string => `0x${value.toString(16)}`;
 
 const formatFromWei = (wei: bigint): string => {
   const weiPerUnit = 1_000_000_000_000_000_000n;
@@ -139,6 +49,8 @@ export const clearActivitySyncState = async (): Promise<void> => {
 export const syncWalletActivities = async (walletAddress: string): Promise<void> => {
   const normalizedWallet = walletAddress.toLowerCase();
   const network = getActiveNetwork();
+  const client = getPublicViemClient(network);
+  const wallet = getAddress(normalizedWallet).toLowerCase();
   const syncKey = `${network.key}:${normalizedWallet}`;
 
   if (inFlightSyncs.has(syncKey)) {
@@ -147,15 +59,13 @@ export const syncWalletActivities = async (walletAddress: string): Promise<void>
   }
 
   const run = (async () => {
-    let latestHex: string;
+    let latest: bigint;
     try {
-      latestHex = await jsonRpc<string>('eth_blockNumber', []);
+      latest = await client.getBlockNumber();
     } catch (error) {
       console.warn('[activitySync] Unable to read latest block', error);
       return;
     }
-
-    const latest = hexToBigInt(latestHex);
     let start: bigint;
 
     let cursor: bigint | null = null;
@@ -169,10 +79,6 @@ export const syncWalletActivities = async (walletAddress: string): Promise<void>
       start = latest > INITIAL_SCAN_LIMIT ? latest - INITIAL_SCAN_LIMIT : 0n;
     } else {
       start = cursor + 1n;
-      const maxStart = latest > INCREMENTAL_SCAN_LIMIT ? latest - INCREMENTAL_SCAN_LIMIT : 0n;
-      if (start < maxStart) {
-        start = maxStart;
-      }
     }
 
     if (start > latest) {
@@ -183,9 +89,12 @@ export const syncWalletActivities = async (walletAddress: string): Promise<void>
     const seenTxHashes = new Set<string>();
 
     for (let block = start; block <= latest; block += 1n) {
-      let blockData: RpcBlock;
+      let blockData: Awaited<ReturnType<typeof client.getBlock>>;
       try {
-        blockData = await jsonRpc<RpcBlock>('eth_getBlockByNumber', [toHexBlock(block), true]);
+        blockData = await client.getBlock({
+          blockNumber: block,
+          includeTransactions: true,
+        });
       } catch (error) {
         console.warn('[activitySync] Failed reading block', block.toString(), error);
         continue;
@@ -194,15 +103,19 @@ export const syncWalletActivities = async (walletAddress: string): Promise<void>
       const transactions = blockData.transactions ?? [];
 
       for (const tx of transactions) {
+        if (typeof tx === 'string') {
+          continue;
+        }
+
         const from = tx.from?.toLowerCase();
         const to = tx.to?.toLowerCase();
-        const valueWei = hexToBigInt(tx.value);
+        const valueWei = tx.value;
 
         if (!from || !to || valueWei <= 0n) {
           continue;
         }
 
-        if (from !== normalizedWallet && to !== normalizedWallet) {
+        if (from !== wallet && to !== wallet) {
           continue;
         }
 
@@ -213,6 +126,7 @@ export const syncWalletActivities = async (walletAddress: string): Promise<void>
         seenTxHashes.add(tx.hash);
         matchedActivities.push({
           transactionHash: tx.hash,
+          networkKey: network.key,
           fromAddress: from,
           toAddress: to,
           amountDisplay: formatFromWei(valueWei),

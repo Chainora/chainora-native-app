@@ -85,14 +85,18 @@ const derToSignature = (der: Uint8Array): Signature => {
   }
 
   const { length: sequenceLength, nextOffset: seqOffset } = parseDerLength(der, 1);
-  if (sequenceLength !== der.length - seqOffset) {
+  const sequenceEnd = seqOffset + sequenceLength;
+  if (sequenceEnd > der.length) {
     throw new Error('Incorrect DER sequence length');
   }
 
-  const firstInteger = parseDerInteger(der, seqOffset);
-  const secondInteger = parseDerInteger(der, firstInteger.nextOffset);
+  // Some cards occasionally append non-DER trailer bytes; parse only the DER sequence.
+  const derSequence = sequenceEnd === der.length ? der : der.slice(0, sequenceEnd);
 
-  if (secondInteger.nextOffset !== der.length) {
+  const firstInteger = parseDerInteger(derSequence, seqOffset);
+  const secondInteger = parseDerInteger(derSequence, firstInteger.nextOffset);
+
+  if (secondInteger.nextOffset !== derSequence.length) {
     throw new Error('Unexpected bytes after DER signature');
   }
 
