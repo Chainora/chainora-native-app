@@ -81,6 +81,12 @@ export type VerifyLoginResponse = {
   token?: string;
 };
 
+export type NotifyLoginProgressRequest = {
+  apiBase: string;
+  sessionId: string;
+  status: string;
+};
+
 export const parseQrLoginPayload = (rawValue: string): QrLoginPayload => {
   const trimmed = rawValue.trim();
   if (!trimmed) {
@@ -208,4 +214,32 @@ export const verifyQrLogin = async ({
   });
 
   return json;
+};
+
+export const notifyQrLoginProgress = async ({
+  apiBase,
+  sessionId,
+  status,
+}: NotifyLoginProgressRequest): Promise<void> => {
+  const endpoint = `${apiBase}/v1/auth/progress`;
+
+  try {
+    await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        sessionId,
+        status,
+      }),
+    });
+  } catch (error) {
+    console.warn('[QRLogin] progress notify failed', {
+      endpoint,
+      sessionId,
+      status,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+  }
 };

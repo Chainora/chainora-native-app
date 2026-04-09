@@ -20,7 +20,13 @@ import { useSettings } from '../features/settings';
 import { ROUTES } from '../navigation/routes/routes';
 import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
 import type { WalletActionResult } from '../services/cardService';
-import { createQrLoginProof, parseQrLoginPayload, QrLoginPayload, verifyQrLogin } from '../services/qrLoginService';
+import {
+  createQrLoginProof,
+  notifyQrLoginProgress,
+  parseQrLoginPayload,
+  QrLoginPayload,
+  verifyQrLogin,
+} from '../services/qrLoginService';
 
 type Props = NativeStackScreenProps<RootStackParamList, typeof ROUTES.QRScanner>;
 const PIN_LENGTH = 4;
@@ -46,12 +52,20 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
   }, []);
 
   const resetScanState = useCallback(() => {
+    if (scannedPayload) {
+      void notifyQrLoginProgress({
+        apiBase: scannedPayload.apiBase,
+        sessionId: scannedPayload.sessionId,
+        status: 'waiting_qr_scan',
+      });
+    }
+
     setScannedPayload(null);
     setPin('');
     setPinDialogVisible(false);
     setScanError('');
     setVerifiedAddress('');
-  }, []);
+  }, [scannedPayload]);
 
   const codeScanner = useCodeScanner({
     codeTypes: ['qr'],
@@ -67,6 +81,13 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
 
       try {
         const payload = parseQrLoginPayload(raw);
+
+        void notifyQrLoginProgress({
+          apiBase: payload.apiBase,
+          sessionId: payload.sessionId,
+          status: 'awaiting_card_scan',
+        });
+
         setScannedPayload(payload);
         setPinDialogVisible(true);
         setScanError('');
@@ -158,6 +179,7 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
     if (!canSubmitPin) {
       return;
     }
+
     setPinDialogVisible(false);
     setScanDialogVisible(true);
   }, [canSubmitPin]);
