@@ -1,221 +1,57 @@
-import { keccak_256 } from '@noble/hashes/sha3.js';
 import { decodeEventLog, encodeFunctionData, getAddress, parseUnits } from 'viem';
 
 import { getActiveNetwork } from '../config/network';
+import {
+  DEVICE_ADAPTER_READ_ABI,
+  DEVICE_ADAPTER_WRITE_ABI,
+  FACTORY_CREATE_POOL_ABI,
+  FACTORY_READ_ABI,
+  REGISTRY_READ_ABI,
+  REPUTATION_ADAPTER_READ_ABI,
+  ZERO_ADDRESS,
+} from './qr-login/abi';
+import { buildAuthMessage, buildEip191Hash } from './qr-login/cryptoUtils';
+import {
+  buildDeviceVerificationCacheKey,
+  readDeviceVerificationCache,
+  writeDeviceVerificationCache,
+} from './qr-login/deviceVerificationCache';
+import {
+  CREATE_POOL_PRECHECK_CONTINUE_STATUS,
+  CREATE_POOL_QR_FEATURE,
+  CREATE_POOL_RPC_TIMEOUT_MESSAGE,
+  DEVICE_NOT_VERIFIED_MESSAGE,
+  POOL_ACTION_QR_FEATURE,
+  PRECHECK_DIAG_TIMEOUT_MS,
+  PRECHECK_SIMULATE_TIMEOUT_MS,
+} from './qr-login/constants';
+import {
+  buildAccountNotActivatedMessage,
+  buildInsufficientGasMessage,
+  buildPoolActionAccountNotActivatedMessage,
+  buildPoolActionInsufficientGasMessage,
+  isInsufficientGasLikeError,
+  isRpcTimeoutLikeError,
+  isUnknownAccountLikeError,
+  logCreateGroupGasIssue,
+  logPoolActionEvent,
+  logPoolActionIssue,
+} from './qr-login/errorUtils';
+import {
+  ensureField,
+  extractResponseData,
+  fetchWithTimeout,
+  normalizeApiBase,
+  readApiErrorMessage,
+} from './qr-login/httpUtils';
+import { isDeviceNotVerifiedError, mapCreatePoolRevertMessage } from './qr-login/precheckUtils';
+import { runWithSoftTimeout, waitForTransactionReceiptWithRetry, withOperationTimeout } from './qr-login/rpcUtils';
+import { createStatusPublisher } from './qr-login/statusPublisher';
 import { signHashAndAttestInOneTap, signTransactionHash } from './cardService';
 import { sendEthTransaction } from './transactionService';
 import { recoverSignature } from './transaction/signatureUtils';
 import { getPublicViemClient } from './web3Client';
 import { bytesToHex, hexToBytes } from '../utils/encoding';
-
-const DEFAULT_AUTH_TEMPLATE = 'Sign this to login to Chainora: %s';
-const REQUEST_TIMEOUT_MS = 12_000;
-const PRECHECK_DIAG_TIMEOUT_MS = 5_000;
-const PRECHECK_SIMULATE_TIMEOUT_MS = 3_500;
-const RECEIPT_WAIT_TIMEOUT_MS = 240_000;
-const RECEIPT_POLL_INTERVAL_MS = 1_200;
-const RECEIPT_TIMEOUT_RETRY_LIMIT = 4;
-const RECEIPT_RETRY_DELAY_MS = 1_000;
-const CREATE_POOL_QR_FEATURE = 'chainora-native-wallet:create-pool';
-const POOL_ACTION_QR_FEATURE = 'chainora-native-wallet:pool-action';
-const DEVICE_NOT_VERIFIED_MESSAGE = 'Create pool blocked: this wallet is not device-verified on protocol adapter yet.';
-const DEVICE_VERIFY_CACHE_TTL_MS = 30 * 60 * 1000;
-const CREATE_POOL_RPC_TIMEOUT_MESSAGE =
-  'Create pool pre-check timed out because Chainora RPC is responding too slowly. Please retry shortly.';
-const CREATE_POOL_PRECHECK_CONTINUE_STATUS = 'create_pool_precheck_timeout_continue';
-
-type DeviceVerificationCacheEntry = {
-  verified: boolean;
-  updatedAtMs: number;
-};
-
-const deviceVerificationCache = new Map<string, DeviceVerificationCacheEntry>();
-
-const buildDeviceVerificationCacheKey = (
-  chainId: number,
-  factoryAddress: `0x${string}`,
-  accountAddress: `0x${string}`,
-): string => `${chainId}:${factoryAddress.toLowerCase()}:${accountAddress.toLowerCase()}`;
-
-const readDeviceVerificationCache = (key: string): boolean | null => {
-  const cached = deviceVerificationCache.get(key);
-  if (!cached) {
-    return null;
-  }
-
-  if (Date.now() - cached.updatedAtMs > DEVICE_VERIFY_CACHE_TTL_MS) {
-    deviceVerificationCache.delete(key);
-    return null;
-  }
-
-  return cached.verified;
-};
-
-const writeDeviceVerificationCache = (key: string, verified: boolean): void => {
-  deviceVerificationCache.set(key, {
-    verified,
-    updatedAtMs: Date.now(),
-  });
-};
-
-const mapCreatePoolRevertMessage = (raw: string): string => {
-  const message = raw.trim();
-  if (!message) {
-    return 'Create pool pre-check failed.';
-  }
-
-  const lower = message.toLowerCase();
-  if (lower.includes('unauthorized')) {
-    return DEVICE_NOT_VERIFIED_MESSAGE;
-  }
-
-  if (lower.includes('invalidconfig') || lower.includes('invalid config')) {
-    return 'Create pool blocked: config is invalid on-chain. Check contribution amount, member count, and period window rules.';
-  }
-
-  if (lower.includes('insufficientreputation') || lower.includes('insufficient reputation')) {
-    return 'Create pool blocked: wallet reputation is too low for selected minReputation. Required rule is currentScore >= minReputation.';
-  }
-
-  return `Create pool pre-check failed: ${message}`;
-};
-
-const FACTORY_CREATE_POOL_ABI = [
-  {
-    type: 'function',
-    name: 'createPool',
-    stateMutability: 'nonpayable',
-    inputs: [
-      {
-        name: 'config',
-        type: 'tuple',
-        components: [
-          { name: 'contributionAmount', type: 'uint256' },
-          { name: 'minReputation', type: 'uint256' },
-          { name: 'targetMembers', type: 'uint16' },
-          { name: 'periodDuration', type: 'uint32' },
-          { name: 'contributionWindow', type: 'uint32' },
-          { name: 'auctionWindow', type: 'uint32' },
-        ],
-      },
-    ],
-    outputs: [
-      { name: 'pool', type: 'address' },
-      { name: 'poolId', type: 'uint256' },
-    ],
-  },
-  {
-    type: 'function',
-    name: 'createPool',
-    stateMutability: 'nonpayable',
-    inputs: [
-      {
-        name: 'config',
-        type: 'tuple',
-        components: [
-          { name: 'contributionAmount', type: 'uint256' },
-          { name: 'minReputation', type: 'uint256' },
-          { name: 'targetMembers', type: 'uint16' },
-          { name: 'periodDuration', type: 'uint32' },
-          { name: 'contributionWindow', type: 'uint32' },
-          { name: 'auctionWindow', type: 'uint32' },
-        ],
-      },
-      { name: 'publicRecruitment', type: 'bool' },
-    ],
-    outputs: [
-      { name: 'pool', type: 'address' },
-      { name: 'poolId', type: 'uint256' },
-    ],
-  },
-  {
-    type: 'event',
-    name: 'ChainoraPoolCreated',
-    inputs: [
-      { indexed: true, name: 'poolId', type: 'uint256' },
-      { indexed: true, name: 'pool', type: 'address' },
-      { indexed: true, name: 'creator', type: 'address' },
-    ],
-    anonymous: false,
-  },
-] as const;
-
-const FACTORY_READ_ABI = [
-  {
-    type: 'function',
-    name: 'registry',
-    stateMutability: 'view',
-    inputs: [],
-    outputs: [{ name: '', type: 'address' }],
-  },
-] as const;
-
-const REGISTRY_READ_ABI = [
-  {
-    type: 'function',
-    name: 'stablecoin',
-    stateMutability: 'view',
-    inputs: [],
-    outputs: [{ name: '', type: 'address' }],
-  },
-  {
-    type: 'function',
-    name: 'deviceAdapter',
-    stateMutability: 'view',
-    inputs: [],
-    outputs: [{ name: '', type: 'address' }],
-  },
-  {
-    type: 'function',
-    name: 'reputationAdapter',
-    stateMutability: 'view',
-    inputs: [],
-    outputs: [{ name: '', type: 'address' }],
-  },
-] as const;
-
-const DEVICE_ADAPTER_READ_ABI = [
-  {
-    type: 'function',
-    name: 'isDeviceVerified',
-    stateMutability: 'view',
-    inputs: [{ name: 'account', type: 'address' }],
-    outputs: [{ name: '', type: 'bool' }],
-  },
-] as const;
-
-const DEVICE_ADAPTER_WRITE_ABI = [
-  {
-    type: 'function',
-    name: 'submitVerification',
-    stateMutability: 'nonpayable',
-    inputs: [
-      {
-        name: 'attestation',
-        type: 'tuple',
-        components: [
-          { name: 'user', type: 'address' },
-          { name: 'nonce', type: 'uint256' },
-          { name: 'deadline', type: 'uint64' },
-        ],
-      },
-      { name: 'signature', type: 'bytes' },
-    ],
-    outputs: [],
-  },
-] as const;
-
-const REPUTATION_ADAPTER_READ_ABI = [
-  {
-    type: 'function',
-    name: 'scoreOf',
-    stateMutability: 'view',
-    inputs: [{ name: 'user', type: 'address' }],
-    outputs: [{ name: '', type: 'uint256' }],
-  },
-] as const;
-
-const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 const resolveRegistryAndDeviceAdapter = async ({
   client,
@@ -242,175 +78,32 @@ const resolveRegistryAndDeviceAdapter = async ({
   };
 };
 
-const withOperationTimeout = async <T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> => {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      reject(new Error(timeoutMessage));
-    }, timeoutMs);
-  });
-
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
-    }
-  }
-};
-
-const runWithSoftTimeout = async <T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-): Promise<
-{ status: 'ok'; value: T }
-| { status: 'timeout' }
-| { status: 'error'; error: Error }
-> => {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const guarded = promise
-    .then(value => ({ status: 'ok' as const, value }))
-    .catch(error => ({
-      status: 'error' as const,
-      error: error instanceof Error ? error : new Error(String(error)),
-    }));
-  const timeoutPromise = new Promise<{ status: 'timeout' }>(resolve => {
-    timer = setTimeout(() => resolve({ status: 'timeout' }), timeoutMs);
-  });
-
-  const result = await Promise.race([guarded, timeoutPromise]);
-  if (timer) {
-    clearTimeout(timer);
-  }
-
-  if (result.status === 'timeout') {
-    // Ensure late rejection is consumed when we time out early.
-    void guarded.then(() => undefined).catch(() => undefined);
-  }
-
-  return result;
-};
-
-const isRpcTimeoutLikeError = (message: string): boolean => {
-  const lower = message.toLowerCase();
-  return (
-    lower.includes('timeout')
-    || lower.includes('timed out')
-    || lower.includes('request took too long')
-    || lower.includes('network request failed')
-    || lower.includes('failed to fetch')
-  );
-};
-
-const isUnknownAccountLikeError = (message: string): boolean => {
-  const lower = message.toLowerCase();
-  return (
-    lower.includes('unknown address')
-    || (lower.includes('account') && lower.includes('does not exist'))
-  );
-};
-
-const isInsufficientGasLikeError = (message: string): boolean => {
-  const lower = message.toLowerCase();
-  return (
-    lower.includes('insufficient funds')
-    || lower.includes('insufficient balance')
-    || (lower.includes('gas') && lower.includes('not enough'))
-  );
-};
-
-const logCreateGroupGasIssue = ({
-  stage,
-  accountAddress,
-  reason,
-}: {
-  stage: string;
-  accountAddress: string;
-  reason: string;
-}): void => {
-  console.warn('[CreateGroup][GasIssue]', {
-    stage,
-    accountAddress: accountAddress.toLowerCase(),
-    reason,
-    hint: 'wallet has no tCNR for gas or account is not activated on Chainora',
-  });
-};
-
-const logPoolActionEvent = ({
-  stage,
-  actionLabel,
-  accountAddress,
-  targetAddress,
-  selector,
-  txHash,
+const createSessionStatusPublisher = ({
+  apiBase,
   sessionId,
+  enabled = true,
+  minIntervalMs = 250,
 }: {
-  stage: string;
-  actionLabel: string;
-  accountAddress: string;
-  targetAddress: string;
-  selector: string;
-  txHash?: string;
-  sessionId?: string;
-}): void => {
-  console.log('[PoolAction]', {
-    stage,
-    actionLabel,
-    accountAddress: accountAddress.toLowerCase(),
-    targetAddress: targetAddress.toLowerCase(),
-    selector,
-    txHash,
-    sessionId: sessionId || 'n/a',
+  apiBase: string;
+  sessionId: string;
+  enabled?: boolean;
+  minIntervalMs?: number;
+}) => {
+  return createStatusPublisher({
+    enabled: enabled && Boolean(sessionId) && Boolean(apiBase),
+    minIntervalMs,
+    publish: status => {
+      if (!sessionId || !apiBase) {
+        return;
+      }
+      void notifyQrLoginProgress({
+        apiBase,
+        sessionId,
+        status,
+      }).catch(() => undefined);
+    },
   });
 };
-
-const logPoolActionIssue = ({
-  stage,
-  actionLabel,
-  accountAddress,
-  targetAddress,
-  selector,
-  reason,
-  txHash,
-  sessionId,
-}: {
-  stage: string;
-  actionLabel: string;
-  accountAddress: string;
-  targetAddress: string;
-  selector: string;
-  reason: string;
-  txHash?: string;
-  sessionId?: string;
-}): void => {
-  console.warn('[PoolAction][Issue]', {
-    stage,
-    actionLabel,
-    accountAddress: accountAddress.toLowerCase(),
-    targetAddress: targetAddress.toLowerCase(),
-    selector,
-    txHash,
-    sessionId: sessionId || 'n/a',
-    reason,
-    hint: 'check wallet tCNR gas balance and account activation on Chainora',
-  });
-};
-
-const buildAccountNotActivatedMessage = (address: string): string =>
-  `Wallet ${address} is not activated on Chainora yet. `
-  + 'Please receive a small amount of tCNR to this wallet, then retry create group.';
-
-const buildInsufficientGasMessage = (address: string): string =>
-  `Wallet ${address} does not have enough tCNR to pay gas. `
-  + 'Please top up tCNR and retry create group.';
-
-const buildPoolActionAccountNotActivatedMessage = (address: string): string =>
-  `Wallet ${address} is not activated on Chainora yet. `
-  + 'Please receive a small amount of tCNR to this wallet, then retry this action.';
-
-const buildPoolActionInsufficientGasMessage = (address: string): string =>
-  `Wallet ${address} does not have enough tCNR to pay gas. `
-  + 'Please top up tCNR and retry this action.';
 
 const diagnoseCreatePoolPrecheck = async ({
   client,
@@ -503,176 +196,12 @@ type CreatePoolQrData = {
   skipPrecheck?: boolean;
 };
 
-type TxReceipt = Awaited<ReturnType<ReturnType<typeof getPublicViemClient>['waitForTransactionReceipt']>>;
-
-const sleep = (ms: number): Promise<void> => new Promise(resolve => {
-  setTimeout(resolve, ms);
-});
-
-const waitForTransactionReceiptWithRetry = async ({
-  client,
-  txHash,
-  label,
-  onProgress,
-}: {
-  client: ReturnType<typeof getPublicViemClient>;
-  txHash: `0x${string}`;
-  label: string;
-  onProgress?: (status: string) => void;
-}): Promise<TxReceipt> => {
-  let lastError: Error | null = null;
-  for (let attempt = 1; attempt <= RECEIPT_TIMEOUT_RETRY_LIMIT; attempt += 1) {
-    try {
-      return await client.waitForTransactionReceipt({
-        hash: txHash,
-        timeout: RECEIPT_WAIT_TIMEOUT_MS,
-        pollingInterval: RECEIPT_POLL_INTERVAL_MS,
-      });
-    } catch (error) {
-      const reason = error instanceof Error ? error : new Error(String(error));
-      if (!isRpcTimeoutLikeError(reason.message)) {
-        throw reason;
-      }
-      if (attempt === RECEIPT_TIMEOUT_RETRY_LIMIT) {
-        throw new Error(
-          `${label} confirmation is taking too long because Chainora RPC is slow. `
-          + `Transaction may still be pending on-chain. Tx: ${txHash}`,
-        );
-      }
-
-      lastError = reason;
-      onProgress?.(
-        `Chainora RPC is slow while waiting ${label} confirmation. Retrying (${attempt}/${RECEIPT_TIMEOUT_RETRY_LIMIT})...`,
-      );
-      await sleep(RECEIPT_RETRY_DELAY_MS * attempt);
-    }
-  }
-
-  throw lastError ?? new Error(`Unable to confirm ${label} transaction`);
-};
-
 type PoolActionQrData = {
   to: string;
   data: string;
   valueWei?: string;
   label?: string;
   poolAddress?: string;
-};
-
-const buildAuthMessage = (nonce: string, explicitMessage?: string): string => {
-  const cleaned = explicitMessage?.trim();
-  if (cleaned) {
-    return cleaned;
-  }
-  return DEFAULT_AUTH_TEMPLATE.replace('%s', nonce);
-};
-
-const concatBytes = (...chunks: Uint8Array[]): Uint8Array => {
-  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-  const out = new Uint8Array(total);
-  let offset = 0;
-  chunks.forEach(chunk => {
-    out.set(chunk, offset);
-    offset += chunk.length;
-  });
-  return out;
-};
-
-const buildEip191Hash = (message: string): Uint8Array => {
-  const encoder = new TextEncoder();
-  const messageBytes = encoder.encode(message);
-  const prefixBytes = encoder.encode(`\x19Ethereum Signed Message:\n${messageBytes.length}`);
-  return keccak_256(concatBytes(prefixBytes, messageBytes));
-};
-
-const normalizeApiBase = (apiBase: string): string => {
-  const trimmed = apiBase.trim();
-  if (!trimmed) {
-    throw new Error('Missing apiBase in QR payload');
-  }
-  const url = new URL(trimmed);
-  return `${url.protocol}//${url.host}`;
-};
-
-const sanitizeRelayerErrorMessage = (raw: string): string => {
-  const trimmed = String(raw ?? '').trim();
-  if (!trimmed) {
-    return '';
-  }
-
-  const usageIndex = trimmed.indexOf('Usage:');
-  if (usageIndex > 0) {
-    return trimmed.slice(0, usageIndex).trim();
-  }
-
-  return trimmed;
-};
-
-const readApiErrorMessage = async (response: Response, fallback: string): Promise<string> => {
-  const text = (await response.text()).trim();
-  if (!text) {
-    return fallback;
-  }
-
-  try {
-    const parsed = JSON.parse(text) as { error?: string; message?: string; data?: { error?: string; message?: string } };
-    const detail = String(
-      parsed?.error ?? parsed?.message ?? parsed?.data?.error ?? parsed?.data?.message ?? text,
-    ).trim();
-    return sanitizeRelayerErrorMessage(detail) || fallback;
-  } catch {
-    return sanitizeRelayerErrorMessage(text) || fallback;
-  }
-};
-
-const fetchWithTimeout = async (input: string, init: RequestInit): Promise<Response> => {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-  try {
-    return await fetch(input, {
-      ...init,
-      signal: controller.signal,
-    });
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    let hint = '';
-    try {
-      const parsed = new URL(input);
-      if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
-        hint = ' If using a real phone, localhost points to the phone itself. Use your laptop LAN IP as apiBase.';
-      }
-    } catch {
-      // Ignore URL parsing failures.
-    }
-
-    throw new Error(`Network request failed for ${input}. ${reason}.${hint}`);
-  } finally {
-    clearTimeout(timer);
-  }
-};
-
-const ensureField = (value: unknown, field: string): string => {
-  if (typeof value !== 'string' || value.trim() === '') {
-    throw new Error(`Invalid QR payload: ${field} is required`);
-  }
-  return value.trim();
-};
-
-const extractResponseData = <T extends object>(raw: { data?: T } | T): T => {
-  if (raw && typeof raw === 'object' && 'data' in raw && raw.data) {
-    return raw.data;
-  }
-
-  return raw as T;
-};
-
-const isDeviceNotVerifiedError = (message: string | null): boolean => {
-  if (!message) {
-    return false;
-  }
-
-  return message.toLowerCase().includes('not device-verified');
 };
 
 const verifyCardAttestationForCreatePool = async ({
@@ -1065,16 +594,11 @@ export const warmupLoginDeviceVerification = async ({
   }
 
   const sessionId = payload.sessionId?.trim() ?? '';
-  const pushStatus = (status: string) => {
-    if (!publishSessionProgress || !sessionId) {
-      return;
-    }
-    void notifyQrLoginProgress({
-      apiBase: payload.apiBase,
-      sessionId,
-      status,
-    }).catch(() => undefined);
-  };
+  const pushStatus = createSessionStatusPublisher({
+    apiBase: payload.apiBase,
+    sessionId,
+    enabled: publishSessionProgress && Boolean(sessionId),
+  });
 
   onProgress?.('Login verified. Running one-time on-chain device verification warmup...');
   pushStatus('login_device_verify_preparing');
@@ -1333,17 +857,11 @@ export const createPoolViaQrOneTap = async ({
 
   const config = payload.createPool;
   const createPoolSessionId = payload.sessionId?.trim() ?? '';
-  const pushSessionStatus = (status: string) => {
-    if (!createPoolSessionId || !payload.apiBase) {
-      return;
-    }
-
-    void notifyQrLoginProgress({
-      apiBase: payload.apiBase,
-      sessionId: createPoolSessionId,
-      status,
-    }).catch(() => undefined);
-  };
+  const pushSessionStatus = createSessionStatusPublisher({
+    apiBase: payload.apiBase,
+    sessionId: createPoolSessionId,
+    enabled: Boolean(createPoolSessionId),
+  });
   const accountAddress = getAddress(expectedAddress);
   const factoryAddress = getAddress(config.factoryAddress);
   const verificationCacheKey = buildDeviceVerificationCacheKey(
@@ -1665,17 +1183,11 @@ export const executePoolActionViaQrOneTap = async ({
 
   const config = payload.poolAction;
   const sessionId = payload.sessionId?.trim() ?? '';
-  const pushSessionStatus = (status: string) => {
-    if (!sessionId || !payload.apiBase) {
-      return;
-    }
-
-    void notifyQrLoginProgress({
-      apiBase: payload.apiBase,
-      sessionId,
-      status,
-    }).catch(() => undefined);
-  };
+  const pushSessionStatus = createSessionStatusPublisher({
+    apiBase: payload.apiBase,
+    sessionId,
+    enabled: Boolean(sessionId),
+  });
 
   const accountAddress = getAddress(expectedAddress);
   const targetAddress = getAddress(config.to);
