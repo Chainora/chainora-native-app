@@ -2,7 +2,10 @@ import { createPublicClient, defineChain, fallback, http, type Chain, type Publi
 
 import { NETWORKS, type NetworkConfig } from '../config/network';
 
-const RPC_TIMEOUT_MS = 10_000;
+const RPC_TIMEOUT_MS = 12_000;
+const RPC_RETRY_COUNT = 2;
+const RPC_RETRY_DELAY_MS = 450;
+const FALLBACK_RETRY_COUNT = 1;
 
 type NetworkRecord = typeof NETWORKS;
 
@@ -61,7 +64,17 @@ const chains = [chainByKey.eth, chainByKey.polygon, chainByKey.bnb, chainByKey.c
 const publicClientByChainId = new Map<number, PublicClient>();
 
 const buildTransport = (network: NetworkConfig) =>
-  fallback(buildRpcCandidates(network.rpcUrl).map(url => http(url, { timeout: RPC_TIMEOUT_MS })));
+  fallback(
+    buildRpcCandidates(network.rpcUrl).map(url => http(url, {
+      timeout: RPC_TIMEOUT_MS,
+      retryCount: RPC_RETRY_COUNT,
+      retryDelay: RPC_RETRY_DELAY_MS,
+    })),
+    {
+      retryCount: FALLBACK_RETRY_COUNT,
+      retryDelay: RPC_RETRY_DELAY_MS,
+    },
+  );
 
 export const getPublicViemClient = (network: NetworkConfig): PublicClient => {
   const cached = publicClientByChainId.get(network.chainId);

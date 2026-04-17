@@ -13,11 +13,16 @@ export const useNfcEnabled = () => {
   useEffect(() => {
     let isMounted = true;
 
+    const isStateEnabled = (state: string | null | undefined): boolean => {
+      const normalized = String(state ?? '').trim().toLowerCase();
+      return normalized === 'on' || normalized === 'enabled';
+    };
+
     const handleStateChange = (state: string) => {
       if (!isMounted) {
         return;
       }
-      const enabled = state === 'on';
+      const enabled = isStateEnabled(state);
       setEnabled(enabled);
       if (enabled) {
         setError(null);

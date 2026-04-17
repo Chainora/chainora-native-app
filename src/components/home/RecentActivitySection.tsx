@@ -71,7 +71,9 @@ export const RecentActivitySection: React.FC<RecentActivitySectionProps> = ({ ac
 
   return (
     <>
-      <Text style={styles.sectionLabel}>{t('homeRecentActivity')}</Text>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionLabel}>{t('homeRecentActivity')}</Text>
+      </View>
       <View style={styles.activityList}>
         {activities.length === 0 ? (
           <View style={styles.activityItem}>
@@ -184,6 +186,13 @@ const createStyles = (theme: ThemeTokens) =>
       fontSize: theme.typography.body,
       letterSpacing: 2,
       fontWeight: '700',
+      marginTop: 6,
+    },
+    sectionHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
       marginTop: 6,
     },
     activityList: {

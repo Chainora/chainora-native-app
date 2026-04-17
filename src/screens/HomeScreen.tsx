@@ -38,6 +38,7 @@ const BALANCE_POLL_INTERVAL_MS = 15_000;
 const ACTIVITY_POLL_INTERVAL_MS = 30_000;
 const POST_SEND_BALANCE_REFETCH_DELAY_MS = 3_500;
 const POST_SEND_ACTIVITY_REFETCH_DELAY_MS = 3_500;
+const ACTIVITY_SYNC_DEBOUNCE_MS = 800;
 
 const truncateAddress = (address: string) =>
   `${address.slice(0, 6)}...${address.slice(-4)}`;
@@ -55,7 +56,8 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
   const wasAppActiveRef = useRef(isAppActive);
   const lastNetworkKeyRef = useRef(network.key);
   const activityInFlightRef = useRef(false);
-  const queuedActivityRefreshRef = useRef(false);
+  const activityQueuedRef = useRef(false);
+  const activitySyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activitySignatureRef = useRef('');
   const postSendBalanceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const postSendActivityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -71,6 +73,9 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
       }
       if (postSendActivityTimeoutRef.current) {
         clearTimeout(postSendActivityTimeoutRef.current);
+      }
+      if (activitySyncTimerRef.current) {
+        clearTimeout(activitySyncTimerRef.current);
       }
     };
   }, []);
@@ -102,11 +107,12 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const loadRecentActivity = useCallback(async () => {
     if (activityInFlightRef.current) {
-      queuedActivityRefreshRef.current = true;
+      activityQueuedRef.current = true;
       return;
     }
 
     activityInFlightRef.current = true;
+
     try {
       // Render cached local activity first for instant UI response after login.
       const cached = await getRecentActivitiesByWallet(ethAddress);
@@ -123,14 +129,28 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
       console.warn('[Home] Failed to load recent activity', error);
     } finally {
       activityInFlightRef.current = false;
-      if (queuedActivityRefreshRef.current) {
-        queuedActivityRefreshRef.current = false;
+      if (activityQueuedRef.current) {
+        activityQueuedRef.current = false;
         setTimeout(() => {
-          loadRecentActivity();
+          loadRecentActivity().catch(err => {
+            console.warn('[Home] Queued activity sync failed', err);
+          });
         }, 0);
       }
     }
   }, [ethAddress, setActivitiesIfChanged]);
+
+  const scheduleActivitySync = useCallback((reason: string) => {
+    if (activitySyncTimerRef.current) {
+      clearTimeout(activitySyncTimerRef.current);
+    }
+
+    activitySyncTimerRef.current = setTimeout(() => {
+      loadRecentActivity().catch(error => {
+        console.warn('[Home] Scheduled activity sync failed', reason, error);
+      });
+    }, ACTIVITY_SYNC_DEBOUNCE_MS);
+  }, [loadRecentActivity]);
 
   useEffect(() => {
     if (!isFocused || !isAppActive) {
@@ -142,21 +162,21 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
     }, BALANCE_POLL_INTERVAL_MS);
 
     const activityIntervalId = setInterval(() => {
-      loadRecentActivity();
+      scheduleActivitySync('interval');
     }, ACTIVITY_POLL_INTERVAL_MS);
 
     return () => {
       clearInterval(balanceIntervalId);
       clearInterval(activityIntervalId);
     };
-  }, [loadRecentActivity, refreshBalanceFn, isAppActive, isFocused]);
+  }, [refreshBalanceFn, scheduleActivitySync, isAppActive, isFocused]);
 
   useEffect(() => {
     if (!isFocused) {
       return;
     }
-    loadRecentActivity();
-  }, [isFocused, loadRecentActivity]);
+    scheduleActivitySync('focus');
+  }, [isFocused, scheduleActivitySync]);
 
   useEffect(() => {
     if (!isFocused) {
@@ -172,8 +192,8 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
 
     // Single refresh pass when app returns from background.
     refreshBalanceFn();
-    loadRecentActivity();
-  }, [isAppActive, isFocused, loadRecentActivity, refreshBalanceFn]);
+    scheduleActivitySync('app-active');
+  }, [isAppActive, isFocused, refreshBalanceFn, scheduleActivitySync]);
 
   useEffect(() => {
     if (!isFocused || !isAppActive) {
@@ -187,8 +207,16 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
     // Refresh immediately after switching network so displayed balance matches selected chain.
     lastNetworkKeyRef.current = network.key;
     refreshBalanceFn();
-    loadRecentActivity();
-  }, [isAppActive, isFocused, loadRecentActivity, network.key, refreshBalanceFn]);
+    scheduleActivitySync('network-change');
+  }, [isAppActive, isFocused, network.key, refreshBalanceFn, scheduleActivitySync]);
+
+  useEffect(() => {
+    if (!isFocused || !isAppActive || !balanceState.formatted) {
+      return;
+    }
+
+    scheduleActivitySync('balance-updated');
+  }, [balanceState.formatted, isAppActive, isFocused, scheduleActivitySync]);
 
   const balanceValue = useMemo(
     () => balanceState.formatted || '0.0000',
@@ -232,12 +260,12 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
         clearTimeout(postSendActivityTimeoutRef.current);
       }
       postSendActivityTimeoutRef.current = setTimeout(() => {
-        loadRecentActivity();
+        scheduleActivitySync('post-send');
       }, POST_SEND_ACTIVITY_REFETCH_DELAY_MS);
     } catch (error) {
       console.warn('[Home] Failed to persist recent activity', error);
     }
-  }, [balanceState, ethAddress, loadRecentActivity, network.key, setActivitiesIfChanged]);
+  }, [balanceState, ethAddress, network.key, scheduleActivitySync, setActivitiesIfChanged]);
 
   const refreshBalance = useCallback(() => {
     balanceState.refresh();

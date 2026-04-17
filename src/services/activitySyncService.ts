@@ -9,8 +9,20 @@ import {
 import { getPublicViemClient } from './web3Client';
 
 const INITIAL_SCAN_LIMIT = 40n;
+const RESCAN_OVERLAP_BLOCKS = 20n;
 const CURSOR_PREFIX = '@chainora/activitySyncCursor';
 const inFlightSyncs = new Map<string, Promise<void>>();
+const blockFailureCounts = new Map<string, number>();
+const MAX_BLOCK_RETRIES = 3;
+let activitySyncPauseCount = 0;
+
+export const pauseActivitySync = (): void => {
+  activitySyncPauseCount += 1;
+};
+
+export const resumeActivitySync = (): void => {
+  activitySyncPauseCount = Math.max(0, activitySyncPauseCount - 1);
+};
 
 const formatFromWei = (wei: bigint): string => {
   const weiPerUnit = 1_000_000_000_000_000_000n;
@@ -47,11 +59,35 @@ export const clearActivitySyncState = async (): Promise<void> => {
 };
 
 export const syncWalletActivities = async (walletAddress: string): Promise<void> => {
+  if (activitySyncPauseCount > 0) {
+    return;
+  }
+
   const normalizedWallet = walletAddress.toLowerCase();
   const network = getActiveNetwork();
   const client = getPublicViemClient(network);
   const wallet = getAddress(normalizedWallet).toLowerCase();
   const syncKey = `${network.key}:${normalizedWallet}`;
+
+  const registerBlockFailure = (block: bigint, reason: string): boolean => {
+    const key = `${syncKey}:${block.toString()}`;
+    const nextCount = (blockFailureCounts.get(key) ?? 0) + 1;
+    blockFailureCounts.set(key, nextCount);
+
+    if (nextCount <= MAX_BLOCK_RETRIES) {
+      console.warn('[activitySync] Block retry scheduled', block.toString(), reason, nextCount);
+      return true;
+    }
+
+    console.warn('[activitySync] Skipping problematic block after retries', block.toString(), reason);
+    blockFailureCounts.delete(key);
+    return false;
+  };
+
+  const clearBlockFailure = (block: bigint) => {
+    const key = `${syncKey}:${block.toString()}`;
+    blockFailureCounts.delete(key);
+  };
 
   if (inFlightSyncs.has(syncKey)) {
     await inFlightSyncs.get(syncKey);
@@ -78,7 +114,17 @@ export const syncWalletActivities = async (walletAddress: string): Promise<void>
     if (cursor === null) {
       start = latest > INITIAL_SCAN_LIMIT ? latest - INITIAL_SCAN_LIMIT : 0n;
     } else {
-      start = cursor + 1n;
+      // If saved cursor is ahead of chain tip (RPC reset/reorg/network change),
+      // fall back to a bounded recent scan window.
+      if (cursor > latest) {
+        start = latest > INITIAL_SCAN_LIMIT ? latest - INITIAL_SCAN_LIMIT : 0n;
+      } else {
+        start = cursor + 1n;
+      }
+
+      // Always overlap a few blocks to recover missed receive/send txs from
+      // transient RPC read failures in previous sync cycles.
+      start = start > RESCAN_OVERLAP_BLOCKS ? start - RESCAN_OVERLAP_BLOCKS : 0n;
     }
 
     if (start > latest) {
@@ -87,6 +133,23 @@ export const syncWalletActivities = async (walletAddress: string): Promise<void>
 
     const matchedActivities: AddRecentActivityParams[] = [];
     const seenTxHashes = new Set<string>();
+
+    const resolveTransaction = async (
+      tx: (Awaited<ReturnType<typeof client.getBlock>>['transactions'])[number],
+    ) => {
+      if (typeof tx !== 'string') {
+        return tx;
+      }
+
+      try {
+        return await client.getTransaction({ hash: tx });
+      } catch (error) {
+        console.warn('[activitySync] Failed reading transaction', tx, error);
+        return null;
+      }
+    };
+
+    let lastProcessedBlock = start - 1n;
 
     for (let block = start; block <= latest; block += 1n) {
       let blockData: Awaited<ReturnType<typeof client.getBlock>>;
@@ -97,21 +160,30 @@ export const syncWalletActivities = async (walletAddress: string): Promise<void>
         });
       } catch (error) {
         console.warn('[activitySync] Failed reading block', block.toString(), error);
+        const shouldRetry = registerBlockFailure(block, 'block-read-failed');
+        if (shouldRetry) {
+          break;
+        }
+
+        lastProcessedBlock = block;
         continue;
       }
 
       const transactions = blockData.transactions ?? [];
+      let blockHasTxReadError = false;
 
-      for (const tx of transactions) {
-        if (typeof tx === 'string') {
+      for (const txItem of transactions) {
+        const tx = await resolveTransaction(txItem);
+        if (!tx) {
+          blockHasTxReadError = true;
           continue;
         }
 
         const from = tx.from?.toLowerCase();
-        const to = tx.to?.toLowerCase();
+        const to = tx.to?.toLowerCase() ?? '0x0000000000000000000000000000000000000000';
         const valueWei = tx.value;
 
-        if (!from || !to || valueWei <= 0n) {
+        if (!from || valueWei <= 0n) {
           continue;
         }
 
@@ -134,6 +206,19 @@ export const syncWalletActivities = async (walletAddress: string): Promise<void>
           networkName: network.name,
         });
       }
+
+      if (blockHasTxReadError) {
+        const shouldRetry = registerBlockFailure(block, 'transaction-read-incomplete');
+        if (shouldRetry) {
+          break;
+        }
+
+        lastProcessedBlock = block;
+        continue;
+      }
+
+      clearBlockFailure(block);
+      lastProcessedBlock = block;
     }
 
     if (matchedActivities.length > 0) {
@@ -144,10 +229,12 @@ export const syncWalletActivities = async (walletAddress: string): Promise<void>
       }
     }
 
-    try {
-      await writeCursor(network.key, normalizedWallet, latest);
-    } catch (error) {
-      console.warn('[activitySync] Failed to persist sync cursor', error);
+    if (lastProcessedBlock >= start) {
+      try {
+        await writeCursor(network.key, normalizedWallet, lastProcessedBlock);
+      } catch (error) {
+        console.warn('[activitySync] Failed to persist sync cursor', error);
+      }
     }
   })();
 

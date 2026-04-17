@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { StatusBar, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -28,6 +28,7 @@ export const LoginPinScreen: React.FC<Props> = ({ navigation }) => {
   const [pinValue, setPinValue] = useState('');
   const [scanVisible, setScanVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const pinValueRef = useRef('');
 
   const handleDigit = useCallback(
     (digit: string) => {
@@ -35,19 +36,29 @@ export const LoginPinScreen: React.FC<Props> = ({ navigation }) => {
         if (prev.length >= PIN_LENGTH) {
           return prev;
         }
-        return `${prev}${digit}`;
+        const next = `${prev}${digit}`;
+        pinValueRef.current = next;
+        return next;
       });
     },
     [],
   );
 
   const handleBackspace = useCallback(() => {
-    setPinValue(prev => prev.slice(0, -1));
+    setPinValue(prev => {
+      const next = prev.slice(0, -1);
+      pinValueRef.current = next;
+      return next;
+    });
   }, []);
 
   const openScanDialog = useCallback(() => {
+    if (pinValueRef.current.length !== PIN_LENGTH) {
+      showToast(t('scanErrorEnterPin4'), 'error');
+      return;
+    }
     setScanVisible(true);
-  }, []);
+  }, [showToast, t]);
 
   const closeScanDialog = useCallback(() => {
     if (submitting) {
@@ -66,6 +77,8 @@ export const LoginPinScreen: React.FC<Props> = ({ navigation }) => {
       try {
         await initializeSession(result.ethAddress);
         await completeSession();
+        pinValueRef.current = '';
+        setPinValue('');
         setScanVisible(false);
         navigation.reset({
           index: 0,
@@ -86,8 +99,6 @@ export const LoginPinScreen: React.FC<Props> = ({ navigation }) => {
     },
     [completeSession, initializeSession, navigation],
   );
-
-  const canSubmit = pinValue.length === PIN_LENGTH;
 
   return (
     <View style={styles.container}>
@@ -119,7 +130,7 @@ export const LoginPinScreen: React.FC<Props> = ({ navigation }) => {
               onDigit={handleDigit}
               onBackspace={handleBackspace}
               onSubmit={openScanDialog}
-              submitDisabled={!canSubmit || submitting}
+              submitDisabled={submitting}
             />
           </View>
         </View>

@@ -1,8 +1,10 @@
 import { keccak_256 } from '@noble/hashes/sha3.js';
+import { sha256 } from '@noble/hashes/sha2.js';
+import * as secp from '@noble/secp256k1';
 
 import { buildSelectApdu, parseApduResponse } from '../lib/apdu';
 import { withIsoDep, IsoDepClient } from '../lib/nfc/isoDepClient';
-import { bytesToHex } from '../utils/encoding';
+import { bytesToHex, hexToBytes } from '../utils/encoding';
 
 const WALLET_AID = new Uint8Array([0xf0, 0x56, 0x4e, 0x43, 0x48, 0x57, 0x01]);
 const WALLET_CLA = 0x80;
@@ -19,17 +21,29 @@ const INS = {
   BACKUP_SESSION: 0x30,
   BACKUP_EXPORT: 0x31,
   BACKUP_IMPORT: 0x32,
+  DEVICE_CERT: 0x23,
+  CARD_ATTEST: 0x24,
 } as const;
 
 const P1_BACKUP = {
   GET_FACTORY_CSR: 0x10,
   SET_DEVICE_CERT: 0x11,
-  GET_DEVICE_CERT: 0x00,
   START_LINK_PROOF: 0x01,
   LOAD_PEER_CERT: 0x02,
   LOAD_PEER_LINK_PROOF: 0x03,
   CLEAR_LINK_STATE: 0x04,
 } as const;
+
+const P1_DEVICE_CERT = {
+  GET_DEVICE_CERT: 0x00,
+  GET_FACTORY_CSR: 0x10,
+  SET_DEVICE_CERT: 0x11,
+} as const;
+
+const DEVICE_CERT_BODY_LENGTH = 1 + 16 + 65 + 1;
+const FACTORY_ROOT_PUBLIC_KEY_HEX =
+  '043e5662949af3d3bdf8c226bdd8444098a14f8960870ccb5be55bbe098b363aadd06109c1c50cfcfb44f80ecd082fd1d00fc8de8c73ed521ad0bab962422f721a';
+const FACTORY_ROOT_PUBLIC_KEY_BYTES = hexToBytes(FACTORY_ROOT_PUBLIC_KEY_HEX);
 
 type WalletCommandOptions = {
   ins: number;
@@ -53,6 +67,7 @@ export type WalletActionCode =
   | 'BACKUP_INIT_FAILED'
   | 'BACKUP_EXPORT_FAILED'
   | 'BACKUP_IMPORT_FAILED'
+  | 'CARD_NOT_CHAINORA'
   | 'UNKNOWN';
 
 export type WalletActionResult = {
@@ -68,6 +83,20 @@ export type WalletActionResult = {
 export type WalletSignatureResult = WalletActionResult & {
   signatureDer?: Uint8Array;
   signatureDerHex?: string;
+  deviceCertificate?: Uint8Array;
+};
+
+export type WalletSignAndAttestResult<TMeta = unknown> = WalletSignatureResult & {
+  attestationProof?: Uint8Array;
+  challengeMeta?: TMeta;
+};
+
+export type CardCertificateResult = WalletActionResult & {
+  deviceCertificate?: Uint8Array;
+};
+
+export type CardAttestationResult = WalletActionResult & {
+  attestationProof?: Uint8Array;
 };
 
 const deriveEthAddress = (publicKey: Uint8Array): string => {
@@ -158,10 +187,11 @@ const walletError = (
 };
 
 const transportError = (message: string): WalletActionResult => {
+  const reason = message && message.trim() ? message.trim() : 'NFC communication interrupted. Keep card steady and try again.';
   console.log('[NFC] Wallet transport error', { message });
   return {
     ok: false,
-    message: `NFC transport error: ${message}`,
+    message: `NFC transport error: ${reason}`,
     code: 'TRANSPORT_ERROR',
     step: 'transport',
   };
@@ -214,6 +244,126 @@ const ensureHashLength = (hash: Uint8Array) => {
   if (hash.length !== 32) {
     throw new Error(`Transaction hash must be 32 bytes, received ${hash.length}`);
   }
+};
+
+const parseDerLength = (bytes: Uint8Array, offset: number): { length: number; nextOffset: number } => {
+  let cursor = offset;
+  if (cursor >= bytes.length) {
+    throw new Error('Malformed DER signature length');
+  }
+
+  let length = bytes[cursor];
+  cursor += 1;
+
+  if (length <= 0x7f) {
+    return { length, nextOffset: cursor };
+  }
+
+  const byteCount = length - 0x80;
+  if (byteCount === 0 || byteCount > 2 || cursor + byteCount > bytes.length) {
+    throw new Error('Malformed DER signature length encoding');
+  }
+
+  length = 0;
+  for (let index = 0; index < byteCount; index += 1) {
+    length = length * 256 + bytes[cursor + index];
+  }
+
+  return { length, nextOffset: cursor + byteCount };
+};
+
+const parseDerInteger = (bytes: Uint8Array, offset: number): { value: Uint8Array; nextOffset: number } => {
+  if (offset >= bytes.length || bytes[offset] !== 0x02) {
+    throw new Error('Malformed DER signature integer tag');
+  }
+
+  const { length, nextOffset } = parseDerLength(bytes, offset + 1);
+  const end = nextOffset + length;
+  if (end > bytes.length) {
+    throw new Error('Malformed DER signature integer length');
+  }
+
+  return { value: bytes.slice(nextOffset, end), nextOffset: end };
+};
+
+const trimInteger = (value: Uint8Array): Uint8Array => {
+  let offset = 0;
+  while (offset < value.length - 1 && value[offset] === 0) {
+    offset += 1;
+  }
+  return value.slice(offset);
+};
+
+const padTo32Bytes = (value: Uint8Array): Uint8Array => {
+  const trimmed = trimInteger(value);
+  if (trimmed.length > 32) {
+    throw new Error('DER integer exceeds 32 bytes');
+  }
+
+  const padded = new Uint8Array(32);
+  padded.set(trimmed, 32 - trimmed.length);
+  return padded;
+};
+
+const derToCompactSignature = (der: Uint8Array): Uint8Array => {
+  if (der.length < 8 || der[0] !== 0x30) {
+    throw new Error('Invalid DER signature header');
+  }
+
+  const { length: sequenceLength, nextOffset: sequenceOffset } = parseDerLength(der, 1);
+  const sequenceEnd = sequenceOffset + sequenceLength;
+  if (sequenceEnd > der.length) {
+    throw new Error('Incorrect DER sequence length');
+  }
+
+  const sequence = sequenceEnd === der.length ? der : der.slice(0, sequenceEnd);
+  const firstInteger = parseDerInteger(sequence, sequenceOffset);
+  const secondInteger = parseDerInteger(sequence, firstInteger.nextOffset);
+
+  const rBytes = padTo32Bytes(firstInteger.value);
+  const sBytes = padTo32Bytes(secondInteger.value);
+  const compact = new Uint8Array(64);
+  compact.set(rBytes, 0);
+  compact.set(sBytes, 32);
+  return compact;
+};
+
+const isFactorySignedDeviceCert = (deviceCert: Uint8Array): boolean => {
+  if (deviceCert.length < DEVICE_CERT_BODY_LENGTH + 1) {
+    return false;
+  }
+
+  const signatureLength = deviceCert[DEVICE_CERT_BODY_LENGTH];
+  const expectedLength = DEVICE_CERT_BODY_LENGTH + 1 + signatureLength;
+  if (signatureLength === 0 || expectedLength !== deviceCert.length) {
+    return false;
+  }
+
+  const certBody = deviceCert.slice(0, DEVICE_CERT_BODY_LENGTH);
+  const signatureDer = deviceCert.slice(DEVICE_CERT_BODY_LENGTH + 1, expectedLength);
+  const digest = sha256(certBody);
+
+  try {
+    const signatureCompact = derToCompactSignature(signatureDer);
+    return secp.verify(signatureCompact, digest, FACTORY_ROOT_PUBLIC_KEY_BYTES);
+  } catch {
+    return false;
+  }
+};
+
+const verifyCardCertificate = (
+  cert: Uint8Array,
+  failureCode: Extract<WalletActionCode, 'BACKUP_INIT_FAILED' | 'BACKUP_EXPORT_FAILED' | 'BACKUP_IMPORT_FAILED'>,
+): WalletActionResult | null => {
+  if (isFactorySignedDeviceCert(cert)) {
+    return null;
+  }
+
+  return walletError(
+    'verifyFactoryCertificate',
+    'Card certificate is not signed by Chainora factory key.',
+    failureCode,
+  );
 };
 
 const buildUpdatePinPayload = (currentPin: string, nextPin: string): Uint8Array => {
@@ -437,6 +587,16 @@ export const signTransactionHash = async (pin: string, hash: Uint8Array): Promis
         return walletError('signHash', 'Failed to sign transaction hash.', 'UNKNOWN', signatureResponse.statusWord.hex);
       }
 
+      // Best-effort in same NFC session: read device certificate for backend attestation flow.
+      let deviceCertificate: Uint8Array | undefined;
+      const certResponse = await sendWalletCommand(isoDep, {
+        ins: INS.DEVICE_CERT,
+        p1: P1_DEVICE_CERT.GET_DEVICE_CERT,
+      });
+      if (certResponse.statusWord.ok) {
+        deviceCertificate = certResponse.data;
+      }
+
       const publicKeyBytes = publicKeyResponse.data;
       const signatureBytes = signatureResponse.data;
       const base = buildInfoResult('Transaction hash signed successfully.', signatureResponse.statusWord.hex, publicKeyBytes);
@@ -446,6 +606,90 @@ export const signTransactionHash = async (pin: string, hash: Uint8Array): Promis
         step: 'signHash',
         signatureDer: signatureBytes,
         signatureDerHex: bytesToHex(signatureBytes),
+        deviceCertificate,
+      };
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return transportError(message);
+  }
+};
+
+export const signHashAndAttestInOneTap = async <TMeta>(
+  pin: string,
+  hash: Uint8Array,
+  requestChallenge: (input: { address: string; deviceCertificate: Uint8Array }) => Promise<{ challenge: Uint8Array; meta: TMeta }>,
+): Promise<WalletSignAndAttestResult<TMeta>> => {
+  ensureHashLength(hash);
+
+  try {
+    return await withIsoDep(async isoDep => {
+      const selectError = await ensureWalletSelected(isoDep);
+      if (selectError) {
+        return selectError;
+      }
+
+      const verifyResponse = await sendWalletCommand(isoDep, { ins: INS.VERIFY_PIN, data: encodePin(pin) });
+      if (!verifyResponse.statusWord.ok) {
+        const code: WalletActionCode = verifyResponse.statusWord.hex === '6982' ? 'PIN_INVALID' : 'UNKNOWN';
+        const message = code === 'PIN_INVALID' ? 'PIN incorrect. Try again.' : 'PIN verification failed on the card.';
+        return walletError('verifyPinForSignAndAttest', message, code, verifyResponse.statusWord.hex);
+      }
+
+      const publicKeyResponse = await sendWalletCommand(isoDep, { ins: INS.GET_PUBLIC_KEY, le: 0x00 });
+      if (!publicKeyResponse.statusWord.ok) {
+        return walletError('readPublicKey', 'Failed to retrieve the public key from the card.', 'PUBLIC_KEY_FAILURE', publicKeyResponse.statusWord.hex);
+      }
+
+      const signatureResponse = await sendWalletCommand(isoDep, { ins: INS.SIGN_HASH, data: hash });
+      if (!signatureResponse.statusWord.ok) {
+        return walletError('signHash', 'Failed to sign transaction hash.', 'UNKNOWN', signatureResponse.statusWord.hex);
+      }
+
+      const certResponse = await sendWalletCommand(isoDep, {
+        ins: INS.DEVICE_CERT,
+        p1: P1_DEVICE_CERT.GET_DEVICE_CERT,
+      });
+      if (!certResponse.statusWord.ok || certResponse.data.length === 0) {
+        return walletError('getDeviceCert', 'Failed to get device certificate from card.', 'UNKNOWN', certResponse.statusWord.hex);
+      }
+
+      const base = buildInfoResult('Transaction hash signed successfully.', signatureResponse.statusWord.hex, publicKeyResponse.data);
+      if (!base.ethAddress) {
+        return walletError('deriveAddress', 'Failed to derive wallet address from card public key.', 'UNKNOWN', signatureResponse.statusWord.hex);
+      }
+
+      let challengeInput: { challenge: Uint8Array; meta: TMeta };
+      try {
+        challengeInput = await requestChallenge({
+          address: base.ethAddress,
+          deviceCertificate: certResponse.data,
+        });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        return walletError('requestChallenge', `Failed to request card challenge: ${reason}`, 'UNKNOWN');
+      }
+
+      if (challengeInput.challenge.length !== 32) {
+        return walletError('requestChallenge', 'Challenge must be exactly 32 bytes.', 'UNKNOWN');
+      }
+
+      const attestResponse = await sendWalletCommand(isoDep, {
+        ins: INS.CARD_ATTEST,
+        data: challengeInput.challenge,
+      });
+      if (!attestResponse.statusWord.ok) {
+        return walletError('cardAttest', 'Failed to create card attestation proof.', 'UNKNOWN', attestResponse.statusWord.hex);
+      }
+
+      return {
+        ...base,
+        step: 'signAndAttest',
+        signatureDer: signatureResponse.data,
+        signatureDerHex: bytesToHex(signatureResponse.data),
+        deviceCertificate: certResponse.data,
+        attestationProof: attestResponse.data,
+        challengeMeta: challengeInput.meta,
       };
     });
   } catch (error) {
@@ -479,13 +723,18 @@ export const prepareBackupDestination = async (pin: string): Promise<BackupDesti
       }
 
       const getCert = await sendWalletCommand(isoDep, { 
-        ins: INS.BACKUP_SESSION, 
-        p1: P1_BACKUP.GET_DEVICE_CERT 
+        ins: INS.DEVICE_CERT,
+        p1: P1_DEVICE_CERT.GET_DEVICE_CERT,
       });
       if (!getCert.statusWord.ok) {
         return walletError('getDeviceCert', 'Failed to get device certificate.', 'BACKUP_INIT_FAILED', getCert.statusWord.hex);
       }
       const deviceCert = getCert.data;
+
+      const certError = verifyCardCertificate(deviceCert, 'BACKUP_INIT_FAILED');
+      if (certError) {
+        return certError;
+      }
 
       const getLinkProof = await sendWalletCommand(isoDep, { 
         ins: INS.BACKUP_SESSION, 
@@ -547,11 +796,16 @@ export const initialisePinAndPrepareBackupDestination = async (pin: string): Pro
       }
 
       const getCert = await sendWalletCommand(isoDep, {
-        ins: INS.BACKUP_SESSION,
-        p1: P1_BACKUP.GET_DEVICE_CERT,
+        ins: INS.DEVICE_CERT,
+        p1: P1_DEVICE_CERT.GET_DEVICE_CERT,
       });
       if (!getCert.statusWord.ok) {
         return walletError('getDeviceCert', 'Failed to get device certificate.', 'BACKUP_INIT_FAILED', getCert.statusWord.hex);
+      }
+
+      const certError = verifyCardCertificate(getCert.data, 'BACKUP_INIT_FAILED');
+      if (certError) {
+        return certError;
       }
 
       const getLinkProof = await sendWalletCommand(isoDep, {
@@ -607,13 +861,18 @@ export const performBackupExport = async (
 
       // Get Source Cert
       const getCert = await sendWalletCommand(isoDep, { 
-        ins: INS.BACKUP_SESSION, 
-        p1: P1_BACKUP.GET_DEVICE_CERT 
+        ins: INS.DEVICE_CERT,
+        p1: P1_DEVICE_CERT.GET_DEVICE_CERT,
       });
       if (!getCert.statusWord.ok) {
         return walletError('sourceGetCert', 'Failed to get source certificate.', 'BACKUP_EXPORT_FAILED', getCert.statusWord.hex);
       }
       const sourceCert = getCert.data;
+
+      const certError = verifyCardCertificate(sourceCert, 'BACKUP_EXPORT_FAILED');
+      if (certError) {
+        return certError;
+      }
 
       // Start Link Proof (Source)
       const getLinkProof = await sendWalletCommand(isoDep, { 
@@ -670,6 +929,11 @@ export const performBackupImport = async (
   envelope: Uint8Array
 ): Promise<WalletActionResult> => {
   try {
+    const certError = verifyCardCertificate(peerCert, 'BACKUP_IMPORT_FAILED');
+    if (certError) {
+      return certError;
+    }
+
     return await withIsoDep(async isoDep => {
       const selectError = await ensureWalletSelected(isoDep);
       if (selectError) return selectError;
@@ -710,6 +974,66 @@ export const performBackupImport = async (
         message: 'Backup imported successfully.',
         step: 'performBackupImport',
         statusWord: importCmd.statusWord.hex,
+      };
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return transportError(message);
+  }
+};
+
+export const readDeviceCertificate = async (): Promise<CardCertificateResult> => {
+  try {
+    return await withIsoDep(async isoDep => {
+      const selectError = await ensureWalletSelected(isoDep);
+      if (selectError) return selectError;
+
+      const response = await sendWalletCommand(isoDep, {
+        ins: INS.DEVICE_CERT,
+        p1: P1_DEVICE_CERT.GET_DEVICE_CERT,
+      });
+      if (!response.statusWord.ok) {
+        return walletError('getDeviceCert', 'Failed to get device certificate.', 'UNKNOWN', response.statusWord.hex);
+      }
+
+      return {
+        ok: true,
+        message: 'Device certificate fetched successfully.',
+        statusWord: response.statusWord.hex,
+        step: 'getDeviceCert',
+        deviceCertificate: response.data,
+      };
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return transportError(message);
+  }
+};
+
+export const cardAttestChallenge = async (challenge: Uint8Array): Promise<CardAttestationResult> => {
+  if (challenge.length !== 32) {
+    return walletError('cardAttest', 'Challenge must be exactly 32 bytes.', 'UNKNOWN');
+  }
+
+  try {
+    return await withIsoDep(async isoDep => {
+      const selectError = await ensureWalletSelected(isoDep);
+      if (selectError) return selectError;
+
+      const response = await sendWalletCommand(isoDep, {
+        ins: INS.CARD_ATTEST,
+        data: challenge,
+      });
+      if (!response.statusWord.ok) {
+        return walletError('cardAttest', 'Failed to create card attestation proof.', 'UNKNOWN', response.statusWord.hex);
+      }
+
+      return {
+        ok: true,
+        message: 'Card attestation proof generated successfully.',
+        statusWord: response.statusWord.hex,
+        step: 'cardAttest',
+        attestationProof: response.data,
       };
     });
   } catch (error) {

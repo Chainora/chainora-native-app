@@ -28,7 +28,7 @@ type ScanDialogProps = {
   initialMode?: ScanMode;
   prefilledPin?: string;
   types?: ScanDialogTypes;
-  onFlowScan?: () => Promise<WalletActionResult>;
+  onFlowScan?: (setStageStatus: (status: string) => void) => Promise<WalletActionResult>;
 };
 
 type ScanPhase = 'pin' | 'working' | 'success' | 'error';
@@ -154,6 +154,7 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
   const [phase, setPhase] = useState<ScanPhase>('pin');
   const [statusMessage, setStatusMessage] = useState(t('scanStatusEnterSetup'));
   const [infoLines, setInfoLines] = useState<string[]>([]);
+  const [allowBackdropClose, setAllowBackdropClose] = useState(false);
   
   // Animation Values
   const indicatorAnim = useRef(new Animated.Value(0)).current;
@@ -306,6 +307,7 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
 
   useEffect(() => {
     if (visible) {
+      setAllowBackdropClose(false);
       const startMode = initialMode ?? mode;
       resetForMode(startMode, false);
       if (prefilledPin) {
@@ -326,8 +328,16 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
           useNativeDriver: true,
         }),
       ]).start();
-      return;
+
+      const unlockTimer = setTimeout(() => {
+        setAllowBackdropClose(true);
+      }, 250);
+
+      return () => {
+        clearTimeout(unlockTimer);
+      };
     }
+    setAllowBackdropClose(false);
     resetForMode(initialMode ?? 'init');
   }, [visible, mode, resetForMode, modalScaleAnim, modalOpacityAnim, initialMode, prefilledPin, onStatusChange, t]);
 
@@ -359,12 +369,21 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
   );
 
   const beginScan = useCallback(async () => {
-    if (isNfcEnabled === false) {
+    let currentNfcEnabled = isNfcEnabled;
+    if (currentNfcEnabled !== true) {
+      try {
+        currentNfcEnabled = await NfcManager.isEnabled();
+      } catch {
+        currentNfcEnabled = isNfcEnabled;
+      }
+    }
+
+    if (currentNfcEnabled === false) {
       Alert.alert(t('scanNfcDisabledTitle'), t('scanNfcDisabledMessage'), [
         {
           text: t('scanOpenSettings'),
           onPress: () => {
-            void openNfcSettings();
+            openNfcSettings().catch(() => undefined);
           },
         },
       ]);
@@ -380,10 +399,16 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
     setStatusMessage(t('scanStatusHoldCard'));
     onStatusChange?.(t('scanStatusHoldCard'));
 
+    const setStageStatus = (status: string) => {
+      if (operationTokenRef.current !== token) return;
+      setStatusMessage(status);
+      onStatusChange?.(status);
+    };
+
     try {
       const result =
         types === 'flow' && onFlowScan
-          ? await onFlowScan()
+          ? await onFlowScan(setStageStatus)
           : mode === 'init'
           ? await initialiseWallet(prefilledPin ?? pinValue)
           : await signInWallet(prefilledPin ?? pinValue);
@@ -542,7 +567,15 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose} statusBarTranslucent>
       <View style={styles.backdrop}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={() => {
+            if (!allowBackdropClose) {
+              return;
+            }
+            onClose();
+          }}
+        />
         <Animated.View 
           style={[
             styles.dialog, 

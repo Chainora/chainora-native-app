@@ -11,7 +11,7 @@ export type NetworkConfig = {
 const LOCAL_RPC_ETH = 'http://127.0.0.1:8545';
 const LOCAL_RPC_POLYGON = 'http://127.0.0.1:8546';
 const LOCAL_RPC_BNB = 'http://127.0.0.1:8547';
-const CHAINORA_RPC = 'http://23.94.63.207:8545';
+const CHAINORA_RPC = 'http://157.66.100.120:8545/';
 
 export const NETWORKS: Record<NetworkKey, NetworkConfig> = {
   eth: {

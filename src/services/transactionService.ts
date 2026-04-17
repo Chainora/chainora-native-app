@@ -7,9 +7,13 @@ import { recoverSignature } from './transaction/signatureUtils';
 import { getPublicViemClient } from './web3Client';
 import { bytesToHex, hexToBytes } from '../utils/encoding';
 
-const LEGACY_GAS_LIMIT = 21_000n;
+const LEGACY_TRANSFER_GAS_LIMIT = 21_000n;
+const CONTRACT_CALL_FALLBACK_GAS_LIMIT = 1_500_000n;
 const GAS_ESTIMATE_BUFFER_NUMERATOR = 12n;
 const GAS_ESTIMATE_BUFFER_DENOMINATOR = 10n;
+const GAS_ESTIMATE_TIMEOUT_MS = 3_500;
+const RPC_CALL_RETRY_LIMIT = 3;
+const RPC_CALL_RETRY_DELAY_MS = 650;
 const ZERO_BYTES = new Uint8Array(0);
 
 export type SendEthParams = {
@@ -94,6 +98,39 @@ const encodeList = (items: Uint8Array[]): Uint8Array => {
   return concat(encodeLength(payload.length, 0xc0), payload);
 };
 
+const sleep = (ms: number): Promise<void> => new Promise(resolve => {
+  setTimeout(resolve, ms);
+});
+
+const isRpcTimeoutLikeError = (message: string): boolean => {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes('timeout')
+    || lower.includes('timed out')
+    || lower.includes('request took too long')
+    || lower.includes('failed to fetch')
+    || lower.includes('network request failed')
+  );
+};
+
+const withRpcRetry = async <T>(task: () => Promise<T>): Promise<T> => {
+  let lastError: Error | null = null;
+  for (let attempt = 1; attempt <= RPC_CALL_RETRY_LIMIT; attempt += 1) {
+    try {
+      return await task();
+    } catch (error) {
+      const reason = error instanceof Error ? error : new Error(String(error));
+      if (!isRpcTimeoutLikeError(reason.message) || attempt === RPC_CALL_RETRY_LIMIT) {
+        throw reason;
+      }
+      lastError = reason;
+      await sleep(RPC_CALL_RETRY_DELAY_MS * attempt);
+    }
+  }
+
+  throw lastError ?? new Error('RPC call failed unexpectedly');
+};
+
 const buildUnsignedLegacyTx = (params: {
   nonce: bigint;
   gasPrice: bigint;
@@ -145,22 +182,27 @@ const buildSignedLegacyTx = (params: {
 const fetchNonce = async (address: string): Promise<bigint> => {
   const network = getActiveNetwork();
   const client = getPublicViemClient(network);
-  const nonce = await client.getTransactionCount({
+  const nonce = await withRpcRetry(() => client.getTransactionCount({
     address: getAddress(address),
     blockTag: 'pending',
-  });
+  }));
   return BigInt(nonce);
 };
 
 const fetchGasPrice = async (): Promise<bigint> => {
   const network = getActiveNetwork();
   const client = getPublicViemClient(network);
-  return client.getGasPrice();
+  return withRpcRetry(() => client.getGasPrice());
 };
 
 const applyGasEstimateBuffer = (estimate: bigint): bigint =>
   (estimate * GAS_ESTIMATE_BUFFER_NUMERATOR + (GAS_ESTIMATE_BUFFER_DENOMINATOR - 1n)) /
   GAS_ESTIMATE_BUFFER_DENOMINATOR;
+
+const isEstimateRevertError = (reason: string): boolean => {
+  const normalized = reason.toLowerCase();
+  return normalized.includes('revert') || normalized.includes('execution reverted') || normalized.includes('failed to execute message');
+};
 
 const estimateGasLimit = async (params: {
   from: string;
@@ -171,14 +213,62 @@ const estimateGasLimit = async (params: {
   try {
     const network = getActiveNetwork();
     const client = getPublicViemClient(network);
-    const estimated = await client.estimateGas({
+    const estimatePromise = client.estimateGas({
       account: getAddress(params.from),
       to: getAddress(params.to),
       value: params.valueWei,
       data: (`0x${bytesToHex(params.data)}` as `0x${string}`),
+    }).then(value => ({ status: 'ok' as const, value }))
+      .catch(error => ({
+        status: 'error' as const,
+        error: error instanceof Error ? error : new Error(String(error)),
+      }));
+    const timeoutPromise = new Promise<{ status: 'timeout' }>(resolve => {
+      setTimeout(() => resolve({ status: 'timeout' }), GAS_ESTIMATE_TIMEOUT_MS);
     });
-    return estimated;
-  } catch {
+    const result = await Promise.race([estimatePromise, timeoutPromise]);
+
+    if (result.status === 'ok') {
+      return result.value;
+    }
+
+    if (result.status === 'timeout') {
+      console.warn('[Tx] estimateGas timed out, using fallback gas limit', {
+        from: params.from,
+        to: params.to,
+        valueWei: params.valueWei.toString(),
+        dataLength: params.data.length,
+      });
+      void estimatePromise.then(() => undefined).catch(() => undefined);
+      return null;
+    }
+
+    const reason = result.error.message;
+    if (isEstimateRevertError(reason)) {
+      throw new Error(`Transaction simulation indicates revert: ${reason}`);
+    }
+
+    console.warn('[Tx] estimateGas failed, will use fallback gas limit', {
+      from: params.from,
+      to: params.to,
+      valueWei: params.valueWei.toString(),
+      dataLength: params.data.length,
+      reason,
+    });
+    return null;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    if (isEstimateRevertError(reason)) {
+      throw new Error(`Transaction simulation indicates revert: ${reason}`);
+    }
+
+    console.warn('[Tx] estimateGas failed, will use fallback gas limit', {
+      from: params.from,
+      to: params.to,
+      valueWei: params.valueWei.toString(),
+      dataLength: params.data.length,
+      reason,
+    });
     return null;
   }
 };
@@ -190,7 +280,7 @@ export const fetchSuggestedGasPriceWei = async (): Promise<bigint> => {
 const sendRawTransaction = async (payloadHex: string): Promise<string> => {
   const network = getActiveNetwork();
   const client = getPublicViemClient(network);
-  return client.sendRawTransaction({ serializedTransaction: payloadHex as `0x${string}` });
+  return withRpcRetry(() => client.sendRawTransaction({ serializedTransaction: payloadHex as `0x${string}` }));
 };
 
 const ensureHexData = (dataHex?: string): Uint8Array => {
@@ -217,21 +307,30 @@ export const sendEthTransaction = async ({
   const fromChecksum = sanitizeAddress(from);
   const toChecksum = sanitizeAddress(to);
 
-  const resolvedNonce = nonce ?? (await fetchNonce(fromChecksum));
-  const resolvedGasPrice = gasPriceWei ?? (await fetchGasPrice());
+  const [resolvedNonce, resolvedGasPrice] = await Promise.all([
+    nonce ?? fetchNonce(fromChecksum),
+    gasPriceWei ?? fetchGasPrice(),
+  ]);
   const data = ensureHexData(dataHex);
-  const estimatedGasLimit = await estimateGasLimit({
-    from: fromChecksum,
-    to: toChecksum,
-    valueWei,
-    data,
-  });
-  const baselineGasLimit = gasLimitWei ?? LEGACY_GAS_LIMIT;
-  const resolvedGasLimit = estimatedGasLimit
-    ? baselineGasLimit > estimatedGasLimit
-      ? baselineGasLimit
-      : applyGasEstimateBuffer(estimatedGasLimit)
-    : baselineGasLimit;
+  const defaultGasLimit = data.length > 0 ? CONTRACT_CALL_FALLBACK_GAS_LIMIT : LEGACY_TRANSFER_GAS_LIMIT;
+  const baselineGasLimit = gasLimitWei ?? defaultGasLimit;
+  let resolvedGasLimit = baselineGasLimit;
+
+  // When caller already provides a gas limit, skip estimateGas to reduce RPC roundtrips on slow nodes.
+  if (gasLimitWei === undefined) {
+    const estimatedGasLimit = await estimateGasLimit({
+      from: fromChecksum,
+      to: toChecksum,
+      valueWei,
+      data,
+    });
+
+    resolvedGasLimit = estimatedGasLimit
+      ? baselineGasLimit > applyGasEstimateBuffer(estimatedGasLimit)
+        ? baselineGasLimit
+        : applyGasEstimateBuffer(estimatedGasLimit)
+      : baselineGasLimit;
+  }
 
   const unsigned = buildUnsignedLegacyTx({
     nonce: resolvedNonce,
@@ -248,6 +347,18 @@ export const sendEthTransaction = async ({
   const signatureResult = await signTransactionHash(pin, messageHash);
   if (!signatureResult.ok || !signatureResult.signatureDer || !signatureResult.publicKeyHex) {
     throw new Error(signatureResult.message);
+  }
+
+  if (!signatureResult.ethAddress) {
+    throw new Error('Unable to derive signer address from card public key. Please re-tap the card and try again.');
+  }
+
+  const cardSignerChecksum = sanitizeAddress(signatureResult.ethAddress);
+  if (cardSignerChecksum.toLowerCase() !== fromChecksum.toLowerCase()) {
+    throw new Error(
+      `Card signer mismatch: active wallet is ${fromChecksum}, but tapped card signs as ${cardSignerChecksum}. `
+      + 'Please login with the same card (or switch wallet) before sending.',
+    );
   }
 
   const recovered = recoverSignature(
