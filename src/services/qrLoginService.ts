@@ -4,8 +4,11 @@ import { getActiveNetwork } from '../config/network';
 import {
   DEVICE_ADAPTER_READ_ABI,
   DEVICE_ADAPTER_WRITE_ABI,
+  ERC20_READ_ABI,
+  ERC20_WRITE_ABI,
   FACTORY_CREATE_POOL_ABI,
   FACTORY_READ_ABI,
+  POOL_READ_ABI,
   REGISTRY_READ_ABI,
   REPUTATION_ADAPTER_READ_ABI,
   ZERO_ADDRESS,
@@ -52,6 +55,35 @@ import { sendEthTransaction } from './transactionService';
 import { recoverSignature } from './transaction/signatureUtils';
 import { getPublicViemClient } from './web3Client';
 import { bytesToHex, hexToBytes } from '../utils/encoding';
+
+const SUBMIT_JOIN_REQUEST_SELECTOR = '0xd7dc9bc7';
+const PROPOSE_INVITE_SELECTOR = '0x017ebb91';
+const CONTRIBUTE_SELECTOR = '0xd7bb99ba';
+const UINT256_MAX = (1n << 256n) - 1n;
+
+const isPoolActionSimulationRevertError = (message: string): boolean =>
+  message.toLowerCase().includes('transaction simulation indicates revert');
+
+const decodeSingleAddressArgument = (calldata: string): `0x${string}` | null => {
+  const trimmed = String(calldata ?? '').trim();
+  if (!trimmed.startsWith('0x')) {
+    return null;
+  }
+
+  const body = trimmed.slice(2);
+  // 4-byte selector + one 32-byte ABI-encoded argument.
+  if (body.length < 8 + 64) {
+    return null;
+  }
+
+  const argumentSlot = body.slice(8, 72);
+  const rawAddress = `0x${argumentSlot.slice(24)}`;
+  try {
+    return getAddress(rawAddress);
+  } catch {
+    return null;
+  }
+};
 
 const resolveRegistryAndDeviceAdapter = async ({
   client,
@@ -175,6 +207,333 @@ const diagnoseCreatePoolPrecheck = async ({
     return null;
   } catch {
     return null;
+  }
+};
+
+const diagnoseSubmitJoinRequestPrecheck = async ({
+  client,
+  poolAddress,
+  accountAddress,
+}: {
+  client: ReturnType<typeof getPublicViemClient>;
+  poolAddress: `0x${string}`;
+  accountAddress: `0x${string}`;
+}): Promise<string | null> => {
+  try {
+    const [poolStatus, publicRecruitment, isActiveMember, minReputation, registryAddress] = await Promise.all([
+      client.readContract({
+        address: poolAddress,
+        abi: POOL_READ_ABI,
+        functionName: 'poolStatus',
+      }),
+      client.readContract({
+        address: poolAddress,
+        abi: POOL_READ_ABI,
+        functionName: 'publicRecruitment',
+      }),
+      client.readContract({
+        address: poolAddress,
+        abi: POOL_READ_ABI,
+        functionName: 'isActiveMember',
+        args: [accountAddress],
+      }),
+      client.readContract({
+        address: poolAddress,
+        abi: POOL_READ_ABI,
+        functionName: 'minReputation',
+      }),
+      client.readContract({
+        address: poolAddress,
+        abi: POOL_READ_ABI,
+        functionName: 'registry',
+      }),
+    ]);
+
+    if (Number(poolStatus) !== 0) {
+      return 'Join request blocked: this group is no longer in Forming state.';
+    }
+
+    if (!publicRecruitment) {
+      return 'Join request blocked: this group is private and only accepts invite proposals.';
+    }
+
+    if (isActiveMember) {
+      return 'Join request blocked: this wallet is already an active member of the group.';
+    }
+
+    const [deviceAdapterAddress, reputationAdapterAddress] = await Promise.all([
+      client.readContract({
+        address: registryAddress,
+        abi: REGISTRY_READ_ABI,
+        functionName: 'deviceAdapter',
+      }),
+      client.readContract({
+        address: registryAddress,
+        abi: REGISTRY_READ_ABI,
+        functionName: 'reputationAdapter',
+      }),
+    ]);
+
+    if (deviceAdapterAddress.toLowerCase() !== ZERO_ADDRESS) {
+      const isVerified = await client.readContract({
+        address: deviceAdapterAddress,
+        abi: DEVICE_ADAPTER_READ_ABI,
+        functionName: 'isDeviceVerified',
+        args: [accountAddress],
+      });
+
+      if (!isVerified) {
+        return 'Join request blocked: this wallet is not device-verified on protocol adapter yet.';
+      }
+    }
+
+    if (minReputation > 0n && reputationAdapterAddress.toLowerCase() !== ZERO_ADDRESS) {
+      const currentScore = await client.readContract({
+        address: reputationAdapterAddress,
+        abi: REPUTATION_ADAPTER_READ_ABI,
+        functionName: 'scoreOf',
+        args: [accountAddress],
+      });
+
+      if (currentScore < minReputation) {
+        return `Join request blocked: wallet reputation score (${currentScore.toString()}) must be greater than or equal to minReputation (${minReputation.toString()}).`;
+      }
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+const diagnoseProposeInvitePrecheck = async ({
+  client,
+  poolAddress,
+  accountAddress,
+  candidateAddress,
+}: {
+  client: ReturnType<typeof getPublicViemClient>;
+  poolAddress: `0x${string}`;
+  accountAddress: `0x${string}`;
+  candidateAddress: `0x${string}`;
+}): Promise<string | null> => {
+  try {
+    if (candidateAddress.toLowerCase() === ZERO_ADDRESS) {
+      return 'Invite blocked: candidate wallet address is zero address.';
+    }
+
+    const [poolStatus, proposerIsActive, candidateIsActive, minReputation, registryAddress] = await Promise.all([
+      client.readContract({
+        address: poolAddress,
+        abi: POOL_READ_ABI,
+        functionName: 'poolStatus',
+      }),
+      client.readContract({
+        address: poolAddress,
+        abi: POOL_READ_ABI,
+        functionName: 'isActiveMember',
+        args: [accountAddress],
+      }),
+      client.readContract({
+        address: poolAddress,
+        abi: POOL_READ_ABI,
+        functionName: 'isActiveMember',
+        args: [candidateAddress],
+      }),
+      client.readContract({
+        address: poolAddress,
+        abi: POOL_READ_ABI,
+        functionName: 'minReputation',
+      }),
+      client.readContract({
+        address: poolAddress,
+        abi: POOL_READ_ABI,
+        functionName: 'registry',
+      }),
+    ]);
+
+    if (Number(poolStatus) !== 0) {
+      return 'Invite blocked: this group is no longer in Forming state.';
+    }
+
+    if (!proposerIsActive) {
+      return 'Invite blocked: only active members can propose invites.';
+    }
+
+    if (accountAddress.toLowerCase() === candidateAddress.toLowerCase()) {
+      return 'Invite blocked: you cannot invite your own wallet.';
+    }
+
+    if (candidateIsActive) {
+      return 'Invite blocked: candidate is already an active member of this group.';
+    }
+
+    const [deviceAdapterAddress, reputationAdapterAddress] = await Promise.all([
+      client.readContract({
+        address: registryAddress,
+        abi: REGISTRY_READ_ABI,
+        functionName: 'deviceAdapter',
+      }),
+      client.readContract({
+        address: registryAddress,
+        abi: REGISTRY_READ_ABI,
+        functionName: 'reputationAdapter',
+      }),
+    ]);
+
+    if (deviceAdapterAddress.toLowerCase() !== ZERO_ADDRESS) {
+      const isVerified = await client.readContract({
+        address: deviceAdapterAddress,
+        abi: DEVICE_ADAPTER_READ_ABI,
+        functionName: 'isDeviceVerified',
+        args: [candidateAddress],
+      });
+
+      if (!isVerified) {
+        return 'Invite blocked: candidate wallet is not device-verified on protocol adapter yet.';
+      }
+    }
+
+    if (minReputation > 0n && reputationAdapterAddress.toLowerCase() !== ZERO_ADDRESS) {
+      const candidateScore = await client.readContract({
+        address: reputationAdapterAddress,
+        abi: REPUTATION_ADAPTER_READ_ABI,
+        functionName: 'scoreOf',
+        args: [candidateAddress],
+      });
+
+      if (candidateScore < minReputation) {
+        return `Invite blocked: candidate reputation score (${candidateScore.toString()}) must be greater than or equal to minReputation (${minReputation.toString()}).`;
+      }
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+type ContributePrecheckResult = {
+  blockedReason: string | null;
+  needsApproval: boolean;
+  stablecoinAddress: `0x${string}` | null;
+  contributionAmount: bigint | null;
+  allowance: bigint | null;
+  balance: bigint | null;
+};
+
+const diagnoseContributePrecheck = async ({
+  client,
+  poolAddress,
+  accountAddress,
+}: {
+  client: ReturnType<typeof getPublicViemClient>;
+  poolAddress: `0x${string}`;
+  accountAddress: `0x${string}`;
+}): Promise<ContributePrecheckResult> => {
+  try {
+    const [poolStatus, isActiveMember, stablecoinAddress, contributionAmount] = await Promise.all([
+      client.readContract({
+        address: poolAddress,
+        abi: POOL_READ_ABI,
+        functionName: 'poolStatus',
+      }),
+      client.readContract({
+        address: poolAddress,
+        abi: POOL_READ_ABI,
+        functionName: 'isActiveMember',
+        args: [accountAddress],
+      }),
+      client.readContract({
+        address: poolAddress,
+        abi: POOL_READ_ABI,
+        functionName: 'stablecoin',
+      }),
+      client.readContract({
+        address: poolAddress,
+        abi: POOL_READ_ABI,
+        functionName: 'contributionAmount',
+      }),
+    ]);
+
+    if (Number(poolStatus) !== 1) {
+      return {
+        blockedReason: 'Contribute blocked: group is not Active yet.',
+        needsApproval: false,
+        stablecoinAddress: null,
+        contributionAmount: null,
+        allowance: null,
+        balance: null,
+      };
+    }
+
+    if (!isActiveMember) {
+      return {
+        blockedReason: 'Contribute blocked: only active members can contribute.',
+        needsApproval: false,
+        stablecoinAddress: null,
+        contributionAmount: null,
+        allowance: null,
+        balance: null,
+      };
+    }
+
+    if (stablecoinAddress.toLowerCase() === ZERO_ADDRESS) {
+      return {
+        blockedReason: 'Contribute blocked: group stablecoin is not configured.',
+        needsApproval: false,
+        stablecoinAddress: null,
+        contributionAmount: null,
+        allowance: null,
+        balance: null,
+      };
+    }
+
+    const [allowance, balance] = await Promise.all([
+      client.readContract({
+        address: stablecoinAddress,
+        abi: ERC20_READ_ABI,
+        functionName: 'allowance',
+        args: [accountAddress, poolAddress],
+      }),
+      client.readContract({
+        address: stablecoinAddress,
+        abi: ERC20_READ_ABI,
+        functionName: 'balanceOf',
+        args: [accountAddress],
+      }),
+    ]);
+
+    if (balance < contributionAmount) {
+      return {
+        blockedReason:
+          `Contribute blocked: stablecoin balance is too low. `
+          + `Required ${contributionAmount.toString()}, current ${balance.toString()}.`,
+        needsApproval: false,
+        stablecoinAddress,
+        contributionAmount,
+        allowance,
+        balance,
+      };
+    }
+
+    return {
+      blockedReason: null,
+      needsApproval: allowance < contributionAmount,
+      stablecoinAddress,
+      contributionAmount,
+      allowance,
+      balance,
+    };
+  } catch {
+    return {
+      blockedReason: null,
+      needsApproval: false,
+      stablecoinAddress: null,
+      contributionAmount: null,
+      allowance: null,
+      balance: null,
+    };
   }
 };
 
@@ -1194,6 +1553,144 @@ export const executePoolActionViaQrOneTap = async ({
   const valueWei = BigInt(config.valueWei?.trim() || '0');
   const actionLabel = config.label?.trim() || 'pool action';
   const selector = String(config.data ?? '').slice(0, 10).toLowerCase();
+  const inviteCandidateAddress = selector === PROPOSE_INVITE_SELECTOR
+    ? decodeSingleAddressArgument(String(config.data ?? ''))
+    : null;
+  const client = getPublicViemClient(activeNetwork);
+
+  const diagnosePoolActionSimulationRevert = async (): Promise<string | null> => {
+    if (selector === SUBMIT_JOIN_REQUEST_SELECTOR) {
+      const diagnosis = await runWithSoftTimeout(
+        diagnoseSubmitJoinRequestPrecheck({
+          client,
+          poolAddress: targetAddress,
+          accountAddress,
+        }),
+        3_000,
+      );
+
+      if (diagnosis.status === 'ok' && diagnosis.value) {
+        return diagnosis.value;
+      }
+
+      return 'Join request was rejected by on-chain rules. Common causes: you already have an open join request, the group is no longer recruiting, or membership checks (device verification/reputation) are not met.';
+    }
+
+    if (selector === PROPOSE_INVITE_SELECTOR) {
+      if (!inviteCandidateAddress) {
+        return 'Invite blocked: invalid candidate address in invite payload.';
+      }
+
+      const diagnosis = await runWithSoftTimeout(
+        diagnoseProposeInvitePrecheck({
+          client,
+          poolAddress: targetAddress,
+          accountAddress,
+          candidateAddress: inviteCandidateAddress,
+        }),
+        3_000,
+      );
+
+      if (diagnosis.status === 'ok' && diagnosis.value) {
+        return diagnosis.value;
+      }
+
+      return 'Invite was rejected by on-chain rules. Common causes: inviter is not active member, candidate is already active/self-invite, or candidate does not meet verification/reputation requirements.';
+    }
+
+    if (selector === CONTRIBUTE_SELECTOR) {
+      const diagnosis = await runWithSoftTimeout(
+        diagnoseContributePrecheck({
+          client,
+          poolAddress: targetAddress,
+          accountAddress,
+        }),
+        3_000,
+      );
+
+      if (diagnosis.status === 'ok') {
+        const details = diagnosis.value;
+        if (details.blockedReason) {
+          return details.blockedReason;
+        }
+        if (details.needsApproval) {
+          return 'Contribute blocked: stablecoin allowance for this pool is not enough. Please approve contribution token first.';
+        }
+      }
+
+      return 'Contribute was rejected by on-chain rules. Common causes: period not in collecting stage, deadline passed, already contributed, or token transfer preconditions not met.';
+    }
+
+    return null;
+  };
+
+  const ensureContributionApproval = async (): Promise<void> => {
+    const diagnosis = await runWithSoftTimeout(
+      diagnoseContributePrecheck({
+        client,
+        poolAddress: targetAddress,
+        accountAddress,
+      }),
+      3_000,
+    );
+
+    if (diagnosis.status !== 'ok') {
+      return;
+    }
+
+    const details = diagnosis.value;
+    if (details.blockedReason) {
+      throw new Error(details.blockedReason);
+    }
+
+    if (!details.needsApproval || !details.stablecoinAddress) {
+      return;
+    }
+
+    const approveCalldata = encodeFunctionData({
+      abi: ERC20_WRITE_ABI,
+      functionName: 'approve',
+      args: [targetAddress, UINT256_MAX],
+    });
+
+    onProgress?.(
+      'Contribution needs token approval first. Please tap card to sign approve transaction.',
+    );
+
+    let approveTx: { transactionHash: string };
+    try {
+      approveTx = await sendEthTransaction({
+        from: accountAddress,
+        to: details.stablecoinAddress,
+        valueWei: 0n,
+        pin,
+        dataHex: approveCalldata,
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      if (isUnknownAccountLikeError(reason)) {
+        throw new Error(buildPoolActionAccountNotActivatedMessage(accountAddress));
+      }
+      if (isInsufficientGasLikeError(reason)) {
+        throw new Error(buildPoolActionInsufficientGasMessage(accountAddress));
+      }
+      throw error instanceof Error ? error : new Error(reason);
+    }
+
+    onProgress?.('Waiting for token approval confirmation...');
+    const approveReceipt = await waitForTransactionReceiptWithRetry({
+      client,
+      txHash: approveTx.transactionHash as `0x${string}`,
+      label: 'approve-contribution-token',
+      onProgress,
+    });
+
+    if (approveReceipt.status !== 'success') {
+      throw new Error(`Contribution token approval reverted on-chain. Tx: ${approveTx.transactionHash}`);
+    }
+
+    onProgress?.('Token approval confirmed. Please tap card again to sign contribute transaction.');
+  };
 
   logPoolActionEvent({
     stage: 'start',
@@ -1205,6 +1702,43 @@ export const executePoolActionViaQrOneTap = async ({
   });
 
   try {
+    if (selector === SUBMIT_JOIN_REQUEST_SELECTOR) {
+      const precheck = await runWithSoftTimeout(
+        diagnoseSubmitJoinRequestPrecheck({
+          client,
+          poolAddress: targetAddress,
+          accountAddress,
+        }),
+        3_000,
+      );
+      if (precheck.status === 'ok' && precheck.value) {
+        throw new Error(precheck.value);
+      }
+    }
+
+    if (selector === PROPOSE_INVITE_SELECTOR) {
+      if (!inviteCandidateAddress) {
+        throw new Error('Invite blocked: invalid candidate address in invite payload.');
+      }
+
+      const precheck = await runWithSoftTimeout(
+        diagnoseProposeInvitePrecheck({
+          client,
+          poolAddress: targetAddress,
+          accountAddress,
+          candidateAddress: inviteCandidateAddress,
+        }),
+        3_000,
+      );
+      if (precheck.status === 'ok' && precheck.value) {
+        throw new Error(precheck.value);
+      }
+    }
+
+    if (selector === CONTRIBUTE_SELECTOR) {
+      await ensureContributionApproval();
+    }
+
     pushSessionStatus('pool_action_signing_tx');
     onProgress?.(`Signing ${actionLabel} transaction on card...`);
 
@@ -1243,6 +1777,26 @@ export const executePoolActionViaQrOneTap = async ({
         });
         throw new Error(buildPoolActionInsufficientGasMessage(accountAddress));
       }
+      if (isPoolActionSimulationRevertError(reason)) {
+        const diagnosed = await diagnosePoolActionSimulationRevert();
+        if (diagnosed) {
+          logPoolActionIssue({
+            stage: 'submit_pool_action_tx',
+            actionLabel,
+            accountAddress,
+            targetAddress,
+            selector,
+            reason: `${reason} | diagnosed: ${diagnosed}`,
+            sessionId,
+          });
+          throw new Error(diagnosed);
+        }
+      }
+      if (selector === CONTRIBUTE_SELECTOR && reason.toLowerCase().includes('transfer_from_failed')) {
+        throw new Error(
+          'Contribute blocked: stablecoin transferFrom failed. Check token balance/allowance and group contribution window.',
+        );
+      }
       throw error instanceof Error ? error : new Error(reason);
     }
 
@@ -1258,7 +1812,6 @@ export const executePoolActionViaQrOneTap = async ({
 
     pushSessionStatus('pool_action_waiting_receipt');
     onProgress?.('Waiting for transaction confirmation...');
-    const client = getPublicViemClient(activeNetwork);
     const receipt = await waitForTransactionReceiptWithRetry({
       client,
       txHash: txResult.transactionHash as `0x${string}`,

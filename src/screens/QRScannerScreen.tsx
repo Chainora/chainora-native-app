@@ -243,27 +243,38 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
         });
         console.log('[QRFlow] auth verify finished');
 
-        // Keep login responsive: run optional on-chain device warmup in background.
-        void warmupLoginDeviceVerification({
+        setStageStatus('Login verified. Completing one-time device verification setup (tap card again if prompted)...');
+        const warmupResult = await warmupLoginDeviceVerification({
           payload: scannedPayload,
           pin,
           expectedAddress: proof.address,
-          publishSessionProgress: false,
-        }).then(result => {
-          console.log('[QRFlow] login warmup result', {
-            attempted: result.attempted,
-            verified: result.verified,
-            message: result.message,
-          });
-        }).catch(error => {
-          console.warn('[QRFlow] login warmup unexpected error', error);
+          publishSessionProgress: true,
+          onProgress: status => {
+            setStageStatus(status);
+          },
         });
+        console.log('[QRFlow] login warmup result', {
+          attempted: warmupResult.attempted,
+          verified: warmupResult.verified,
+          message: warmupResult.message,
+        });
+
+        const warmupFailed = warmupResult.attempted && !warmupResult.verified;
+        if (warmupFailed) {
+          throw new Error(
+            `Login verified but device verification setup failed: ${warmupResult.message}. `
+            + 'Please rescan and complete device verification before group actions.',
+          );
+        }
 
         setScanError('');
         setVerifiedAddress(proof.address);
+        const warmupSummary = warmupResult.attempted && warmupResult.verified
+          ? ' Device verification setup completed.'
+          : '';
         return {
           ok: true,
-          message: 'QR login verified. DApp session should complete now.',
+          message: `QR login verified. DApp session should complete now.${warmupSummary}`.trim(),
           ethAddress: proof.address,
         };
       }
