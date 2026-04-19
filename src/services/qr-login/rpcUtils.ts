@@ -70,6 +70,9 @@ export const waitForTransactionReceiptWithRetry = async <TReceipt>({
   txHash,
   label,
   onProgress,
+  timeoutMs,
+  retryLimit,
+  retryDelayMs,
 }: {
   client: {
     waitForTransactionReceipt: (args: {
@@ -81,13 +84,20 @@ export const waitForTransactionReceiptWithRetry = async <TReceipt>({
   txHash: `0x${string}`;
   label: string;
   onProgress?: (status: string) => void;
+  timeoutMs?: number;
+  retryLimit?: number;
+  retryDelayMs?: number;
 }): Promise<TReceipt> => {
+  const effectiveTimeoutMs = timeoutMs ?? RECEIPT_WAIT_TIMEOUT_MS;
+  const effectiveRetryLimit = retryLimit ?? RECEIPT_TIMEOUT_RETRY_LIMIT;
+  const effectiveRetryDelayMs = retryDelayMs ?? RECEIPT_RETRY_DELAY_MS;
+
   let lastError: Error | null = null;
-  for (let attempt = 1; attempt <= RECEIPT_TIMEOUT_RETRY_LIMIT; attempt += 1) {
+  for (let attempt = 1; attempt <= effectiveRetryLimit; attempt += 1) {
     try {
       return await client.waitForTransactionReceipt({
         hash: txHash,
-        timeout: RECEIPT_WAIT_TIMEOUT_MS,
+        timeout: effectiveTimeoutMs,
         pollingInterval: RECEIPT_POLL_INTERVAL_MS,
       });
     } catch (error) {
@@ -95,7 +105,7 @@ export const waitForTransactionReceiptWithRetry = async <TReceipt>({
       if (!isRpcTimeoutLikeError(reason.message)) {
         throw reason;
       }
-      if (attempt === RECEIPT_TIMEOUT_RETRY_LIMIT) {
+      if (attempt === effectiveRetryLimit) {
         throw new Error(
           `${label} confirmation is taking too long because Chainora RPC is slow. `
           + `Transaction may still be pending on-chain. Tx: ${txHash}`,
@@ -104,9 +114,9 @@ export const waitForTransactionReceiptWithRetry = async <TReceipt>({
 
       lastError = reason;
       onProgress?.(
-        `Chainora RPC is slow while waiting ${label} confirmation. Retrying (${attempt}/${RECEIPT_TIMEOUT_RETRY_LIMIT})...`,
+        `Chainora RPC is slow while waiting ${label} confirmation. Retrying (${attempt}/${effectiveRetryLimit})...`,
       );
-      await sleep(RECEIPT_RETRY_DELAY_MS * attempt);
+      await sleep(effectiveRetryDelayMs * attempt);
     }
   }
 

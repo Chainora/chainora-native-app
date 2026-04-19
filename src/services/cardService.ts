@@ -99,6 +99,14 @@ export type CardAttestationResult = WalletActionResult & {
   attestationProof?: Uint8Array;
 };
 
+export type VerifiedWalletSession = {
+  publicKeyHex: string;
+  ethAddress: string;
+  deviceCertificate: Uint8Array;
+  signHash: (hash: Uint8Array) => Promise<WalletSignatureResult>;
+  attestChallenge: (challenge: Uint8Array) => Promise<CardAttestationResult>;
+};
+
 const deriveEthAddress = (publicKey: Uint8Array): string => {
   const isUncompressedWithPrefix = publicKey.length === 65 && publicKey[0] === 0x04;
   const keyBytes = isUncompressedWithPrefix ? publicKey.slice(1) : publicKey;
@@ -695,6 +703,98 @@ export const signHashAndAttestInOneTap = async <TMeta>(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return transportError(message);
+  }
+};
+
+export const withVerifiedWalletSession = async <T>(
+  pin: string,
+  runner: (session: VerifiedWalletSession) => Promise<T>,
+): Promise<T> => {
+  try {
+    return await withIsoDep(async isoDep => {
+      const selectError = await ensureWalletSelected(isoDep);
+      if (selectError) {
+        throw new Error(selectError.message);
+      }
+
+      const verifyResponse = await sendWalletCommand(isoDep, { ins: INS.VERIFY_PIN, data: encodePin(pin) });
+      if (!verifyResponse.statusWord.ok) {
+        const code: WalletActionCode = verifyResponse.statusWord.hex === '6982' ? 'PIN_INVALID' : 'UNKNOWN';
+        const message = code === 'PIN_INVALID' ? 'PIN incorrect. Try again.' : 'PIN verification failed on the card.';
+        throw new Error(message);
+      }
+
+      const publicKeyResponse = await sendWalletCommand(isoDep, { ins: INS.GET_PUBLIC_KEY, le: 0x00 });
+      if (!publicKeyResponse.statusWord.ok) {
+        throw new Error('Failed to retrieve the public key from the card.');
+      }
+
+      const certResponse = await sendWalletCommand(isoDep, {
+        ins: INS.DEVICE_CERT,
+        p1: P1_DEVICE_CERT.GET_DEVICE_CERT,
+      });
+      if (!certResponse.statusWord.ok || certResponse.data.length === 0) {
+        throw new Error('Failed to get device certificate from card.');
+      }
+
+      const publicKeyHex = bytesToHex(publicKeyResponse.data);
+      const ethAddress = deriveEthAddress(publicKeyResponse.data);
+      const deviceCertificate = certResponse.data;
+
+      const signHash = async (hash: Uint8Array): Promise<WalletSignatureResult> => {
+        ensureHashLength(hash);
+
+        const signatureResponse = await sendWalletCommand(isoDep, { ins: INS.SIGN_HASH, data: hash });
+        if (!signatureResponse.statusWord.ok) {
+          return walletError('signHash', 'Failed to sign transaction hash.', 'UNKNOWN', signatureResponse.statusWord.hex);
+        }
+
+        return {
+          ok: true,
+          message: 'Transaction hash signed successfully.',
+          statusWord: signatureResponse.statusWord.hex,
+          step: 'signHash',
+          signatureDer: signatureResponse.data,
+          signatureDerHex: bytesToHex(signatureResponse.data),
+          publicKeyHex,
+          ethAddress,
+          deviceCertificate,
+        };
+      };
+
+      const attestChallenge = async (challenge: Uint8Array): Promise<CardAttestationResult> => {
+        if (challenge.length !== 32) {
+          return walletError('cardAttest', 'Challenge must be exactly 32 bytes.', 'UNKNOWN');
+        }
+
+        const response = await sendWalletCommand(isoDep, {
+          ins: INS.CARD_ATTEST,
+          data: challenge,
+        });
+        if (!response.statusWord.ok) {
+          return walletError('cardAttest', 'Failed to create card attestation proof.', 'UNKNOWN', response.statusWord.hex);
+        }
+
+        return {
+          ok: true,
+          message: 'Card attestation proof generated successfully.',
+          statusWord: response.statusWord.hex,
+          step: 'cardAttest',
+          attestationProof: response.data,
+        };
+      };
+
+      return runner({
+        publicKeyHex,
+        ethAddress,
+        deviceCertificate,
+        signHash,
+        attestChallenge,
+      });
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(message || 'NFC communication interrupted. Keep card steady and try again.');
   }
 };
 

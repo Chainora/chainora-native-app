@@ -6,12 +6,16 @@ export type NetworkConfig = {
   chainId: number;
   rpcUrl: string;
   currencySymbol: string;
+  stablecoinAddress?: string;
+  stablecoinDecimals?: number;
 };
 
 const LOCAL_RPC_ETH = 'http://127.0.0.1:8545';
 const LOCAL_RPC_POLYGON = 'http://127.0.0.1:8546';
 const LOCAL_RPC_BNB = 'http://127.0.0.1:8547';
 const CHAINORA_RPC = 'http://157.66.100.120:8545/';
+// Keep this in sync with chainora-dapp `VITE_CHAINORA_STABLECOIN_ADDRESS`.
+const CHAINORA_STABLECOIN_ADDRESS = '0x79abce4dc09dce832361090d35ba8ae051cd1fd6';
 
 export const NETWORKS: Record<NetworkKey, NetworkConfig> = {
   eth: {
@@ -40,7 +44,9 @@ export const NETWORKS: Record<NetworkKey, NetworkConfig> = {
     name: 'Chainora Testnet',
     chainId: 1123337227327254,
     rpcUrl: CHAINORA_RPC,
-    currencySymbol: 'tCNR',
+    currencySymbol: 'tcUSD',
+    stablecoinAddress: CHAINORA_STABLECOIN_ADDRESS,
+    stablecoinDecimals: 18,
   },
 };
 

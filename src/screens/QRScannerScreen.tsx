@@ -20,9 +20,10 @@ import { useSettings } from '../features/settings';
 import { ROUTES } from '../navigation/routes/routes';
 import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
 import type { WalletActionResult } from '../services/cardService';
-import { createQrLoginProof, verifyQrLogin, warmupLoginDeviceVerification } from '../services/qrAuthFlowService';
+import { verifyQrLoginWithOneTapVerification } from '../services/qrAuthFlowService';
 import { createPoolViaQrOneTap } from '../services/qrCreateGroupFlowService';
 import { executePoolActionViaQrOneTap } from '../services/qrPoolActionFlowService';
+import { isQrFlowCancelledError } from '../services/qrFlowCommonService';
 import { parseQrLoginPayload, type QrLoginPayload } from '../services/qrPayloadParserService';
 import { notifyQrLoginProgress } from '../services/qrSessionProgressService';
 import { registerUsernameRelayerOneTap } from '../services/qrUsernameFlowService';
@@ -46,6 +47,9 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
   const [scanDialogVisible, setScanDialogVisible] = useState(false);
   const [verifiedAddress, setVerifiedAddress] = useState('');
   const [flowSuccessMessage, setFlowSuccessMessage] = useState('');
+  const flowInProgressRef = React.useRef(false);
+  const flowCancelRequestedRef = React.useRef(false);
+  const flowMainTxSubmittedRef = React.useRef(false);
 
   useEffect(() => {
     const status = Camera.getCameraPermissionStatus();
@@ -135,6 +139,10 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
       };
     }
 
+    flowInProgressRef.current = true;
+    flowCancelRequestedRef.current = false;
+    flowMainTxSubmittedRef.current = false;
+
     try {
       console.log('[QRFlow] start handleFlowScan', {
         feature: scannedPayload.feature,
@@ -173,6 +181,10 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
             pin,
             expectedAddress: route.params.ethAddress,
             onProgress: setStageStatus,
+            isCancelled: () => flowCancelRequestedRef.current,
+            onMainTxSubmitted: () => {
+              flowMainTxSubmittedRef.current = true;
+            },
           });
 
           const summary = `Pool created\nPool ID: ${createResult.poolId ?? '-'}\nPool: ${createResult.poolAddress ?? '-'}\nTx: ${createResult.txHash ?? '-'}`;
@@ -197,10 +209,16 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
             pin,
             expectedAddress: route.params.ethAddress,
             onProgress: setStageStatus,
+            isCancelled: () => flowCancelRequestedRef.current,
+            onMainTxSubmitted: () => {
+              flowMainTxSubmittedRef.current = true;
+            },
           });
 
           const actionLabel = scannedPayload.poolAction?.label?.trim() || 'Pool action';
-          const summary = `${actionLabel} completed\nTx: ${actionResult.txHash ?? '-'}`;
+          const summary = actionResult.pendingConfirmation
+            ? `${actionLabel} submitted\nTx: ${actionResult.txHash ?? '-'}\nStatus: Pending confirmation (RPC slow)`
+            : `${actionLabel} completed\nTx: ${actionResult.txHash ?? '-'}`;
           setVerifiedAddress(actionResult.address ?? route.params.ethAddress);
           setFlowSuccessMessage(summary);
           setScanError('');
@@ -219,67 +237,32 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
           throw new Error('QR payload missing sessionId for auth login.');
         }
 
-        setStageStatus('Signing login challenge on card...');
-        const proof = await createQrLoginProof(scannedPayload, pin);
-        console.log('[QRFlow] proof created', {
-          proofAddress: proof.address,
-          appAddress: route.params.ethAddress,
-        });
-        if (proof.address.toLowerCase() !== route.params.ethAddress.toLowerCase()) {
-          setScanError('Card address does not match the active wallet in app.');
-          return {
-            ok: false,
-            message: 'Card address does not match the active wallet in app.',
-          };
-        }
-
-        setStageStatus('Submitting signature to backend for login verification...');
-        await verifyQrLogin({
-          apiBase: scannedPayload.apiBase,
-          sessionId,
-          address: proof.address,
-          signatureHex: proof.signatureHex,
-          recovery: proof.recovery,
-        });
-        console.log('[QRFlow] auth verify finished');
-
-        setStageStatus('Login verified. Completing one-time device verification setup (tap card again if prompted)...');
-        const warmupResult = await warmupLoginDeviceVerification({
+        setStageStatus('Signing login challenge and running first-login verification...');
+        const verifyResult = await verifyQrLoginWithOneTapVerification({
           payload: scannedPayload,
           pin,
-          expectedAddress: proof.address,
-          publishSessionProgress: true,
+          expectedAddress: route.params.ethAddress,
           onProgress: status => {
             setStageStatus(status);
           },
         });
-        console.log('[QRFlow] login warmup result', {
-          attempted: warmupResult.attempted,
-          verified: warmupResult.verified,
-          message: warmupResult.message,
-        });
-
-        const warmupFailed = warmupResult.attempted && !warmupResult.verified;
-        if (warmupFailed) {
-          throw new Error(
-            `Login verified but device verification setup failed: ${warmupResult.message}. `
-            + 'Please rescan and complete device verification before group actions.',
-          );
-        }
+        console.log('[QRFlow] auth verify finished');
 
         setScanError('');
-        setVerifiedAddress(proof.address);
-        const warmupSummary = warmupResult.attempted && warmupResult.verified
-          ? ' Device verification setup completed.'
-          : '';
+        setVerifiedAddress(verifyResult.address ?? route.params.ethAddress);
         return {
           ok: true,
-          message: `QR login verified. DApp session should complete now.${warmupSummary}`.trim(),
-          ethAddress: proof.address,
+          message: 'QR login verified. DApp session should complete now.',
+          ethAddress: verifyResult.address ?? route.params.ethAddress,
         };
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unable to verify QR login.';
+      const cancelledByUser = isQrFlowCancelledError(error);
+      const message = cancelledByUser
+        ? 'Flow cancelled on mobile before main transaction submission.'
+        : error instanceof Error
+          ? error.message
+          : 'Unable to verify QR login.';
       if (
         (scannedPayload.feature === 'chainora-native-wallet:create-pool'
           || scannedPayload.feature === 'chainora-native-wallet:pool-action')
@@ -299,8 +282,41 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
         ok: false,
         message,
       };
+    } finally {
+      flowInProgressRef.current = false;
+      flowCancelRequestedRef.current = false;
+      flowMainTxSubmittedRef.current = false;
     }
   }, [pin, route.params.ethAddress, scannedPayload]);
+
+  const handleCloseScanDialog = useCallback(() => {
+    if (flowInProgressRef.current) {
+      if (flowMainTxSubmittedRef.current) {
+        Alert.alert(
+          'Transaction already submitted',
+          'Transaction was already broadcast to Chainora. Closing now will not cancel it, and it can still confirm shortly.',
+          [
+            {
+              text: 'Keep waiting',
+              style: 'cancel',
+            },
+            {
+              text: 'Close anyway',
+              style: 'destructive',
+              onPress: () => {
+                setScanDialogVisible(false);
+              },
+            },
+          ],
+        );
+        return;
+      }
+
+      flowCancelRequestedRef.current = true;
+    }
+
+    setScanDialogVisible(false);
+  }, []);
 
   const handleScanSuccess = useCallback((details?: { result: WalletActionResult }) => {
     setScanDialogVisible(false);
@@ -403,7 +419,7 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
       <ScanDialog
         visible={scanDialogVisible}
         isNfcEnabled={isNfcEnabled}
-        onClose={() => setScanDialogVisible(false)}
+        onClose={handleCloseScanDialog}
         onSuccess={handleScanSuccess}
         types="flow"
         prefilledPin={pin}

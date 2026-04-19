@@ -39,7 +39,7 @@ export const logCreateGroupGasIssue = ({
     stage,
     accountAddress: accountAddress.toLowerCase(),
     reason,
-    hint: 'wallet has no tCNR for gas or account is not activated on Chainora',
+    hint: 'wallet has no tcUSD for gas or account is not activated on Chainora',
   });
 };
 
@@ -61,6 +61,7 @@ export const logPoolActionEvent = ({
   sessionId?: string;
 }): void => {
   console.log('[PoolAction]', {
+    flowVersion: 'qr-pool-action-2026-04-19-precheck-v2',
     stage,
     actionLabel,
     accountAddress: accountAddress.toLowerCase(),
@@ -91,6 +92,7 @@ export const logPoolActionIssue = ({
   sessionId?: string;
 }): void => {
   console.warn('[PoolAction][Issue]', {
+    flowVersion: 'qr-pool-action-2026-04-19-precheck-v2',
     stage,
     actionLabel,
     accountAddress: accountAddress.toLowerCase(),
@@ -99,22 +101,22 @@ export const logPoolActionIssue = ({
     txHash,
     sessionId: sessionId || 'n/a',
     reason,
-    hint: 'check wallet tCNR gas balance and account activation on Chainora',
+    hint: 'check wallet gas balance/account activation; for contribute verify stablecoin balance + allowance; for bidding ensure discount > current best and auction is open',
   });
 };
 
 export const buildAccountNotActivatedMessage = (address: string): string =>
   `Wallet ${address} is not activated on Chainora yet. `
-  + 'Please receive a small amount of tCNR to this wallet, then retry create group.';
+  + 'Please receive a small amount of tcUSD to this wallet, then retry create group.';
 
 export const buildInsufficientGasMessage = (address: string): string =>
-  `Wallet ${address} does not have enough tCNR to pay gas. `
-  + 'Please top up tCNR and retry create group.';
+  `Wallet ${address} does not have enough tcUSD to pay gas. `
+  + 'Please top up tcUSD and retry create group.';
 
 export const buildPoolActionAccountNotActivatedMessage = (address: string): string =>
   `Wallet ${address} is not activated on Chainora yet. `
-  + 'Please receive a small amount of tCNR to this wallet, then retry this action.';
+  + 'Please receive a small amount of tcUSD to this wallet, then retry this action.';
 
 export const buildPoolActionInsufficientGasMessage = (address: string): string =>
-  `Wallet ${address} does not have enough tCNR to pay gas. `
-  + 'Please top up tCNR and retry this action.';
+  `Wallet ${address} does not have enough tcUSD to pay gas. `
+  + 'Please top up tcUSD and retry this action.';

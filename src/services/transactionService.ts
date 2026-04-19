@@ -21,10 +21,19 @@ export type SendEthParams = {
   to: string;
   valueWei: bigint;
   pin: string;
+  signHash?: (hash: Uint8Array) => Promise<{
+    ok: boolean;
+    message: string;
+    signatureDer?: Uint8Array;
+    publicKeyHex?: string;
+    ethAddress?: string;
+  }>;
   nonce?: bigint;
   gasPriceWei?: bigint;
   gasLimitWei?: bigint;
+  fallbackGasLimitWei?: bigint;
   dataHex?: string;
+  broadcast?: boolean;
 };
 
 export type SendEthResult = {
@@ -283,6 +292,9 @@ const sendRawTransaction = async (payloadHex: string): Promise<string> => {
   return withRpcRetry(() => client.sendRawTransaction({ serializedTransaction: payloadHex as `0x${string}` }));
 };
 
+export const broadcastRawSignedTransaction = async (payloadHex: string): Promise<string> =>
+  sendRawTransaction(payloadHex);
+
 const ensureHexData = (dataHex?: string): Uint8Array => {
   if (!dataHex) {
     return ZERO_BYTES;
@@ -299,10 +311,13 @@ export const sendEthTransaction = async ({
   to,
   valueWei,
   pin,
+  signHash,
   nonce,
   gasPriceWei,
   gasLimitWei,
+  fallbackGasLimitWei,
   dataHex,
+  broadcast = true,
 }: SendEthParams): Promise<SendEthResult> => {
   const fromChecksum = sanitizeAddress(from);
   const toChecksum = sanitizeAddress(to);
@@ -313,7 +328,7 @@ export const sendEthTransaction = async ({
   ]);
   const data = ensureHexData(dataHex);
   const defaultGasLimit = data.length > 0 ? CONTRACT_CALL_FALLBACK_GAS_LIMIT : LEGACY_TRANSFER_GAS_LIMIT;
-  const baselineGasLimit = gasLimitWei ?? defaultGasLimit;
+  const baselineGasLimit = gasLimitWei ?? fallbackGasLimitWei ?? defaultGasLimit;
   let resolvedGasLimit = baselineGasLimit;
 
   // When caller already provides a gas limit, skip estimateGas to reduce RPC roundtrips on slow nodes.
@@ -344,7 +359,9 @@ export const sendEthTransaction = async ({
 
   const messageHash = keccak_256(unsigned);
 
-  const signatureResult = await signTransactionHash(pin, messageHash);
+  const signatureResult = signHash
+    ? await signHash(messageHash)
+    : await signTransactionHash(pin, messageHash);
   if (!signatureResult.ok || !signatureResult.signatureDer || !signatureResult.publicKeyHex) {
     throw new Error(signatureResult.message);
   }
@@ -381,7 +398,10 @@ export const sendEthTransaction = async ({
   });
 
   const rawTxHex = `0x${bytesToHex(signedTx)}`;
-  const transactionHash = await sendRawTransaction(rawTxHex);
+  const locallyComputedHash = `0x${bytesToHex(keccak_256(signedTx))}`;
+  const transactionHash = broadcast
+    ? await sendRawTransaction(rawTxHex)
+    : locallyComputedHash;
 
   return {
     transactionHash,
