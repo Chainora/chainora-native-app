@@ -32,6 +32,113 @@ import { pauseActivitySync, resumeActivitySync } from '../services/activitySyncS
 type Props = NativeStackScreenProps<RootStackParamList, typeof ROUTES.QRScanner>;
 const PIN_LENGTH = 4;
 
+const toFriendlyStageStatus = (raw: string): string => {
+  const message = String(raw ?? '').trim();
+  if (!message) {
+    return 'Processing your request...';
+  }
+
+  const lower = message.toLowerCase();
+  if (lower.includes('waiting for transaction confirmation') || lower.includes('pending confirmation')) {
+    return 'Finalizing your request...';
+  }
+  if (lower.includes('broadcast') || lower.includes('submit') || lower.includes('sending transaction')) {
+    return 'Sending your request...';
+  }
+  if (lower.includes('precheck') || lower.includes('simulate')) {
+    return 'Checking request details...';
+  }
+  if (lower.includes('sync') || lower.includes('backend')) {
+    return 'Updating your group data...';
+  }
+  if (lower.includes('nfc') || lower.includes('card')) {
+    return 'Hold your card near the phone...';
+  }
+  if (lower.includes('0x') || lower.includes('sessionid') || lower.includes('selector')) {
+    return 'Processing your request...';
+  }
+
+  return message;
+};
+
+const toFriendlyFlowError = (raw: unknown): string => {
+  const message = raw instanceof Error ? raw.message.trim() : String(raw ?? '').trim();
+  if (!message) {
+    return 'Could not complete this request. Please try again.';
+  }
+
+  const lower = message.toLowerCase();
+  if (lower.includes('pin') && (lower.includes('invalid') || lower.includes('incorrect'))) {
+    return 'Incorrect PIN. Please try again.';
+  }
+  if (lower.includes('nfc') || lower.includes('card') || lower.includes('transport')) {
+    return 'Card not detected. Hold it close to your phone and try again.';
+  }
+  if (
+    lower.includes('sequence')
+    || lower.includes('nonce')
+    || lower.includes('rpc')
+    || lower.includes('eth_sendrawtransaction')
+    || lower.includes('selector')
+    || lower.includes('invalid parameters')
+    || lower.includes('payload')
+    || lower.includes('sessionid')
+  ) {
+    return 'Network is busy right now. Please wait a moment and try again.';
+  }
+  if (lower.includes('expired qr') || lower.includes('invalid qr') || lower.includes('unsupported qr')) {
+    return 'This QR code is invalid or expired. Please refresh QR on the dApp.';
+  }
+
+  return message;
+};
+
+const resolveRequestTypeLabel = (payload: QrLoginPayload): string => {
+  if (payload.feature === 'chainora-native-wallet:create-pool') {
+    return 'Create Group';
+  }
+  if (payload.feature === 'chainora-native-wallet:pool-action') {
+    return 'Group Action';
+  }
+  if (payload.feature === 'username.register' || payload.feature === 'username.set_primary') {
+    return 'Username';
+  }
+  return 'Sign In';
+};
+
+const resolveRequestTitle = (payload: QrLoginPayload): string => {
+  if (payload.feature === 'chainora-native-wallet:create-pool') {
+    return 'Approve create group request';
+  }
+  if (payload.feature === 'chainora-native-wallet:pool-action') {
+    return payload.poolAction?.label?.trim()
+      ? `Approve ${payload.poolAction.label}`
+      : 'Approve group action';
+  }
+  if (payload.feature === 'username.set_primary') {
+    return 'Set primary username';
+  }
+  if (payload.feature === 'username.register') {
+    return 'Register username';
+  }
+  return 'Approve sign in request';
+};
+
+const resolveRequestDescription = (payload: QrLoginPayload): string => {
+  if (payload.feature === 'chainora-native-wallet:create-pool') {
+    const groupName = payload.createPool?.groupName?.trim();
+    return groupName
+      ? `Group: ${groupName}`
+      : 'You will create a new savings group.';
+  }
+  if (payload.feature === 'username.register' || payload.feature === 'username.set_primary') {
+    return payload.username?.trim()
+      ? `Username: ${payload.username}`
+      : 'You are confirming a username request.';
+  }
+  return 'Enter your wallet PIN, then tap your card to continue.';
+};
+
 const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice('back');
@@ -45,8 +152,6 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
   const [pin, setPin] = useState('');
   const [pinDialogVisible, setPinDialogVisible] = useState(false);
   const [scanDialogVisible, setScanDialogVisible] = useState(false);
-  const [verifiedAddress, setVerifiedAddress] = useState('');
-  const [flowSuccessMessage, setFlowSuccessMessage] = useState('');
   const flowInProgressRef = React.useRef(false);
   const flowCancelRequestedRef = React.useRef(false);
   const flowMainTxSubmittedRef = React.useRef(false);
@@ -69,8 +174,6 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
     setPin('');
     setPinDialogVisible(false);
     setScanError('');
-    setVerifiedAddress('');
-    setFlowSuccessMessage('');
   }, [scannedPayload]);
 
   const codeScanner = useCodeScanner({
@@ -100,8 +203,7 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
         setPinDialogVisible(true);
         setScanError('');
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Invalid QR login payload';
-        setScanError(message);
+        setScanError(toFriendlyFlowError(error));
       }
     },
   });
@@ -135,7 +237,7 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
     if (!scannedPayload) {
       return {
         ok: false,
-        message: 'Missing scanned QR payload.',
+        message: 'Missing QR request. Please scan again.',
       };
     }
 
@@ -143,126 +245,114 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
     flowCancelRequestedRef.current = false;
     flowMainTxSubmittedRef.current = false;
 
+    const setFriendlyStageStatus = (status: string) => {
+      setStageStatus(toFriendlyStageStatus(status));
+    };
+
     try {
-      console.log('[QRFlow] start handleFlowScan', {
-        feature: scannedPayload.feature,
-        sessionId: scannedPayload.sessionId,
-        apiBase: scannedPayload.apiBase,
-      });
       if (scannedPayload.feature === 'username.register' || scannedPayload.feature === 'username.set_primary') {
         const isPrimarySelection = scannedPayload.feature === 'username.set_primary';
-        setStageStatus(
+        setFriendlyStageStatus(
           isPrimarySelection
-            ? 'Starting primary username selection flow (single card tap)...'
-            : 'Starting username verification flow (single card tap)...',
+            ? 'Preparing primary username request...'
+            : 'Preparing username request...',
         );
         const registerResult = await registerUsernameRelayerOneTap({
           payload: scannedPayload,
           pin,
           expectedAddress: route.params.ethAddress,
-          onProgress: setStageStatus,
+          onProgress: setFriendlyStageStatus,
         });
-        console.log('[QRFlow] username relayer flow finished');
-        setVerifiedAddress(registerResult.address ?? route.params.ethAddress);
         setScanError('');
         return {
           ok: true,
           message: isPrimarySelection
-            ? 'Primary username selected and card verified in one NFC session.'
-            : 'Username registered and card verified in one NFC session.',
+            ? 'Primary username updated successfully.'
+            : 'Username registered successfully.',
           ethAddress: registerResult.address ?? route.params.ethAddress,
         };
-      } else if (scannedPayload.feature === 'chainora-native-wallet:create-pool') {
+      }
+
+      if (scannedPayload.feature === 'chainora-native-wallet:create-pool') {
         pauseActivitySync();
         try {
-          setStageStatus('Preparing create pool flow...');
+          setFriendlyStageStatus('Preparing create group request...');
           const createResult = await createPoolViaQrOneTap({
             payload: scannedPayload,
             pin,
             expectedAddress: route.params.ethAddress,
-            onProgress: setStageStatus,
+            onProgress: setFriendlyStageStatus,
             isCancelled: () => flowCancelRequestedRef.current,
             onMainTxSubmitted: () => {
               flowMainTxSubmittedRef.current = true;
             },
           });
 
-          const summary = `Pool created\nPool ID: ${createResult.poolId ?? '-'}\nPool: ${createResult.poolAddress ?? '-'}\nTx: ${createResult.txHash ?? '-'}`;
-          setVerifiedAddress(createResult.address ?? route.params.ethAddress);
-          setFlowSuccessMessage(summary);
           setScanError('');
-
           return {
             ok: true,
-            message: summary,
+            message: 'Group created successfully.',
             ethAddress: createResult.address ?? route.params.ethAddress,
           };
         } finally {
           resumeActivitySync();
         }
-      } else if (scannedPayload.feature === 'chainora-native-wallet:pool-action') {
+      }
+
+      if (scannedPayload.feature === 'chainora-native-wallet:pool-action') {
         pauseActivitySync();
         try {
-          setStageStatus('Preparing pool action flow...');
+          setFriendlyStageStatus('Preparing group action...');
           const actionResult = await executePoolActionViaQrOneTap({
             payload: scannedPayload,
             pin,
             expectedAddress: route.params.ethAddress,
-            onProgress: setStageStatus,
+            onProgress: setFriendlyStageStatus,
             isCancelled: () => flowCancelRequestedRef.current,
             onMainTxSubmitted: () => {
               flowMainTxSubmittedRef.current = true;
             },
           });
 
-          const actionLabel = scannedPayload.poolAction?.label?.trim() || 'Pool action';
-          const summary = actionResult.pendingConfirmation
-            ? `${actionLabel} submitted\nTx: ${actionResult.txHash ?? '-'}\nStatus: Pending confirmation (RPC slow)`
-            : `${actionLabel} completed\nTx: ${actionResult.txHash ?? '-'}`;
-          setVerifiedAddress(actionResult.address ?? route.params.ethAddress);
-          setFlowSuccessMessage(summary);
+          const actionLabel = scannedPayload.poolAction?.label?.trim() || 'Group action';
           setScanError('');
-
           return {
             ok: true,
-            message: summary,
+            message: `${actionLabel} completed successfully.`,
             ethAddress: actionResult.address ?? route.params.ethAddress,
           };
         } finally {
           resumeActivitySync();
         }
-      } else {
-        const sessionId = scannedPayload.sessionId?.trim();
-        if (!sessionId) {
-          throw new Error('QR payload missing sessionId for auth login.');
-        }
-
-        setStageStatus('Signing login challenge and running first-login verification...');
-        const verifyResult = await verifyQrLoginWithOneTapVerification({
-          payload: scannedPayload,
-          pin,
-          expectedAddress: route.params.ethAddress,
-          onProgress: status => {
-            setStageStatus(status);
-          },
-        });
-        console.log('[QRFlow] auth verify finished');
-
-        setScanError('');
-        setVerifiedAddress(verifyResult.address ?? route.params.ethAddress);
-        return {
-          ok: true,
-          message: 'QR login verified. DApp session should complete now.',
-          ethAddress: verifyResult.address ?? route.params.ethAddress,
-        };
       }
+
+      const sessionId = scannedPayload.sessionId?.trim();
+      if (!sessionId) {
+        throw new Error('Missing QR session.');
+      }
+
+      setFriendlyStageStatus('Preparing sign in...');
+      const verifyResult = await verifyQrLoginWithOneTapVerification({
+        payload: scannedPayload,
+        pin,
+        expectedAddress: route.params.ethAddress,
+        onProgress: status => {
+          setFriendlyStageStatus(status);
+        },
+      });
+
+      setScanError('');
+      return {
+        ok: true,
+        message: 'Sign in approved successfully.',
+        ethAddress: verifyResult.address ?? route.params.ethAddress,
+      };
     } catch (error) {
       const cancelledByUser = isQrFlowCancelledError(error);
       const message = cancelledByUser
-        ? 'Flow cancelled on mobile before main transaction submission.'
-        : error instanceof Error
-          ? error.message
-          : 'Unable to verify QR login.';
+        ? 'Request was cancelled.'
+        : toFriendlyFlowError(error);
+
       if (
         (scannedPayload.feature === 'chainora-native-wallet:create-pool'
           || scannedPayload.feature === 'chainora-native-wallet:pool-action')
@@ -276,7 +366,7 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
             : 'create_pool_failed',
         }).catch(() => undefined);
       }
-      console.log('[QRFlow] handleFlowScan failed', { message });
+
       setScanError(message);
       return {
         ok: false,
@@ -293,8 +383,8 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
     if (flowInProgressRef.current) {
       if (flowMainTxSubmittedRef.current) {
         Alert.alert(
-          'Transaction already submitted',
-          'Transaction was already broadcast to Chainora. Closing now will not cancel it, and it can still confirm shortly.',
+          'Request is being processed',
+          'Your request has already been sent. Closing now will not cancel it.',
           [
             {
               text: 'Keep waiting',
@@ -320,14 +410,14 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const handleScanSuccess = useCallback((details?: { result: WalletActionResult }) => {
     setScanDialogVisible(false);
-    const successText = details?.result?.message || flowSuccessMessage || 'Signature was accepted.';
+    const successText = details?.result?.message || 'Request completed successfully.';
     Alert.alert('Sign Completed', successText, [
       {
         text: 'OK',
         onPress: () => navigation.goBack(),
       },
     ]);
-  }, [flowSuccessMessage, navigation]);
+  }, [navigation]);
 
   const canSubmitPin = pin.length === PIN_LENGTH && Boolean(scannedPayload) && !scanDialogVisible;
 
@@ -342,8 +432,8 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
 
   return (
     <SafeAreaView style={styles.root}>
-      <Text style={styles.title}>QR Scanner</Text>
-      <Text style={styles.payload}>Scan QR, enter password, then tap your NFC card to authorize and sign the requested action.</Text>
+      <Text style={styles.title}>Scan QR</Text>
+      <Text style={styles.subtitle}>Scan the code from Chainora dApp, enter PIN, then tap your card to approve.</Text>
 
       {!hasPermission ? (
         <View>
@@ -365,39 +455,17 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
             <Camera
               style={StyleSheet.absoluteFill}
               device={device}
-              isActive={!scanDialogVisible && !verifiedAddress}
+              isActive={!scanDialogVisible}
               codeScanner={codeScanner}
             />
           </View>
 
           {scannedPayload ? (
             <View style={styles.detailsCard}>
-              <Text style={styles.detailsTitle}>Scanned Request</Text>
-              <Text style={styles.payload}>feature: {scannedPayload.feature ?? 'auth.login'}</Text>
-              {scannedPayload.sessionId ? <Text style={styles.payload}>sessionId: {scannedPayload.sessionId}</Text> : null}
-              {scannedPayload.nonce ? <Text style={styles.payload}>nonce: {scannedPayload.nonce}</Text> : null}
-              {scannedPayload.username ? <Text style={styles.payload}>username: {scannedPayload.username}</Text> : null}
-              {scannedPayload.createPool ? (
-                <>
-                  <Text style={styles.payload}>NFC purpose: sign create pool transaction with your card</Text>
-                  <Text style={styles.payload}>factory: {scannedPayload.createPool.factoryAddress}</Text>
-                  <Text style={styles.payload}>
-                    amount: {scannedPayload.createPool.contributionAmount}{' '}
-                    {scannedPayload.createPool.contributionTokenSymbol ?? 'tcUSD'}
-                  </Text>
-                  <Text style={styles.payload}>members: {scannedPayload.createPool.targetMembers}</Text>
-                </>
-              ) : null}
-              {scannedPayload.poolAction ? (
-                <>
-                  <Text style={styles.payload}>NFC purpose: sign pool action transaction with your card</Text>
-                  {scannedPayload.poolAction.label ? (
-                    <Text style={styles.payload}>action: {scannedPayload.poolAction.label}</Text>
-                  ) : null}
-                  <Text style={styles.payload}>to: {scannedPayload.poolAction.to}</Text>
-                </>
-              ) : null}
-              <Text style={styles.payload}>api: {scannedPayload.apiBase}</Text>
+              <Text style={styles.requestBadge}>{resolveRequestTypeLabel(scannedPayload)}</Text>
+              <Text style={styles.detailsTitle}>{resolveRequestTitle(scannedPayload)}</Text>
+              <Text style={styles.payload}>{resolveRequestDescription(scannedPayload)}</Text>
+              <Text style={styles.payload}>You can scan another QR if this is not your request.</Text>
 
               <Pressable style={styles.secondaryButton} onPress={resetScanState}>
                 <Text style={styles.secondaryButtonText}>Scan Another QR</Text>
@@ -410,7 +478,6 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
       )}
 
       {scanError ? <Text style={styles.errorText}>{scanError}</Text> : null}
-      {verifiedAddress ? <Text style={styles.successText}>Verified address: {verifiedAddress}</Text> : null}
 
       <Pressable style={styles.button} onPress={() => navigation.goBack()}>
         <Text style={styles.buttonText}>Back</Text>
@@ -430,7 +497,7 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
         <View style={styles.pinDialogBackdrop}>
           <View style={styles.pinDialogCard}>
             <Text style={styles.pinDialogTitle}>Enter Password</Text>
-            <Text style={styles.payload}>Use your wallet PIN, then tap NFC card to sign the request from this QR.</Text>
+            <Text style={styles.payload}>Use your wallet PIN, then tap your card to approve this request.</Text>
             <PinInput value={pin} onChange={setPin} disabled={scanDialogVisible} length={PIN_LENGTH} />
             <View style={styles.pinDialogActions}>
               <AppButton label="Cancel" variant="text" onPress={() => setPinDialogVisible(false)} />
@@ -448,31 +515,52 @@ const createStyles = (background: string, foreground: string) =>
     root: {
       flex: 1,
       backgroundColor: background,
-      padding: 16,
-      gap: 12,
+      paddingHorizontal: 18,
+      paddingTop: 16,
+      paddingBottom: 14,
+      gap: 14,
     },
     title: {
       color: foreground,
-      fontSize: 18,
+      fontSize: 24,
       fontWeight: '700',
     },
+    subtitle: {
+      color: `${foreground}CC`,
+      fontSize: 13,
+      lineHeight: 20,
+      marginTop: -6,
+    },
     cameraWrapper: {
-      height: 260,
-      borderRadius: 12,
+      height: 280,
+      borderRadius: 16,
       overflow: 'hidden',
       backgroundColor: '#111',
+      borderWidth: 1,
+      borderColor: '#334155',
     },
     detailsCard: {
-      gap: 8,
-      padding: 12,
-      borderRadius: 10,
+      gap: 10,
+      padding: 14,
+      borderRadius: 14,
       borderWidth: 1,
-      borderColor: '#2b6cb0',
-      backgroundColor: 'rgba(43, 108, 176, 0.08)',
+      borderColor: '#1d4ed8',
+      backgroundColor: 'rgba(29, 78, 216, 0.10)',
+    },
+    requestBadge: {
+      alignSelf: 'flex-start',
+      color: '#dbeafe',
+      backgroundColor: '#1e40af',
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 999,
+      fontSize: 11,
+      fontWeight: '700',
+      overflow: 'hidden',
     },
     detailsTitle: {
       color: foreground,
-      fontSize: 14,
+      fontSize: 16,
       fontWeight: '700',
     },
     button: {
@@ -488,27 +576,24 @@ const createStyles = (background: string, foreground: string) =>
     },
     payload: {
       color: foreground,
-      fontSize: 12,
+      fontSize: 13,
+      lineHeight: 19,
     },
     errorText: {
       color: '#d64545',
-      fontSize: 12,
-    },
-    successText: {
-      color: '#2f855a',
-      fontSize: 12,
-      fontWeight: '600',
+      fontSize: 13,
+      lineHeight: 18,
     },
     secondaryButton: {
       alignSelf: 'center',
       paddingVertical: 8,
-      paddingHorizontal: 10,
-      borderRadius: 8,
+      paddingHorizontal: 12,
+      borderRadius: 10,
       borderWidth: 1,
-      borderColor: '#2b6cb0',
+      borderColor: '#1d4ed8',
     },
     secondaryButtonText: {
-      color: '#2b6cb0',
+      color: '#1d4ed8',
       fontWeight: '700',
     },
     pinDialogBackdrop: {

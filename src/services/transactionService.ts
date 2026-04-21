@@ -11,9 +11,11 @@ const LEGACY_TRANSFER_GAS_LIMIT = 21_000n;
 const CONTRACT_CALL_FALLBACK_GAS_LIMIT = 1_500_000n;
 const GAS_ESTIMATE_BUFFER_NUMERATOR = 12n;
 const GAS_ESTIMATE_BUFFER_DENOMINATOR = 10n;
-const GAS_ESTIMATE_TIMEOUT_MS = 3_500;
-const RPC_CALL_RETRY_LIMIT = 3;
-const RPC_CALL_RETRY_DELAY_MS = 650;
+const GAS_ESTIMATE_TIMEOUT_MS = 2_200;
+const STRICT_GAS_ESTIMATE_RETRY_LIMIT = 2;
+const STRICT_GAS_ESTIMATE_RETRY_DELAY_MS = 220;
+const RPC_CALL_RETRY_LIMIT = 2;
+const RPC_CALL_RETRY_DELAY_MS = 280;
 const ZERO_BYTES = new Uint8Array(0);
 
 export type SendEthParams = {
@@ -43,6 +45,11 @@ export type SendEthResult = {
   gasPriceWei: bigint;
   gasLimitWei: bigint;
 };
+
+export type SendAbiTransactionStrictParams =
+  Omit<SendEthParams, 'gasLimitWei' | 'fallbackGasLimitWei'> & {
+    estimateFailureMessage?: string;
+  };
 
 export const parseEther = (value: string): bigint => {
   const trimmed = value.trim();
@@ -282,6 +289,50 @@ const estimateGasLimit = async (params: {
   }
 };
 
+const estimateGasLimitStrict = async (params: {
+  from: string;
+  to: string;
+  valueWei: bigint;
+  data: Uint8Array;
+  estimateFailureMessage?: string;
+}): Promise<bigint> => {
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= STRICT_GAS_ESTIMATE_RETRY_LIMIT; attempt += 1) {
+    try {
+      const estimate = await estimateGasLimit({
+        from: params.from,
+        to: params.to,
+        valueWei: params.valueWei,
+        data: params.data,
+      });
+
+      if (estimate !== null) {
+        return estimate;
+      }
+      lastError = new Error('estimateGas returned no result');
+    } catch (error) {
+      const reason = error instanceof Error ? error : new Error(String(error));
+      if (isEstimateRevertError(reason.message)) {
+        throw reason;
+      }
+      lastError = reason;
+    }
+
+    if (attempt < STRICT_GAS_ESTIMATE_RETRY_LIMIT) {
+      await sleep(STRICT_GAS_ESTIMATE_RETRY_DELAY_MS * attempt);
+    }
+  }
+
+  const reason = lastError?.message;
+  throw new Error(
+    params.estimateFailureMessage
+      ?? (reason
+        ? `Unable to estimate transaction gas on Chainora right now. Please retry in a moment. Details: ${reason}`
+        : 'Unable to estimate transaction gas on Chainora right now. Please retry in a moment.'),
+  );
+};
+
 export const fetchSuggestedGasPriceWei = async (): Promise<bigint> => {
   return fetchGasPrice();
 };
@@ -291,9 +342,6 @@ const sendRawTransaction = async (payloadHex: string): Promise<string> => {
   const client = getPublicViemClient(network);
   return withRpcRetry(() => client.sendRawTransaction({ serializedTransaction: payloadHex as `0x${string}` }));
 };
-
-export const broadcastRawSignedTransaction = async (payloadHex: string): Promise<string> =>
-  sendRawTransaction(payloadHex);
 
 const ensureHexData = (dataHex?: string): Uint8Array => {
   if (!dataHex) {
@@ -410,4 +458,47 @@ export const sendEthTransaction = async ({
     gasPriceWei: resolvedGasPrice,
     gasLimitWei: resolvedGasLimit,
   };
+};
+
+export const sendAbiTransactionStrict = async ({
+  from,
+  to,
+  valueWei,
+  pin,
+  signHash,
+  nonce,
+  gasPriceWei,
+  dataHex,
+  broadcast = true,
+  estimateFailureMessage,
+}: SendAbiTransactionStrictParams): Promise<SendEthResult> => {
+  const fromChecksum = sanitizeAddress(from);
+  const toChecksum = sanitizeAddress(to);
+  const data = ensureHexData(dataHex);
+
+  const [resolvedNonce, resolvedGasPrice] = await Promise.all([
+    nonce ?? fetchNonce(fromChecksum),
+    gasPriceWei ?? fetchGasPrice(),
+  ]);
+
+  const estimatedGasLimit = await estimateGasLimitStrict({
+    from: fromChecksum,
+    to: toChecksum,
+    valueWei,
+    data,
+    estimateFailureMessage,
+  });
+
+  return sendEthTransaction({
+    from: fromChecksum,
+    to: toChecksum,
+    valueWei,
+    pin,
+    signHash,
+    nonce: resolvedNonce,
+    gasPriceWei: resolvedGasPrice,
+    gasLimitWei: applyGasEstimateBuffer(estimatedGasLimit),
+    dataHex,
+    broadcast,
+  });
 };

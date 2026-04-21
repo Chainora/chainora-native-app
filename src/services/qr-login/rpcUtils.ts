@@ -73,6 +73,7 @@ export const waitForTransactionReceiptWithRetry = async <TReceipt>({
   timeoutMs,
   retryLimit,
   retryDelayMs,
+  pollingIntervalMs,
 }: {
   client: {
     waitForTransactionReceipt: (args: {
@@ -87,10 +88,12 @@ export const waitForTransactionReceiptWithRetry = async <TReceipt>({
   timeoutMs?: number;
   retryLimit?: number;
   retryDelayMs?: number;
+  pollingIntervalMs?: number;
 }): Promise<TReceipt> => {
   const effectiveTimeoutMs = timeoutMs ?? RECEIPT_WAIT_TIMEOUT_MS;
   const effectiveRetryLimit = retryLimit ?? RECEIPT_TIMEOUT_RETRY_LIMIT;
   const effectiveRetryDelayMs = retryDelayMs ?? RECEIPT_RETRY_DELAY_MS;
+  const effectivePollingIntervalMs = pollingIntervalMs ?? RECEIPT_POLL_INTERVAL_MS;
 
   let lastError: Error | null = null;
   for (let attempt = 1; attempt <= effectiveRetryLimit; attempt += 1) {
@@ -98,7 +101,7 @@ export const waitForTransactionReceiptWithRetry = async <TReceipt>({
       return await client.waitForTransactionReceipt({
         hash: txHash,
         timeout: effectiveTimeoutMs,
-        pollingInterval: RECEIPT_POLL_INTERVAL_MS,
+        pollingInterval: effectivePollingIntervalMs,
       });
     } catch (error) {
       const reason = error instanceof Error ? error : new Error(String(error));

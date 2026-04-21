@@ -11,6 +11,7 @@ import {
   fetchWithTimeout,
   readApiErrorMessage,
 } from './qr-login/httpUtils';
+import { isRpcTimeoutLikeError } from './qr-login/errorUtils';
 import { withVerifiedWalletSession } from './cardService';
 import { mapCreatePoolStatusToLoginStatus, verifyLoginDeviceInOneSession } from './qrAuthDeviceVerificationService';
 import { signAuthProofWithSession } from './qrAuthProofService';
@@ -25,6 +26,18 @@ import type {
 import { getPublicViemClient } from './web3Client';
 
 export { createQrLoginProof } from './qrAuthProofService';
+
+const isTransientDeviceVerificationError = (message: string): boolean => {
+  const normalized = message.toLowerCase();
+  return (
+    isRpcTimeoutLikeError(message)
+    || normalized.includes('confirmation is taking too long')
+    || normalized.includes('transaction may still be pending on-chain')
+    || normalized.includes('rpc is slow')
+    || normalized.includes('request timed out')
+    || normalized.includes('network request failed')
+  );
+};
 
 export const warmupLoginDeviceVerification = async ({
   payload,
@@ -189,8 +202,17 @@ export const verifyQrLoginWithOneTapVerification = async ({
         writeDeviceVerificationCache(verificationCacheKey, true);
         pushStatus('login_device_verify_success');
       } catch (error) {
-        pushStatus('login_device_verify_failed');
-        throw error;
+        const reason = error instanceof Error ? error.message : String(error);
+        console.warn('[QRLogin] device verification warmup failed; continuing login', {
+          reason,
+          accountAddress,
+          factoryAddress,
+        });
+        onProgress?.(
+          isTransientDeviceVerificationError(reason)
+            ? 'Device verification warmup is delayed because Chainora RPC is slow. Continuing login now...'
+            : 'Device verification warmup failed. Continuing login now, and you can retry warmup later.',
+        );
       }
     }
 

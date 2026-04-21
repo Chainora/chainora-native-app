@@ -75,8 +75,8 @@ export const LoginPinScreen: React.FC<Props> = ({ navigation }) => {
 
       setSubmitting(true);
       try {
-        await initializeSession(result.ethAddress);
-        await completeSession();
+        const session = await initializeSession(result.ethAddress);
+        await completeSession(session.address);
         pinValueRef.current = '';
         setPinValue('');
         setScanVisible(false);

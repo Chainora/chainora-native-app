@@ -2,13 +2,12 @@ import { getAddress } from 'viem';
 
 export const SUBMIT_JOIN_REQUEST_SELECTOR = '0xd7dc9bc7';
 export const PROPOSE_INVITE_SELECTOR = '0x017ebb91';
+export const ACCEPT_INVITE_SELECTOR = '0xbf8e9176';
+export const ACCEPT_JOIN_REQUEST_SELECTOR = '0x558c1642';
 export const CONTRIBUTE_SELECTOR = '0xd7bb99ba';
 export const SUBMIT_DISCOUNT_BID_SELECTOR = '0xb30e0159';
 
 export const UINT256_MAX = (1n << 256n) - 1n;
-export const CONTRIBUTION_APPROVE_FALLBACK_GAS_LIMIT = 80_000n;
-export const CONTRIBUTION_TX_FALLBACK_GAS_LIMIT = 220_000n;
-export const BID_TX_FALLBACK_GAS_LIMIT = 180_000n;
 
 export const isPoolActionSimulationRevertError = (message: string): boolean =>
   message.toLowerCase().includes('transaction simulation indicates revert');
@@ -17,11 +16,15 @@ export const isNonceConflictLikeError = (message: string): boolean => {
   const normalized = message.toLowerCase();
   return (
     normalized.includes('nonce too low')
+    || normalized.includes('nonce too high')
     || normalized.includes('nonce has already been used')
+    || normalized.includes('nonce gap')
     || normalized.includes('replacement transaction underpriced')
     || normalized.includes('already known')
     || normalized.includes('invalid transaction nonce')
     || normalized.includes('transaction underpriced')
+    || normalized.includes('account sequence mismatch')
+    || normalized.includes('incorrect account sequence')
   );
 };
 

@@ -6,12 +6,32 @@ export type IsoDepClient = {
 
 export type IsoDepSession<T> = (isoDep: IsoDepClient) => Promise<T>;
 
-export const withIsoDep = async <T>(callback: IsoDepSession<T>): Promise<T> => {
-  await safeCancelTechnology();
+const TECH_REQUEST_RETRY_DELAY_MS = 180;
 
-  await NfcManager.requestTechnology(NfcTech.IsoDep, {
-    alertMessage: 'Hold near your Chainora card',
-  });
+const sleep = (ms: number): Promise<void> => new Promise(resolve => {
+  setTimeout(resolve, ms);
+});
+
+const requestIsoDepWithRetry = async (): Promise<void> => {
+  try {
+    await NfcManager.requestTechnology(NfcTech.IsoDep, {
+      alertMessage: 'Hold near your Chainora card',
+    });
+    return;
+  } catch (firstError) {
+    await safeCancelTechnology();
+    await sleep(TECH_REQUEST_RETRY_DELAY_MS);
+    await NfcManager.requestTechnology(NfcTech.IsoDep, {
+      alertMessage: 'Hold near your Chainora card',
+    });
+  }
+};
+
+export const withIsoDep = async <T>(callback: IsoDepSession<T>): Promise<T> => {
+  // Ensure NFC manager is initialised even if caller screen hook is not ready yet.
+  await NfcManager.start();
+  await safeCancelTechnology();
+  await requestIsoDepWithRetry();
 
   const handler = (NfcManager as unknown as { isoDepHandler?: { transceive: (payload: number[]) => Promise<number[] | Uint8Array>; } }).isoDepHandler;
 

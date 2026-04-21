@@ -22,7 +22,7 @@ import {
 import { waitForTransactionReceiptWithRetry } from './qr-login/rpcUtils';
 import { signHashAndAttestInOneTap, type VerifiedWalletSession } from './cardService';
 import { resolveRegistryAndDeviceAdapter, throwIfQrFlowCancelled } from './qrFlowCommonService';
-import { sendEthTransaction } from './transactionService';
+import { sendAbiTransactionStrict, sendEthTransaction } from './transactionService';
 import type { CardChallengeResponse, CardDeviceAttestationResponse, CardVerifyResponse } from './qrTypes';
 import { getPublicViemClient } from './web3Client';
 import { bytesToHex, hexToBytes } from '../utils/encoding';
@@ -36,6 +36,7 @@ export const verifyCardAttestationForCreatePool = async ({
   onSessionStatus,
   isCancelled,
   session,
+  txSubmitPolicy = 'legacy',
 }: {
   apiBase: string;
   pin: string;
@@ -45,6 +46,7 @@ export const verifyCardAttestationForCreatePool = async ({
   onSessionStatus?: (status: string) => void;
   isCancelled?: () => boolean;
   session?: VerifiedWalletSession;
+  txSubmitPolicy?: 'legacy' | 'strict';
 }): Promise<void> => {
   throwIfQrFlowCancelled(isCancelled);
   const accountAddress = getAddress(expectedAddress);
@@ -57,6 +59,18 @@ export const verifyCardAttestationForCreatePool = async ({
 
   if (deviceAdapterAddress.toLowerCase() === ZERO_ADDRESS) {
     onProgress?.('Device adapter is disabled in protocol registry. Skipping device verification attestation.');
+    return;
+  }
+  throwIfQrFlowCancelled(isCancelled);
+
+  const alreadyOnChainVerified = await client.readContract({
+    address: deviceAdapterAddress,
+    abi: DEVICE_ADAPTER_READ_ABI,
+    functionName: 'isDeviceVerified',
+    args: [accountAddress],
+  });
+  if (alreadyOnChainVerified) {
+    onProgress?.('Wallet already verified on-chain. Retrying create pool pre-check...');
     return;
   }
   throwIfQrFlowCancelled(isCancelled);
@@ -236,15 +250,28 @@ export const verifyCardAttestationForCreatePool = async ({
   throwIfQrFlowCancelled(isCancelled);
   let submitVerificationTx;
   try {
-    submitVerificationTx = await sendEthTransaction({
-      from: accountAddress,
-      to: deviceAdapterAddress,
-      valueWei: 0n,
-      pin: session ? '0000' : pin,
-      signHash: session ? hash => session.signHash(hash) : undefined,
-      gasLimitWei: 1_500_000n,
-      dataHex: submitVerificationCalldata,
-    });
+    if (txSubmitPolicy === 'strict') {
+      submitVerificationTx = await sendAbiTransactionStrict({
+        from: accountAddress,
+        to: deviceAdapterAddress,
+        valueWei: 0n,
+        pin: session ? '0000' : pin,
+        signHash: session ? hash => session.signHash(hash) : undefined,
+        dataHex: submitVerificationCalldata,
+        estimateFailureMessage:
+          'Unable to prepare device verification transaction because Chainora RPC gas estimation is slow. Please retry in a moment.',
+      });
+    } else {
+      submitVerificationTx = await sendEthTransaction({
+        from: accountAddress,
+        to: deviceAdapterAddress,
+        valueWei: 0n,
+        pin: session ? '0000' : pin,
+        signHash: session ? hash => session.signHash(hash) : undefined,
+        gasLimitWei: 1_500_000n,
+        dataHex: submitVerificationCalldata,
+      });
+    }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     if (isUnknownAccountLikeError(reason)) {
@@ -273,6 +300,10 @@ export const verifyCardAttestationForCreatePool = async ({
     txHash: submitVerificationTx.transactionHash as `0x${string}`,
     label: 'device verification',
     onProgress,
+    timeoutMs: 16_000,
+    retryLimit: 1,
+    retryDelayMs: 320,
+    pollingIntervalMs: 420,
   });
   if (submitReceipt.status !== 'success') {
     throw new Error(
@@ -282,7 +313,7 @@ export const verifyCardAttestationForCreatePool = async ({
   throwIfQrFlowCancelled(isCancelled);
 
   let isNowVerified = false;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
     const verified = await client.readContract({
       address: deviceAdapterAddress,
       abi: DEVICE_ADAPTER_READ_ABI,
@@ -295,7 +326,7 @@ export const verifyCardAttestationForCreatePool = async ({
     }
 
     await new Promise(resolve => {
-      setTimeout(resolve, 700);
+      setTimeout(resolve, 280);
     });
   }
   if (!isNowVerified) {

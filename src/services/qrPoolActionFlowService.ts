@@ -2,7 +2,6 @@ import { encodeFunctionData, getAddress } from 'viem';
 
 import { getActiveNetwork } from '../config/network';
 import {
-  ERC20_READ_ABI,
   ERC20_WRITE_ABI,
 } from './qr-login/abi';
 import { POOL_ACTION_QR_FEATURE } from './qr-login/constants';
@@ -19,9 +18,8 @@ import { runWithSoftTimeout, waitForTransactionReceiptWithRetry } from './qr-log
 import { withVerifiedWalletSession } from './cardService';
 import { createSessionStatusPublisher, throwIfQrFlowCancelled } from './qrFlowCommonService';
 import {
-  BID_TX_FALLBACK_GAS_LIMIT,
-  CONTRIBUTION_APPROVE_FALLBACK_GAS_LIMIT,
-  CONTRIBUTION_TX_FALLBACK_GAS_LIMIT,
+  ACCEPT_INVITE_SELECTOR,
+  ACCEPT_JOIN_REQUEST_SELECTOR,
   CONTRIBUTE_SELECTOR,
   decodeSingleUint256Argument,
   decodeSingleAddressArgument,
@@ -35,14 +33,28 @@ import {
 import { diagnoseSubmitDiscountBidPrecheck } from './qrPoolActionBiddingPrecheckService';
 import { diagnoseContributePrecheck } from './qrPoolActionCollectingPrecheckService';
 import { diagnoseProposeInvitePrecheck, diagnoseSubmitJoinRequestPrecheck } from './qrPoolActionFormingPrecheckService';
-import { broadcastRawSignedTransaction, sendEthTransaction } from './transactionService';
+import { sendAbiTransactionStrict } from './transactionService';
 import type {
   QrLoginPayload,
   VerifyLoginResponse,
 } from './qrTypes';
 import { getPublicViemClient } from './web3Client';
 
-const CONTRIBUTE_PRECHECK_TIMEOUT_MS = 6_000;
+const CONTRIBUTE_PRECHECK_TIMEOUT_MS = 2_800;
+const MEMBERSHIP_PRECHECK_TIMEOUT_MS = 900;
+const BID_PRECHECK_TIMEOUT_MS = 1_800;
+const TX_NONCE_WARMUP_TIMEOUT_MS = 900;
+const MEMBERSHIP_RECEIPT_WAIT_TIMEOUT_MS = 8_000;
+const CONTRIBUTE_RECEIPT_WAIT_TIMEOUT_MS = 12_000;
+const BID_RECEIPT_WAIT_TIMEOUT_MS = 10_000;
+const DEFAULT_RECEIPT_WAIT_TIMEOUT_MS = 9_000;
+const JOIN_REQUEST_GAS_PRICE_BOOST_NUMERATOR = 140n;
+const JOIN_REQUEST_GAS_PRICE_BOOST_DENOMINATOR = 100n;
+const JOIN_REQUEST_REPLACEMENT_GAS_PRICE_BOOST_NUMERATOR = 118n;
+const JOIN_REQUEST_REPLACEMENT_GAS_PRICE_BOOST_DENOMINATOR = 100n;
+const JOIN_REQUEST_MAX_SUBMIT_NONCE_RECOVERY_ATTEMPTS = 2;
+const CONTRIBUTE_GAS_PRICE_BOOST_NUMERATOR = 132n;
+const CONTRIBUTE_GAS_PRICE_BOOST_DENOMINATOR = 100n;
 
 const isPendingConfirmationError = (message: string): boolean => {
   const normalized = message.toLowerCase();
@@ -51,6 +63,23 @@ const isPendingConfirmationError = (message: string): boolean => {
     || normalized.includes('transaction may still be pending on-chain')
     || isRpcTimeoutLikeError(message)
   );
+};
+
+const boostGasPrice = (
+  gasPriceWei: bigint,
+  numerator: bigint,
+  denominator: bigint,
+): bigint => {
+  const boosted = (
+    gasPriceWei * numerator
+    + (denominator - 1n)
+  ) / denominator;
+
+  if (boosted > gasPriceWei) {
+    return boosted;
+  }
+
+  return gasPriceWei + 1n;
 };
 
 export const executePoolActionViaQrOneTap = async ({
@@ -90,14 +119,77 @@ export const executePoolActionViaQrOneTap = async ({
   const targetAddress = getAddress(config.to);
   const valueWei = BigInt(config.valueWei?.trim() || '0');
   const actionLabel = config.label?.trim() || 'pool action';
+  const normalizedActionLabel = actionLabel.toLowerCase();
   const selector = String(config.data ?? '').slice(0, 10).toLowerCase();
+  const isMembershipLikeAction = (
+    selector === PROPOSE_INVITE_SELECTOR
+    || selector === SUBMIT_JOIN_REQUEST_SELECTOR
+    || selector === ACCEPT_INVITE_SELECTOR
+    || selector === ACCEPT_JOIN_REQUEST_SELECTOR
+    || normalizedActionLabel.includes('invite')
+    || normalizedActionLabel.includes('join')
+    || normalizedActionLabel.includes('request')
+    || normalizedActionLabel.includes('vote')
+    || normalizedActionLabel.includes('leave')
+  );
+  const receiptWaitProfile = (() => {
+    if (isMembershipLikeAction) {
+      return {
+        timeoutMs: MEMBERSHIP_RECEIPT_WAIT_TIMEOUT_MS,
+        retryDelayMs: 350,
+        pollingIntervalMs: 450,
+      };
+    }
+    if (selector === CONTRIBUTE_SELECTOR) {
+      return {
+        timeoutMs: CONTRIBUTE_RECEIPT_WAIT_TIMEOUT_MS,
+        retryDelayMs: 500,
+        pollingIntervalMs: 550,
+      };
+    }
+    if (selector === SUBMIT_DISCOUNT_BID_SELECTOR) {
+      return {
+        timeoutMs: BID_RECEIPT_WAIT_TIMEOUT_MS,
+        retryDelayMs: 450,
+        pollingIntervalMs: 520,
+      };
+    }
+    return {
+      timeoutMs: DEFAULT_RECEIPT_WAIT_TIMEOUT_MS,
+      retryDelayMs: 420,
+      pollingIntervalMs: 500,
+    };
+  })();
   const inviteCandidateAddress = selector === PROPOSE_INVITE_SELECTOR
     ? decodeSingleAddressArgument(String(config.data ?? ''))
     : null;
   const bidDiscount = selector === SUBMIT_DISCOUNT_BID_SELECTOR
     ? decodeSingleUint256Argument(String(config.data ?? ''))
     : null;
+  const shouldUseMembershipPriority = (
+    selector === PROPOSE_INVITE_SELECTOR
+    || selector === SUBMIT_JOIN_REQUEST_SELECTOR
+    || selector === ACCEPT_INVITE_SELECTOR
+    || selector === ACCEPT_JOIN_REQUEST_SELECTOR
+  );
   const client = getPublicViemClient(activeNetwork);
+
+  const buildPriorityGasPrice = async ({
+    numerator,
+    denominator,
+    timeoutMs = 900,
+  }: {
+    numerator: bigint;
+    denominator: bigint;
+    timeoutMs?: number;
+  }): Promise<bigint | undefined> => {
+    const gasProbe = await runWithSoftTimeout(client.getGasPrice(), timeoutMs);
+    if (gasProbe.status !== 'ok') {
+      return undefined;
+    }
+
+    return boostGasPrice(gasProbe.value, numerator, denominator);
+  };
 
   const diagnosePoolActionSimulationRevert = async (): Promise<string | null> => {
     if (selector === SUBMIT_JOIN_REQUEST_SELECTOR) {
@@ -188,14 +280,101 @@ export const executePoolActionViaQrOneTap = async ({
   };
 
   type ContributionApprovalPreparation = {
-    queuedApprovalTxHash?: `0x${string}`;
-    queuedMainTxNonce?: bigint;
-    queuedMainTxGasPriceWei?: bigint;
-    preparedApprovalRawTx?: string;
-    preparedMainRawTx?: string;
-    approvalTokenAddress?: `0x${string}`;
-    requiredAllowanceWei?: bigint;
+    contributeGasPriceWei?: bigint;
   };
+  type ContributeDiagnosis = Awaited<ReturnType<typeof diagnoseContributePrecheck>>;
+  type ContributePrecheckProbe =
+    | { status: 'ok'; value: ContributeDiagnosis }
+    | { status: 'timeout' }
+    | { status: 'error'; error: Error };
+
+  const buildWarmPendingNonce = async (timeoutMs = TX_NONCE_WARMUP_TIMEOUT_MS): Promise<bigint | undefined> => {
+    const nonceProbe = await runWithSoftTimeout(client.getTransactionCount({
+      address: accountAddress,
+      blockTag: 'pending',
+    }), timeoutMs);
+    if (nonceProbe.status !== 'ok') {
+      return undefined;
+    }
+
+    return BigInt(nonceProbe.value);
+  };
+
+  const membershipPriorityGasPriceTask: Promise<bigint | undefined> = shouldUseMembershipPriority
+    ? buildPriorityGasPrice({
+      numerator: JOIN_REQUEST_GAS_PRICE_BOOST_NUMERATOR,
+      denominator: JOIN_REQUEST_GAS_PRICE_BOOST_DENOMINATOR,
+    })
+    : Promise.resolve(undefined);
+  const warmedPendingNonceTask = buildWarmPendingNonce();
+  const warmContributePrecheckTask: Promise<ContributePrecheckProbe | null> = selector === CONTRIBUTE_SELECTOR
+    ? runWithSoftTimeout(
+      diagnoseContributePrecheck({
+        client,
+        poolAddress: targetAddress,
+        accountAddress,
+      }),
+      CONTRIBUTE_PRECHECK_TIMEOUT_MS,
+    )
+    : Promise.resolve(null);
+  let actionPrecheckError: Error | null = null;
+  const actionPrecheckTask = (async (): Promise<void> => {
+    if (selector === SUBMIT_JOIN_REQUEST_SELECTOR) {
+      const precheck = await runWithSoftTimeout(
+        diagnoseSubmitJoinRequestPrecheck({
+          client,
+          poolAddress: targetAddress,
+          accountAddress,
+        }),
+        MEMBERSHIP_PRECHECK_TIMEOUT_MS,
+      );
+      if (precheck.status === 'ok' && precheck.value) {
+        throw new Error(precheck.value);
+      }
+      return;
+    }
+
+    if (selector === PROPOSE_INVITE_SELECTOR) {
+      if (!inviteCandidateAddress) {
+        throw new Error('Invite blocked: invalid candidate address in invite payload.');
+      }
+
+      const precheck = await runWithSoftTimeout(
+        diagnoseProposeInvitePrecheck({
+          client,
+          poolAddress: targetAddress,
+          accountAddress,
+          candidateAddress: inviteCandidateAddress,
+        }),
+        MEMBERSHIP_PRECHECK_TIMEOUT_MS,
+      );
+      if (precheck.status === 'ok' && precheck.value) {
+        throw new Error(precheck.value);
+      }
+      return;
+    }
+
+    if (selector === SUBMIT_DISCOUNT_BID_SELECTOR) {
+      if (bidDiscount === null) {
+        throw new Error('Bid blocked: invalid discount parameter in bid payload.');
+      }
+
+      const precheck = await runWithSoftTimeout(
+        diagnoseSubmitDiscountBidPrecheck({
+          client,
+          poolAddress: targetAddress,
+          accountAddress,
+          discountWei: bidDiscount,
+        }),
+        BID_PRECHECK_TIMEOUT_MS,
+      );
+      if (precheck.status === 'ok' && precheck.value) {
+        throw new Error(precheck.value);
+      }
+    }
+  })().catch(error => {
+    actionPrecheckError = error instanceof Error ? error : new Error(String(error));
+  });
 
   logPoolActionEvent({
     stage: 'start',
@@ -211,10 +390,20 @@ export const executePoolActionViaQrOneTap = async ({
       if (walletSession.ethAddress.toLowerCase() !== accountAddress.toLowerCase()) {
         throw new Error('Card address does not match the active wallet in app.');
       }
+      throwIfQrFlowCancelled(isCancelled);
+      await actionPrecheckTask;
+      if (actionPrecheckError) {
+        throw actionPrecheckError;
+      }
 
-      const ensureContributionApproval = async (): Promise<ContributionApprovalPreparation> => {
+      const warmContributePrecheck = selector === CONTRIBUTE_SELECTOR
+        ? await warmContributePrecheckTask
+        : null;
+      const ensureContributionApproval = async (
+        warmDiagnosis?: ContributePrecheckProbe | null,
+      ): Promise<ContributionApprovalPreparation> => {
         throwIfQrFlowCancelled(isCancelled);
-        const diagnosis = await runWithSoftTimeout(
+        const diagnosis = warmDiagnosis ?? await runWithSoftTimeout(
           diagnoseContributePrecheck({
             client,
             poolAddress: targetAddress,
@@ -224,17 +413,17 @@ export const executePoolActionViaQrOneTap = async ({
         );
 
         if (diagnosis.status === 'timeout') {
-          throw new Error(
-            'Contribute pre-check timed out on Chainora RPC. Please refresh QR and retry to avoid sending a reverting transaction.',
-          );
+          onProgress?.('Contribute pre-check timed out. Skipping strict pre-check and continuing to transaction signing...');
+          return {};
         }
 
         if (diagnosis.status === 'error') {
           const reason = diagnosis.error.message || 'unknown pre-check error';
-          throw new Error(
-            `Contribute pre-check failed: ${reason}. `
-            + 'Please refresh QR and retry.',
-          );
+          if (isRpcTimeoutLikeError(reason)) {
+            onProgress?.('Contribute pre-check hit RPC timeout. Continuing with direct transaction submission...');
+            return {};
+          }
+          throw new Error(`Contribute pre-check failed: ${reason}.`);
         }
 
         const details = diagnosis.value;
@@ -252,65 +441,34 @@ export const executePoolActionViaQrOneTap = async ({
           args: [targetAddress, UINT256_MAX],
         });
 
-        const approvePreflight = await runWithSoftTimeout(
-          client.call({
-            account: accountAddress,
-            to: details.stablecoinAddress,
-            value: 0n,
-            data: approveCalldata,
-          }),
-          CONTRIBUTE_PRECHECK_TIMEOUT_MS,
-        );
-
-        if (approvePreflight.status === 'timeout') {
-          throw new Error(
-            'Contribution approval simulation timed out on Chainora RPC. Please refresh QR and retry.',
-          );
-        }
-
-        if (approvePreflight.status === 'error') {
-          const reason = approvePreflight.error.message || 'unknown approval simulation error';
-          throw new Error(`Contribution approval simulation failed: ${reason}`);
-        }
-
         onProgress?.(
-          'Contribution needs token approval first. Continuing approval + contribute in one NFC session...',
+          'Contribution needs token approval first. Submitting approval transaction...',
         );
         throwIfQrFlowCancelled(isCancelled);
 
+        const contributePriorityGasPrice = await buildPriorityGasPrice({
+          numerator: CONTRIBUTE_GAS_PRICE_BOOST_NUMERATOR,
+          denominator: CONTRIBUTE_GAS_PRICE_BOOST_DENOMINATOR,
+        });
+        if (contributePriorityGasPrice) {
+          onProgress?.('Using priority gas price for token approval...');
+        }
+
         let approveTx: {
           transactionHash: string;
-          nonce: bigint;
           gasPriceWei: bigint;
-          rawTransaction: string;
-        };
-        let preparedContributeTx: {
-          rawTransaction: string;
         };
         try {
-          approveTx = await sendEthTransaction({
+          approveTx = await sendAbiTransactionStrict({
             from: accountAddress,
             to: details.stablecoinAddress,
             valueWei: 0n,
             pin: '0000',
             signHash: hash => walletSession.signHash(hash),
-            fallbackGasLimitWei: CONTRIBUTION_APPROVE_FALLBACK_GAS_LIMIT,
+            gasPriceWei: contributePriorityGasPrice,
             dataHex: approveCalldata,
-            broadcast: false,
-          });
-
-          preparedContributeTx = await sendEthTransaction({
-            from: accountAddress,
-            to: targetAddress,
-            valueWei,
-            pin: '0000',
-            signHash: hash => walletSession.signHash(hash),
-            nonce: approveTx.nonce + 1n,
-            gasPriceWei: approveTx.gasPriceWei,
-            // This tx is signed before approval is mined. Skip estimateGas here to avoid false revert.
-            gasLimitWei: CONTRIBUTION_TX_FALLBACK_GAS_LIMIT,
-            dataHex: config.data as `0x${string}`,
-            broadcast: false,
+            estimateFailureMessage:
+              'Unable to estimate gas for contribution token approval because Chainora RPC is slow. Please retry in a moment.',
           });
         } catch (error) {
           const reason = error instanceof Error ? error.message : String(error);
@@ -324,155 +482,78 @@ export const executePoolActionViaQrOneTap = async ({
         }
 
         throwIfQrFlowCancelled(isCancelled);
-        onProgress?.(
-          'Approval and contribute signatures are ready in one NFC session. Submitting transactions to Chainora...',
-        );
-
-        return {
-          queuedApprovalTxHash: approveTx.transactionHash as `0x${string}`,
-          queuedMainTxNonce: approveTx.nonce + 1n,
-          queuedMainTxGasPriceWei: approveTx.gasPriceWei,
-          preparedApprovalRawTx: approveTx.rawTransaction,
-          preparedMainRawTx: preparedContributeTx.rawTransaction,
-          approvalTokenAddress: details.stablecoinAddress,
-          requiredAllowanceWei: details.contributionAmount ?? 0n,
-        };
-      };
-
-      const assertContributeExecutableNow = async (): Promise<void> => {
-        const preflight = await runWithSoftTimeout(
-          client.call({
-            account: accountAddress,
-            to: targetAddress,
-            value: valueWei,
-            data: config.data as `0x${string}`,
-          }),
-          CONTRIBUTE_PRECHECK_TIMEOUT_MS,
-        );
-
-        if (preflight.status === 'timeout') {
-          throw new Error(
-            'Contribute simulation timed out on Chainora RPC. Please refresh QR and retry to avoid sending a reverting transaction.',
-          );
-        }
-
-        if (preflight.status === 'ok') {
-          return;
-        }
-
-        const reason = preflight.error.message || 'unknown simulation error';
-        if (reason.toLowerCase().includes('transfer_from_failed')) {
-          const diagnosis = await runWithSoftTimeout(
-            diagnoseContributePrecheck({
+        onProgress?.('Waiting for token approval confirmation...');
+        let approvalWaitingRound = 1;
+        while (true) {
+          throwIfQrFlowCancelled(isCancelled);
+          try {
+            const approvalReceipt = await waitForTransactionReceiptWithRetry({
               client,
-              poolAddress: targetAddress,
-              accountAddress,
-            }),
-            CONTRIBUTE_PRECHECK_TIMEOUT_MS,
-          );
-          if (diagnosis.status === 'ok' && diagnosis.value.blockedReason) {
-            throw new Error(diagnosis.value.blockedReason);
+              txHash: approveTx.transactionHash as `0x${string}`,
+              label: 'contribution approval',
+              onProgress,
+              timeoutMs: 6_000,
+              retryLimit: 1,
+              retryDelayMs: 260,
+              pollingIntervalMs: 320,
+            });
+            if (approvalReceipt.status !== 'success') {
+              throw new Error(`Contribution approval reverted on-chain. Tx: ${approveTx.transactionHash}`);
+            }
+            break;
+          } catch (error) {
+            const reason = error instanceof Error ? error.message : String(error);
+            if (!isPendingConfirmationError(reason)) {
+              throw error instanceof Error ? error : new Error(reason);
+            }
+            approvalWaitingRound += 1;
+            onProgress?.(
+              `Chainora RPC is still slow. Continuing to wait for contribution approval confirmation... (${approvalWaitingRound})`,
+            );
           }
-
-          throw new Error(
-            'Contribute blocked: stablecoin transferFrom failed. '
-            + 'Check contribution token balance/allowance and current collecting window.',
-          );
         }
 
-        if (isPoolActionSimulationRevertError(reason) || reason.toLowerCase().includes('revert')) {
-          const diagnosed = await diagnosePoolActionSimulationRevert();
-          if (diagnosed) {
-            throw new Error(diagnosed);
-          }
-        }
-
-        throw new Error(`Contribute simulation failed: ${reason}`);
+        return { contributeGasPriceWei: approveTx.gasPriceWei };
       };
-
-      throwIfQrFlowCancelled(isCancelled);
-      if (selector === SUBMIT_JOIN_REQUEST_SELECTOR) {
-        const precheck = await runWithSoftTimeout(
-          diagnoseSubmitJoinRequestPrecheck({
-            client,
-            poolAddress: targetAddress,
-            accountAddress,
-          }),
-          3_000,
-        );
-        if (precheck.status === 'ok' && precheck.value) {
-          throw new Error(precheck.value);
-        }
-      }
-
-      if (selector === PROPOSE_INVITE_SELECTOR) {
-        if (!inviteCandidateAddress) {
-          throw new Error('Invite blocked: invalid candidate address in invite payload.');
-        }
-
-        const precheck = await runWithSoftTimeout(
-          diagnoseProposeInvitePrecheck({
-            client,
-            poolAddress: targetAddress,
-            accountAddress,
-            candidateAddress: inviteCandidateAddress,
-          }),
-          3_000,
-        );
-        if (precheck.status === 'ok' && precheck.value) {
-          throw new Error(precheck.value);
-        }
-      }
-
-      if (selector === SUBMIT_DISCOUNT_BID_SELECTOR) {
-        if (bidDiscount === null) {
-          throw new Error('Bid blocked: invalid discount parameter in bid payload.');
-        }
-
-        const precheck = await runWithSoftTimeout(
-          diagnoseSubmitDiscountBidPrecheck({
-            client,
-            poolAddress: targetAddress,
-            accountAddress,
-            discountWei: bidDiscount,
-          }),
-          4_000,
-        );
-        if (precheck.status === 'timeout') {
-          throw new Error(
-            'Bid pre-check timed out on Chainora RPC. Please refresh QR and retry to avoid sending a reverting transaction.',
-          );
-        }
-        if (precheck.status === 'error') {
-          const reason = precheck.error.message || 'unknown bid pre-check error';
-          throw new Error(`Bid pre-check failed: ${reason}. Please refresh QR and retry.`);
-        }
-        if (precheck.status === 'ok' && precheck.value) {
-          throw new Error(precheck.value);
-        }
-      }
 
       let contributionApprovalPrep: ContributionApprovalPreparation | null = null;
       if (selector === CONTRIBUTE_SELECTOR) {
-        contributionApprovalPrep = await ensureContributionApproval();
-        if (!contributionApprovalPrep.preparedApprovalRawTx) {
-          await assertContributeExecutableNow();
-        }
+        contributionApprovalPrep = await ensureContributionApproval(warmContributePrecheck);
       }
       throwIfQrFlowCancelled(isCancelled);
 
+      const membershipPriorityGasPrice = shouldUseMembershipPriority
+        ? await membershipPriorityGasPriceTask
+        : undefined;
+      if (membershipPriorityGasPrice) {
+        onProgress?.('Using priority gas price to speed up membership confirmation...');
+      }
+      const warmedPendingNonce = await warmedPendingNonceTask;
+
+      const contributePriorityGasPrice = (
+        selector === CONTRIBUTE_SELECTOR
+        && !contributionApprovalPrep?.contributeGasPriceWei
+      )
+        ? await buildPriorityGasPrice({
+          numerator: CONTRIBUTE_GAS_PRICE_BOOST_NUMERATOR,
+          denominator: CONTRIBUTE_GAS_PRICE_BOOST_DENOMINATOR,
+        })
+        : undefined;
+      if (contributePriorityGasPrice) {
+        onProgress?.('Using priority gas price to speed up contribute confirmation...');
+      }
+
       const signingMessage =
         selector === CONTRIBUTE_SELECTOR
-        && contributionApprovalPrep?.preparedApprovalRawTx
-        && contributionApprovalPrep.preparedMainRawTx
-          ? 'Signing approval + contribute transactions on card (single NFC session)...'
+        && contributionApprovalPrep?.contributeGasPriceWei
+          ? 'Token approval confirmed. Estimating gas and signing contribute transaction on card...'
           : `Signing ${actionLabel} transaction on card...`;
 
       pushSessionStatus('pool_action_signing_tx');
       onProgress?.(signingMessage);
       throwIfQrFlowCancelled(isCancelled);
 
-      const submitPoolActionTx = (params?: { nonce?: bigint; gasPriceWei?: bigint }) => sendEthTransaction({
+      const submitPoolActionTx = (params?: { nonce?: bigint; gasPriceWei?: bigint }) => sendAbiTransactionStrict({
         from: accountAddress,
         to: targetAddress,
         valueWei,
@@ -480,102 +561,88 @@ export const executePoolActionViaQrOneTap = async ({
         signHash: hash => walletSession.signHash(hash),
         nonce: params?.nonce,
         gasPriceWei: params?.gasPriceWei,
-        // Contribute/bid are preflighted before this step; keep fixed gas to avoid estimateGas false-reverts.
-        gasLimitWei:
-          selector === CONTRIBUTE_SELECTOR
-            ? CONTRIBUTION_TX_FALLBACK_GAS_LIMIT
-            : selector === SUBMIT_DISCOUNT_BID_SELECTOR
-              ? BID_TX_FALLBACK_GAS_LIMIT
-              : undefined,
         dataHex: config.data as `0x${string}`,
+        estimateFailureMessage:
+          `Unable to estimate gas for ${actionLabel} because Chainora RPC is slow. Please retry in a moment.`,
       });
 
-      let txResult: { transactionHash: string } | null = null;
-      let submissionError: Error | null = null;
-      if (
-        selector === CONTRIBUTE_SELECTOR
-        && contributionApprovalPrep?.preparedApprovalRawTx
-        && contributionApprovalPrep.preparedMainRawTx
-      ) {
-        try {
-          onProgress?.('Submitting token approval transaction...');
-          const approvalTxHash = await broadcastRawSignedTransaction(contributionApprovalPrep.preparedApprovalRawTx);
-          contributionApprovalPrep.queuedApprovalTxHash = approvalTxHash as `0x${string}`;
+      const submitMembershipActionWithNonceRecovery = async (): Promise<
+      Awaited<ReturnType<typeof submitPoolActionTx>>
+      > => {
+        let attempt = 0;
+        let currentGasPriceWei = membershipPriorityGasPrice;
+        let currentNonce = warmedPendingNonce;
 
-          throwIfQrFlowCancelled(isCancelled);
-          onProgress?.('Waiting for approval confirmation...');
-          const approvalReceipt = await waitForTransactionReceiptWithRetry({
-            client,
-            txHash: approvalTxHash as `0x${string}`,
-            label: 'contribution approval',
-            onProgress,
-            timeoutMs: 60_000,
-            retryLimit: 1,
-            retryDelayMs: 700,
-          });
-          if (approvalReceipt.status !== 'success') {
-            throw new Error(`Contribution approval reverted on-chain. Tx: ${approvalTxHash}`);
-          }
+        while (true) {
+          try {
+            return await submitPoolActionTx({
+              nonce: currentNonce,
+              gasPriceWei: currentGasPriceWei,
+            });
+          } catch (error) {
+            const reason = error instanceof Error ? error.message : String(error);
+            if (
+              !isNonceConflictLikeError(reason)
+              || attempt >= JOIN_REQUEST_MAX_SUBMIT_NONCE_RECOVERY_ATTEMPTS
+            ) {
+              throw error instanceof Error ? error : new Error(reason);
+            }
 
-          if (contributionApprovalPrep.approvalTokenAddress) {
-            const approvalPostCheck = await runWithSoftTimeout(
-              client.readContract({
-                address: contributionApprovalPrep.approvalTokenAddress,
-                abi: ERC20_READ_ABI,
-                functionName: 'allowance',
-                args: [accountAddress, targetAddress],
-              }),
-              CONTRIBUTE_PRECHECK_TIMEOUT_MS,
+            attempt += 1;
+            currentNonce = undefined;
+            onProgress?.(
+              `Wallet nonce changed during membership submit. Retrying with fresh nonce (${attempt}/${JOIN_REQUEST_MAX_SUBMIT_NONCE_RECOVERY_ATTEMPTS})...`,
             );
-
-            if (approvalPostCheck.status === 'timeout') {
-              throw new Error('Unable to verify updated allowance after approval (timeout). Please retry.');
-            }
-
-            if (approvalPostCheck.status === 'error') {
-              throw new Error(`Unable to verify updated allowance after approval: ${approvalPostCheck.error.message}`);
-            }
-
-            const requiredAllowanceWei = contributionApprovalPrep.requiredAllowanceWei ?? 0n;
-            if (approvalPostCheck.value < requiredAllowanceWei) {
-              throw new Error(
-                `Contribution approval did not set enough allowance. `
-                + `Required ${requiredAllowanceWei.toString()}, current ${approvalPostCheck.value.toString()}.`,
+            if (currentGasPriceWei) {
+              currentGasPriceWei = boostGasPrice(
+                currentGasPriceWei,
+                JOIN_REQUEST_REPLACEMENT_GAS_PRICE_BOOST_NUMERATOR,
+                JOIN_REQUEST_REPLACEMENT_GAS_PRICE_BOOST_DENOMINATOR,
               );
+            } else {
+              const gasProbe = await runWithSoftTimeout(client.getGasPrice(), 900);
+              if (gasProbe.status === 'ok') {
+                currentGasPriceWei = boostGasPrice(
+                  gasProbe.value,
+                  JOIN_REQUEST_GAS_PRICE_BOOST_NUMERATOR,
+                  JOIN_REQUEST_GAS_PRICE_BOOST_DENOMINATOR,
+                );
+              }
             }
           }
-
-          throwIfQrFlowCancelled(isCancelled);
-          await assertContributeExecutableNow();
-
-          onProgress?.('Approval confirmed. Submitting contribute transaction...');
-          const mainTxHash = await broadcastRawSignedTransaction(contributionApprovalPrep.preparedMainRawTx);
-          txResult = { transactionHash: mainTxHash };
-        } catch (error) {
-          submissionError = error instanceof Error ? error : new Error(String(error));
         }
-      } else {
-        try {
+      };
+
+      let txResult: Awaited<ReturnType<typeof sendAbiTransactionStrict>> | null = null;
+      let submissionError: Error | null = null;
+      try {
+        if (shouldUseMembershipPriority) {
+          txResult = await submitMembershipActionWithNonceRecovery();
+        } else {
           txResult = await submitPoolActionTx({
-            nonce: contributionApprovalPrep?.queuedMainTxNonce,
-            gasPriceWei: contributionApprovalPrep?.queuedMainTxGasPriceWei,
+            nonce: warmedPendingNonce,
+            gasPriceWei:
+              contributionApprovalPrep?.contributeGasPriceWei
+              ?? contributePriorityGasPrice
+              ?? membershipPriorityGasPrice,
           });
-        } catch (error) {
-          const reason = error instanceof Error ? error.message : String(error);
-          if (
-            selector === CONTRIBUTE_SELECTOR
-            && contributionApprovalPrep?.queuedMainTxNonce !== undefined
-            && isNonceConflictLikeError(reason)
-          ) {
-            onProgress?.('Contribute nonce changed while approval was processing. Retrying contribute transaction...');
-            try {
-              txResult = await submitPoolActionTx();
-            } catch (retryError) {
-              submissionError = retryError instanceof Error ? retryError : new Error(String(retryError));
-            }
-          } else {
-            submissionError = error instanceof Error ? error : new Error(reason);
+        }
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        if (isNonceConflictLikeError(reason)) {
+          onProgress?.('Wallet nonce changed during submit. Retrying with fresh nonce...');
+          try {
+            txResult = await submitPoolActionTx({
+              gasPriceWei:
+                contributionApprovalPrep?.contributeGasPriceWei
+                ?? contributePriorityGasPrice
+                ?? membershipPriorityGasPrice,
+            });
+          } catch (retryError) {
+            submissionError = retryError instanceof Error ? retryError : new Error(String(retryError));
           }
+        } else {
+          submissionError = error instanceof Error ? error : new Error(reason);
         }
       }
 
@@ -680,40 +747,32 @@ export const executePoolActionViaQrOneTap = async ({
       onProgress?.('Waiting for transaction confirmation... Transaction is already submitted and cannot be cancelled.');
 
       let receipt;
-      try {
-        receipt = await waitForTransactionReceiptWithRetry({
-          client,
-          txHash: txResult.transactionHash as `0x${string}`,
-          label: actionLabel,
-          onProgress,
-          timeoutMs: 45_000,
-          retryLimit: 1,
-          retryDelayMs: 700,
-        });
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        if (isPendingConfirmationError(reason)) {
-          pushSessionStatus('pool_action_pending_confirmation');
-          onProgress?.(
-            'Transaction was submitted, but Chainora RPC is slow to confirm. You can continue using app and check tx status later.',
-          );
-          logPoolActionEvent({
-            stage: 'pending_confirmation',
-            actionLabel,
-            accountAddress,
-            targetAddress,
-            selector,
-            txHash: txResult.transactionHash,
-            sessionId,
+      let waitingRound = 1;
+      const activeTxResult = txResult;
+      while (true) {
+        throwIfQrFlowCancelled(isCancelled);
+        try {
+          receipt = await waitForTransactionReceiptWithRetry({
+            client,
+            txHash: activeTxResult.transactionHash as `0x${string}`,
+            label: actionLabel,
+            onProgress,
+            timeoutMs: receiptWaitProfile.timeoutMs,
+            retryLimit: 1,
+            retryDelayMs: receiptWaitProfile.retryDelayMs,
+            pollingIntervalMs: receiptWaitProfile.pollingIntervalMs,
           });
-          return {
-            verified: true,
-            address: accountAddress,
-            txHash: txResult.transactionHash,
-            pendingConfirmation: true,
-          };
+          break;
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          if (!isPendingConfirmationError(reason)) {
+            throw error instanceof Error ? error : new Error(reason);
+          }
+          waitingRound += 1;
+          onProgress?.(
+            `Chainora RPC is still slow. Continuing to wait for ${actionLabel} confirmation... (${waitingRound})`,
+          );
         }
-        throw error instanceof Error ? error : new Error(reason);
       }
 
       if (receipt.status !== 'success') {
@@ -726,7 +785,7 @@ export const executePoolActionViaQrOneTap = async ({
               accountAddress,
               targetAddress,
               selector,
-              txHash: txResult.transactionHash,
+              txHash: activeTxResult.transactionHash,
               sessionId,
               reason: `transaction reverted on-chain | diagnosed: ${diagnosed}`,
             });
@@ -740,11 +799,11 @@ export const executePoolActionViaQrOneTap = async ({
           accountAddress,
           targetAddress,
           selector,
-          txHash: txResult.transactionHash,
+          txHash: activeTxResult.transactionHash,
           sessionId,
           reason: 'transaction reverted on-chain',
         });
-        throw new Error(`${actionLabel} transaction reverted on-chain. Tx: ${txResult.transactionHash}`);
+        throw new Error(`${actionLabel} transaction reverted on-chain. Tx: ${activeTxResult.transactionHash}`);
       }
 
       pushSessionStatus('pool_action_success');
@@ -754,14 +813,14 @@ export const executePoolActionViaQrOneTap = async ({
         accountAddress,
         targetAddress,
         selector,
-        txHash: txResult.transactionHash,
+        txHash: activeTxResult.transactionHash,
         sessionId,
       });
 
       return {
         verified: true,
         address: accountAddress,
-        txHash: txResult.transactionHash,
+        txHash: activeTxResult.transactionHash,
       };
     });
   } catch (error) {

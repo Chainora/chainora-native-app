@@ -176,13 +176,6 @@ export const POOL_READ_ABI = [
   },
   {
     type: 'function',
-    name: 'allMembers',
-    stateMutability: 'view',
-    inputs: [],
-    outputs: [{ name: '', type: 'address[]' }],
-  },
-  {
-    type: 'function',
     name: 'periodInfo',
     stateMutability: 'view',
     inputs: [

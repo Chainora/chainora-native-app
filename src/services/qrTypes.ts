@@ -64,7 +64,6 @@ export type VerifyLoginResponse = {
   address?: string;
   token?: string;
   txHash?: string;
-  pendingConfirmation?: boolean;
   poolAddress?: string;
   poolId?: string;
 };

@@ -47,15 +47,8 @@ const SPRING_CONFIG = { tension: 120, friction: 14, useNativeDriver: true };
 const BEZIER_EASING = Easing.bezier(0.25, 0.1, 0.25, 1);
 const SCAN_GUIDE_VIDEO = require('../../assets/scan.mp4');
 
-const formatPublicKeySummary = (value: string) => {
-  if (value.length <= 16) {
-    return value;
-  }
-  return `${value.slice(0, 12)}...${value.slice(-12)}`;
-};
-
 const suggestionForCode = (
-  mode: ScanMode,
+  _mode: ScanMode,
   code: WalletActionCode | undefined,
   translate: (key: any) => string,
 ): string | null => {
@@ -73,49 +66,30 @@ const suggestionForCode = (
   }
 };
 
-const buildInfoLines = (
-  mode: ScanMode,
-  result: WalletActionResult,
-  translate: (key: any) => string,
-): string[] => {
-  const lines: string[] = [];
-
-  if (result.ok && result.publicKeyHex) {
-    lines.push(`${translate('scanInfoPublicKey')}: ${formatPublicKeySummary(result.publicKeyHex)}`);
+const toFriendlyMessage = (raw: string, fallback: string): string => {
+  const message = String(raw ?? '').trim();
+  if (!message) {
+    return fallback;
   }
 
-  if (result.ok && result.ethAddress) {
-    lines.push(`${translate('scanInfoAddress')}: ${result.ethAddress}`);
+  const lower = message.toLowerCase();
+  if (
+    lower.includes('session')
+    || lower.includes('payload')
+    || lower.includes('selector')
+    || lower.includes('nonce')
+    || lower.includes('rpc')
+    || lower.includes('sequence')
+    || lower.includes('status word')
+    || lower.includes('sw:')
+    || lower.includes('eth_sendrawtransaction')
+    || lower.includes('tx ')
+    || /0x[a-f0-9]{10,}/i.test(message)
+  ) {
+    return fallback;
   }
 
-  const suggestion = suggestionForCode(mode, result.code, translate);
-  if (suggestion) {
-    lines.push(suggestion);
-  }
-
-  if (result.statusWord) {
-    lines.push(`${translate('scanInfoStatus')}: ${result.statusWord}`);
-  }
-
-  return lines;
-};
-
-const buildFlowInfoLines = (result: WalletActionResult, translate: (key: any) => string): string[] => {
-  const lines: string[] = [];
-
-  if (result.publicKeyHex) {
-    lines.push(`${translate('scanInfoPublicKey')}: ${formatPublicKeySummary(result.publicKeyHex)}`);
-  }
-
-  if (result.ethAddress) {
-    lines.push(`${translate('scanInfoAddress')}: ${result.ethAddress}`);
-  }
-
-  if (result.statusWord) {
-    lines.push(`${translate('scanInfoStatus')}: ${result.statusWord}`);
-  }
-
-  return lines;
+  return message.length > 140 ? fallback : message;
 };
 
 /* --- Success Checkmark Component --- */
@@ -153,7 +127,6 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
   const [confirmPinValue, setConfirmPinValue] = useState('');
   const [phase, setPhase] = useState<ScanPhase>('pin');
   const [statusMessage, setStatusMessage] = useState(t('scanStatusEnterSetup'));
-  const [infoLines, setInfoLines] = useState<string[]>([]);
   const [allowBackdropClose, setAllowBackdropClose] = useState(false);
   
   // Animation Values
@@ -188,10 +161,6 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
   const subtitleColor = indicatorAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [THEME.foreground, THEME.foreground],
-  });
-  const infoColor = indicatorAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [THEME.foregroundMuted, THEME.foregroundMuted],
   });
   const secondaryColor = indicatorAnim.interpolate({
     inputRange: [0, 1],
@@ -293,7 +262,6 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
       setPinStage('create');
       setPinValue('');
       setConfirmPinValue('');
-      setInfoLines([]);
       const instructions =
         nextMode === 'init' ? modeInstructions.initCreate : modeInstructions.signin;
       setStatusMessage(instructions);
@@ -395,14 +363,14 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
     const token = operationTokenRef.current + 1;
     operationTokenRef.current = token;
     setPhase('working');
-    setInfoLines([]);
     setStatusMessage(t('scanStatusHoldCard'));
     onStatusChange?.(t('scanStatusHoldCard'));
 
     const setStageStatus = (status: string) => {
       if (operationTokenRef.current !== token) return;
-      setStatusMessage(status);
-      onStatusChange?.(status);
+      const nextStatus = toFriendlyMessage(status, 'Processing your request...');
+      setStatusMessage(nextStatus);
+      onStatusChange?.(nextStatus);
     };
 
     try {
@@ -414,15 +382,16 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
           : await signInWallet(prefilledPin ?? pinValue);
       if (operationTokenRef.current !== token) return;
 
-      setInfoLines(types === 'flow' ? buildFlowInfoLines(result, t) : buildInfoLines(mode, result, t));
-
       if (result.ok) {
         try {
           await Promise.resolve(onSuccess?.({ result, mode }));
         } catch (onSuccessError) {
           if (operationTokenRef.current !== token) return;
-          const message = onSuccessError instanceof Error ? onSuccessError.message : String(onSuccessError);
-          const fallbackMessage = `${t('scanErrorPrefix')}: ${message}`;
+          const rawMessage = onSuccessError instanceof Error ? onSuccessError.message : String(onSuccessError);
+          const fallbackMessage = toFriendlyMessage(
+            rawMessage,
+            'Could not complete this request. Please try again.',
+          );
           setPhase('error');
           setStatusMessage(fallbackMessage);
           onStatusChange?.(fallbackMessage);
@@ -432,21 +401,26 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
         }
 
         setPhase('success');
-        setStatusMessage(result.message);
-        onStatusChange?.(result.message);
+        const successMessage = toFriendlyMessage(result.message, 'Request completed successfully.');
+        setStatusMessage(successMessage);
+        onStatusChange?.(successMessage);
         showToast(t('scanToastSuccess'), 'success');
       } else {
+        const codeHint = suggestionForCode(mode, result.code, t);
+        const failureMessage = codeHint ?? toFriendlyMessage(
+          result.message,
+          'Could not complete this request. Please try again.',
+        );
         setPhase('error');
-        setStatusMessage(result.message);
-        onStatusChange?.(result.message);
-        showToast(result.message, 'error');
+        setStatusMessage(failureMessage);
+        onStatusChange?.(failureMessage);
+        showToast(failureMessage, 'error');
         shakeDialog();
       }
     } catch (error) {
       if (operationTokenRef.current !== token) return;
       const message = error instanceof Error ? error.message : String(error);
-      const fallbackMessage = `${t('scanErrorPrefix')}: ${message}`;
-      setInfoLines([]);
+      const fallbackMessage = toFriendlyMessage(message, 'Could not complete this request. Please try again.');
       setPhase('error');
       setStatusMessage(fallbackMessage);
       onStatusChange?.(fallbackMessage);
@@ -703,14 +677,6 @@ export const ScanDialog: React.FC<ScanDialogProps> = ({
               </View>
             )}
 
-            <View style={styles.infoContainer}>
-              {infoLines.map((line, i) => (
-                <AnimatedText key={i} style={[styles.infoText, { color: infoColor }]}>
-                  {line}
-                </AnimatedText>
-              ))}
-            </View>
-
             <View style={styles.actions}>
               <AppButton 
                 label={primaryButtonLabel} 
@@ -904,21 +870,10 @@ const styles = StyleSheet.create({
     fontSize: THEME.typography.display,
     fontWeight: 'bold',
   },
-  infoContainer: {
-    marginBottom: 24,
-    width: '100%',
-    paddingHorizontal: 8,
-  },
-  infoText: {
-    fontSize: THEME.typography.subtext,
-    marginBottom: 8,
-    textAlign: 'center',
-    fontWeight: '500',
-    lineHeight: 20,
-  },
   actions: {
     width: '100%',
     alignItems: 'center',
+    marginTop: 8,
     gap: 16,
   },
   secondaryAction: {

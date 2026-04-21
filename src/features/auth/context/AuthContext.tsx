@@ -16,7 +16,7 @@ export type AuthContextValue = {
   session: AuthSession | null;
   isAuthenticated: boolean;
   initializeSession: (address: string) => Promise<AuthSession>;
-  completeSession: () => Promise<AuthSession>;
+  completeSession: (addressHint?: string) => Promise<AuthSession>;
   clearSession: () => Promise<void>;
 };
 
@@ -131,13 +131,23 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
   );
 
   const completeSession = useCallback(
-    async (): Promise<AuthSession> => {
-      if (!session) {
+    async (addressHint?: string): Promise<AuthSession> => {
+      const fallbackAddress = addressHint?.toLowerCase().trim();
+      const activeSession = session ?? (fallbackAddress
+        ? {
+            address: fallbackAddress,
+            authenticated: false,
+            issuedAt: nowIso(),
+            expiresAt: addMillis(SESSION_PENDING_TTL_MS),
+          }
+        : null);
+
+      if (!activeSession) {
         throw new Error('No session active');
       }
 
       const next: AuthSession = {
-        ...session,
+        ...activeSession,
         authenticated: true,
         issuedAt: nowIso(),
         expiresAt: addMillis(SESSION_ACTIVE_TTL_MS),
@@ -169,4 +179,3 @@ export const useAuth = (): AuthContextValue => {
   }
   return context;
 };
-``

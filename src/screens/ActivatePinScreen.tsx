@@ -99,8 +99,8 @@ export const ActivatePinScreen: React.FC<Props> = ({ navigation }) => {
 
       setSubmitting(true);
       try {
-        await initializeSession(result.ethAddress);
-        await completeSession();
+        const session = await initializeSession(result.ethAddress);
+        await completeSession(session.address);
         setScanVisible(false);
         navigation.reset({
           index: 0,

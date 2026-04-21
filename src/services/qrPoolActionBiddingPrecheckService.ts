@@ -20,32 +20,64 @@ const readMemberListWithFallback = async ({
   client: ReturnType<typeof getPublicViemClient>;
   poolAddress: `0x${string}`;
 }): Promise<`0x${string}`[]> => {
-  const methods: Array<'activeMembers' | 'members' | 'allMembers'> = ['activeMembers', 'members', 'allMembers'];
   let lastError: unknown = null;
 
-  for (const method of methods) {
-    try {
-      const membersRead = await client.readContract({
-        address: poolAddress,
-        abi: POOL_READ_ABI,
-        functionName: method,
-      });
-      if (!Array.isArray(membersRead)) {
-        continue;
-      }
-
-      return membersRead
+  try {
+    const activeMembersRead = await client.readContract({
+      address: poolAddress,
+      abi: POOL_READ_ABI,
+      functionName: 'activeMembers',
+    });
+    if (Array.isArray(activeMembersRead)) {
+      return activeMembersRead
         .map(member => getAddress(member))
         .filter(Boolean) as `0x${string}`[];
-    } catch (error) {
-      lastError = error;
     }
+  } catch (error) {
+    lastError = error;
+  }
+
+  try {
+    const membersRead = await client.readContract({
+      address: poolAddress,
+      abi: POOL_READ_ABI,
+      functionName: 'members',
+    });
+    if (!Array.isArray(membersRead)) {
+      return [];
+    }
+
+    const normalizedMembers = membersRead
+      .map(member => getAddress(member))
+      .filter(Boolean) as `0x${string}`[];
+    if (normalizedMembers.length === 0) {
+      return [];
+    }
+
+    const activeFlags = await Promise.all(
+      normalizedMembers.map(async member => {
+        try {
+          const active = await client.readContract({
+            address: poolAddress,
+            abi: POOL_READ_ABI,
+            functionName: 'isActiveMember',
+            args: [member],
+          });
+          return Boolean(active);
+        } catch {
+          return false;
+        }
+      }),
+    );
+
+    return normalizedMembers.filter((_, index) => activeFlags[index]);
+  } catch (error) {
+    lastError = error;
   }
 
   if (lastError) {
     throw lastError;
   }
-
   return [];
 };
 
