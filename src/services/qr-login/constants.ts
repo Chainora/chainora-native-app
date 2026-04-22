@@ -9,6 +9,7 @@ export const RECEIPT_RETRY_DELAY_MS = 1_000;
 
 export const CREATE_POOL_QR_FEATURE = 'chainora-native-wallet:create-pool';
 export const POOL_ACTION_QR_FEATURE = 'chainora-native-wallet:pool-action';
+export const DEVICE_ATTEST_QR_FEATURE = 'chainora-native-wallet:device-attest';
 
 export const DEVICE_NOT_VERIFIED_MESSAGE = 'Create pool blocked: this wallet is not device-verified on protocol adapter yet.';
 export const DEVICE_VERIFY_CACHE_TTL_MS = 30 * 60 * 1000;

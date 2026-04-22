@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Linking,
@@ -8,8 +8,10 @@ import {
   Text,
   View,
 } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { getAddress } from 'viem';
 import { Camera, useCameraDevice, useCameraPermission, useCodeScanner } from 'react-native-vision-camera';
 
 import { AppButton } from '../components/AppButton';
@@ -17,17 +19,13 @@ import { PinInput } from '../components/ui/PinInput';
 import { ScanDialog } from '../components/ui/ScanDialog';
 import { useNfcEnabled } from '../features/nfc/hooks/useNfcEnabled';
 import { useSettings } from '../features/settings';
+import { useWalletConnect } from '../features/walletconnect';
 import { ROUTES } from '../navigation/routes/routes';
 import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
 import type { WalletActionResult } from '../services/cardService';
-import { verifyQrLoginWithOneTapVerification } from '../services/qrAuthFlowService';
-import { createPoolViaQrOneTap } from '../services/qrCreateGroupFlowService';
-import { executePoolActionViaQrOneTap } from '../services/qrPoolActionFlowService';
-import { isQrFlowCancelledError } from '../services/qrFlowCommonService';
+import { verifyCardAttestationForCreatePool } from '../services/qrCreateGroupDeviceVerificationService';
+import { DEVICE_ATTEST_QR_FEATURE } from '../services/qr-login/constants';
 import { parseQrLoginPayload, type QrLoginPayload } from '../services/qrPayloadParserService';
-import { notifyQrLoginProgress } from '../services/qrSessionProgressService';
-import { registerUsernameRelayerOneTap } from '../services/qrUsernameFlowService';
-import { pauseActivitySync, resumeActivitySync } from '../services/activitySyncService';
 
 type Props = NativeStackScreenProps<RootStackParamList, typeof ROUTES.QRScanner>;
 const PIN_LENGTH = 4;
@@ -35,27 +33,24 @@ const PIN_LENGTH = 4;
 const toFriendlyStageStatus = (raw: string): string => {
   const message = String(raw ?? '').trim();
   if (!message) {
-    return 'Processing your request...';
+    return 'Processing device attestation...';
   }
 
   const lower = message.toLowerCase();
-  if (lower.includes('waiting for transaction confirmation') || lower.includes('pending confirmation')) {
-    return 'Finalizing your request...';
+  if (lower.includes('challenge')) {
+    return 'Preparing challenge...';
   }
-  if (lower.includes('broadcast') || lower.includes('submit') || lower.includes('sending transaction')) {
-    return 'Sending your request...';
+  if (lower.includes('attestation proof')) {
+    return 'Generating card attestation proof...';
   }
-  if (lower.includes('precheck') || lower.includes('simulate')) {
-    return 'Checking request details...';
+  if (lower.includes('submitting on-chain') || lower.includes('verification transaction')) {
+    return 'Submitting on-chain verification...';
   }
-  if (lower.includes('sync') || lower.includes('backend')) {
-    return 'Updating your group data...';
+  if (lower.includes('confirmation') || lower.includes('receipt')) {
+    return 'Waiting for confirmation...';
   }
   if (lower.includes('nfc') || lower.includes('card')) {
     return 'Hold your card near the phone...';
-  }
-  if (lower.includes('0x') || lower.includes('sessionid') || lower.includes('selector')) {
-    return 'Processing your request...';
   }
 
   return message;
@@ -64,7 +59,7 @@ const toFriendlyStageStatus = (raw: string): string => {
 const toFriendlyFlowError = (raw: unknown): string => {
   const message = raw instanceof Error ? raw.message.trim() : String(raw ?? '').trim();
   if (!message) {
-    return 'Could not complete this request. Please try again.';
+    return 'Could not complete device attestation. Please try again.';
   }
 
   const lower = message.toLowerCase();
@@ -74,69 +69,56 @@ const toFriendlyFlowError = (raw: unknown): string => {
   if (lower.includes('nfc') || lower.includes('card') || lower.includes('transport')) {
     return 'Card not detected. Hold it close to your phone and try again.';
   }
+  if (lower.includes('invalid qr') || lower.includes('unsupported qr') || lower.includes('missing')) {
+    return 'This QR is not a valid device-attestation request.';
+  }
   if (
-    lower.includes('sequence')
+    lower.includes('rpc')
     || lower.includes('nonce')
-    || lower.includes('rpc')
-    || lower.includes('eth_sendrawtransaction')
-    || lower.includes('selector')
-    || lower.includes('invalid parameters')
-    || lower.includes('payload')
-    || lower.includes('sessionid')
+    || lower.includes('sequence')
+    || lower.includes('network')
+    || lower.includes('timed out')
   ) {
     return 'Network is busy right now. Please wait a moment and try again.';
-  }
-  if (lower.includes('expired qr') || lower.includes('invalid qr') || lower.includes('unsupported qr')) {
-    return 'This QR code is invalid or expired. Please refresh QR on the dApp.';
   }
 
   return message;
 };
 
-const resolveRequestTypeLabel = (payload: QrLoginPayload): string => {
-  if (payload.feature === 'chainora-native-wallet:create-pool') {
-    return 'Create Group';
+const normalizeWalletConnectError = (raw: unknown): string => {
+  const message = raw instanceof Error ? raw.message.trim() : String(raw ?? '').trim();
+  if (!message) {
+    return 'WalletConnect pairing failed.';
   }
-  if (payload.feature === 'chainora-native-wallet:pool-action') {
-    return 'Group Action';
-  }
-  if (payload.feature === 'username.register' || payload.feature === 'username.set_primary') {
-    return 'Username';
-  }
-  return 'Sign In';
+  return message;
 };
 
-const resolveRequestTitle = (payload: QrLoginPayload): string => {
-  if (payload.feature === 'chainora-native-wallet:create-pool') {
-    return 'Approve create group request';
-  }
-  if (payload.feature === 'chainora-native-wallet:pool-action') {
-    return payload.poolAction?.label?.trim()
-      ? `Approve ${payload.poolAction.label}`
-      : 'Approve group action';
-  }
-  if (payload.feature === 'username.set_primary') {
-    return 'Set primary username';
-  }
-  if (payload.feature === 'username.register') {
-    return 'Register username';
-  }
-  return 'Approve sign in request';
+const isFlowCancelledError = (raw: unknown): boolean => {
+  const message = raw instanceof Error ? raw.message : String(raw ?? '');
+  const lower = message.toLowerCase();
+  return lower.includes('cancel') || lower.includes('cancelled');
 };
 
 const resolveRequestDescription = (payload: QrLoginPayload): string => {
-  if (payload.feature === 'chainora-native-wallet:create-pool') {
-    const groupName = payload.createPool?.groupName?.trim();
-    return groupName
-      ? `Group: ${groupName}`
-      : 'You will create a new savings group.';
+  const requestId = payload.deviceAttest?.requestId?.trim() || '';
+  const shortRequestId = requestId.length > 14
+    ? `${requestId.slice(0, 8)}...${requestId.slice(-4)}`
+    : requestId;
+  return shortRequestId
+    ? `Request ID: ${shortRequestId}`
+    : 'Device verification request';
+};
+
+const isWalletConnectPayload = (raw: string): boolean => {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return false;
   }
-  if (payload.feature === 'username.register' || payload.feature === 'username.set_primary') {
-    return payload.username?.trim()
-      ? `Username: ${payload.username}`
-      : 'You are confirming a username request.';
+  if (trimmed.startsWith('wc:')) {
+    return true;
   }
-  return 'Enter your wallet PIN, then tap your card to continue.';
+  const lower = trimmed.toLowerCase();
+  return lower.includes('uri=wc%3a') || lower.includes('uri=wc:') || lower.startsWith('chainora://wc');
 };
 
 const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
@@ -144,42 +126,72 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
   const device = useCameraDevice('back');
   const { isEnabled: isNfcEnabled } = useNfcEnabled();
   const { themeTokens } = useSettings();
+  const { pairWithInput, latestStatus: walletConnectStatus, latestError: walletConnectError } = useWalletConnect();
   const styles = useMemo(() => createStyles(themeTokens.background, themeTokens.foreground), [themeTokens.background, themeTokens.foreground]);
 
   const [permissionBlocked, setPermissionBlocked] = useState(false);
   const [scanError, setScanError] = useState('');
   const [scannedPayload, setScannedPayload] = useState<QrLoginPayload | null>(null);
+  const [isWalletConnectPairing, setIsWalletConnectPairing] = useState(false);
   const [pin, setPin] = useState('');
   const [pinDialogVisible, setPinDialogVisible] = useState(false);
   const [scanDialogVisible, setScanDialogVisible] = useState(false);
   const flowInProgressRef = React.useRef(false);
   const flowCancelRequestedRef = React.useRef(false);
   const flowMainTxSubmittedRef = React.useRef(false);
+  const scannedPayloadRef = useRef<QrLoginPayload | null>(null);
+  const walletConnectScanLockRef = useRef(false);
+  const walletConnectScanCooldownUntilRef = useRef(0);
 
   useEffect(() => {
     const status = Camera.getCameraPermissionStatus();
     setPermissionBlocked(status === 'denied' || status === 'restricted');
   }, []);
 
-  const resetScanState = useCallback(() => {
-    if (scannedPayload?.sessionId) {
-      notifyQrLoginProgress({
-        apiBase: scannedPayload.apiBase,
-        sessionId: scannedPayload.sessionId,
-        status: 'waiting_qr_scan',
-      }).catch(() => undefined);
-    }
+  useEffect(() => {
+    scannedPayloadRef.current = scannedPayload;
+  }, [scannedPayload]);
 
+  const resetScanState = useCallback(() => {
     setScannedPayload(null);
     setPin('');
     setPinDialogVisible(false);
     setScanError('');
-  }, [scannedPayload]);
+  }, []);
+
+  const handleWalletConnectPair = useCallback(async (rawInput: string) => {
+    const now = Date.now();
+    if (walletConnectScanLockRef.current || now < walletConnectScanCooldownUntilRef.current) {
+      return;
+    }
+
+    walletConnectScanLockRef.current = true;
+    walletConnectScanCooldownUntilRef.current = now + 2_500;
+    setIsWalletConnectPairing(true);
+    setScanError('');
+
+    try {
+      await pairWithInput(rawInput, route.params.ethAddress);
+      Alert.alert(
+        'WalletConnect Pairing Started',
+        'Pair request sent. Approve session in your dApp.',
+      );
+    } catch (error) {
+      setScanError(normalizeWalletConnectError(error));
+    } finally {
+      setIsWalletConnectPairing(false);
+      walletConnectScanLockRef.current = false;
+    }
+  }, [pairWithInput, route.params.ethAddress]);
 
   const codeScanner = useCodeScanner({
     codeTypes: ['qr'],
     onCodeScanned: codes => {
-      if (scannedPayload || !codes.length) {
+      if (
+        scannedPayloadRef.current
+        || walletConnectScanLockRef.current
+        || !codes.length
+      ) {
         return;
       }
 
@@ -188,15 +200,15 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
         return;
       }
 
+      if (isWalletConnectPayload(raw)) {
+        void handleWalletConnectPair(raw);
+        return;
+      }
+
       try {
         const payload = parseQrLoginPayload(raw);
-
-        if (payload.sessionId) {
-          notifyQrLoginProgress({
-            apiBase: payload.apiBase,
-            sessionId: payload.sessionId,
-            status: 'awaiting_card_scan',
-          }).catch(() => undefined);
+        if (payload.feature !== DEVICE_ATTEST_QR_FEATURE || !payload.deviceAttest) {
+          throw new Error('Unsupported QR feature');
         }
 
         setScannedPayload(payload);
@@ -218,7 +230,7 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
     setPermissionBlocked(true);
     Alert.alert(
       'Camera Permission Needed',
-      'Enable camera access in system settings to scan QR login codes.',
+      'Enable camera access in system settings to scan attestation QR codes.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -234,10 +246,10 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
   };
 
   const handleFlowScan = useCallback(async (setStageStatus: (status: string) => void): Promise<WalletActionResult> => {
-    if (!scannedPayload) {
+    if (!scannedPayload || scannedPayload.feature !== DEVICE_ATTEST_QR_FEATURE || !scannedPayload.deviceAttest) {
       return {
         ok: false,
-        message: 'Missing QR request. Please scan again.',
+        message: 'Missing device-attestation request. Please scan again.',
       };
     }
 
@@ -250,122 +262,35 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
     };
 
     try {
-      if (scannedPayload.feature === 'username.register' || scannedPayload.feature === 'username.set_primary') {
-        const isPrimarySelection = scannedPayload.feature === 'username.set_primary';
-        setFriendlyStageStatus(
-          isPrimarySelection
-            ? 'Preparing primary username request...'
-            : 'Preparing username request...',
-        );
-        const registerResult = await registerUsernameRelayerOneTap({
-          payload: scannedPayload,
-          pin,
-          expectedAddress: route.params.ethAddress,
-          onProgress: setFriendlyStageStatus,
-        });
-        setScanError('');
-        return {
-          ok: true,
-          message: isPrimarySelection
-            ? 'Primary username updated successfully.'
-            : 'Username registered successfully.',
-          ethAddress: registerResult.address ?? route.params.ethAddress,
-        };
+      const expectedAddress = getAddress(route.params.ethAddress);
+      const requestedAddress = getAddress(scannedPayload.deviceAttest.address);
+      if (requestedAddress.toLowerCase() !== expectedAddress.toLowerCase()) {
+        throw new Error('Device-attestation QR is for a different wallet address.');
       }
 
-      if (scannedPayload.feature === 'chainora-native-wallet:create-pool') {
-        pauseActivitySync();
-        try {
-          setFriendlyStageStatus('Preparing create group request...');
-          const createResult = await createPoolViaQrOneTap({
-            payload: scannedPayload,
-            pin,
-            expectedAddress: route.params.ethAddress,
-            onProgress: setFriendlyStageStatus,
-            isCancelled: () => flowCancelRequestedRef.current,
-            onMainTxSubmitted: () => {
-              flowMainTxSubmittedRef.current = true;
-            },
-          });
-
-          setScanError('');
-          return {
-            ok: true,
-            message: 'Group created successfully.',
-            ethAddress: createResult.address ?? route.params.ethAddress,
-          };
-        } finally {
-          resumeActivitySync();
-        }
-      }
-
-      if (scannedPayload.feature === 'chainora-native-wallet:pool-action') {
-        pauseActivitySync();
-        try {
-          setFriendlyStageStatus('Preparing group action...');
-          const actionResult = await executePoolActionViaQrOneTap({
-            payload: scannedPayload,
-            pin,
-            expectedAddress: route.params.ethAddress,
-            onProgress: setFriendlyStageStatus,
-            isCancelled: () => flowCancelRequestedRef.current,
-            onMainTxSubmitted: () => {
-              flowMainTxSubmittedRef.current = true;
-            },
-          });
-
-          const actionLabel = scannedPayload.poolAction?.label?.trim() || 'Group action';
-          setScanError('');
-          return {
-            ok: true,
-            message: `${actionLabel} completed successfully.`,
-            ethAddress: actionResult.address ?? route.params.ethAddress,
-          };
-        } finally {
-          resumeActivitySync();
-        }
-      }
-
-      const sessionId = scannedPayload.sessionId?.trim();
-      if (!sessionId) {
-        throw new Error('Missing QR session.');
-      }
-
-      setFriendlyStageStatus('Preparing sign in...');
-      const verifyResult = await verifyQrLoginWithOneTapVerification({
-        payload: scannedPayload,
+      setFriendlyStageStatus('Preparing device attestation...');
+      await verifyCardAttestationForCreatePool({
+        apiBase: scannedPayload.deviceAttest.apiBase?.trim() || scannedPayload.apiBase,
         pin,
-        expectedAddress: route.params.ethAddress,
-        onProgress: status => {
-          setFriendlyStageStatus(status);
-        },
+        expectedAddress,
+        factoryAddress: getAddress(scannedPayload.deviceAttest.factoryAddress),
+        onProgress: setFriendlyStageStatus,
+        isCancelled: () => flowCancelRequestedRef.current,
+        txSubmitPolicy: 'strict',
       });
 
+      flowMainTxSubmittedRef.current = true;
       setScanError('');
       return {
         ok: true,
-        message: 'Sign in approved successfully.',
-        ethAddress: verifyResult.address ?? route.params.ethAddress,
+        message: 'Device attestation completed successfully.',
+        ethAddress: expectedAddress,
       };
     } catch (error) {
-      const cancelledByUser = isQrFlowCancelledError(error);
+      const cancelledByUser = isFlowCancelledError(error);
       const message = cancelledByUser
         ? 'Request was cancelled.'
         : toFriendlyFlowError(error);
-
-      if (
-        (scannedPayload.feature === 'chainora-native-wallet:create-pool'
-          || scannedPayload.feature === 'chainora-native-wallet:pool-action')
-        && scannedPayload.sessionId?.trim()
-      ) {
-        notifyQrLoginProgress({
-          apiBase: scannedPayload.apiBase,
-          sessionId: scannedPayload.sessionId.trim(),
-          status: scannedPayload.feature === 'chainora-native-wallet:pool-action'
-            ? 'pool_action_failed'
-            : 'create_pool_failed',
-        }).catch(() => undefined);
-      }
 
       setScanError(message);
       return {
@@ -375,7 +300,6 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
     } finally {
       flowInProgressRef.current = false;
       flowCancelRequestedRef.current = false;
-      flowMainTxSubmittedRef.current = false;
     }
   }, [pin, route.params.ethAddress, scannedPayload]);
 
@@ -384,7 +308,7 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
       if (flowMainTxSubmittedRef.current) {
         Alert.alert(
           'Request is being processed',
-          'Your request has already been sent. Closing now will not cancel it.',
+          'Your attestation transaction has already been sent. Closing now will not cancel it.',
           [
             {
               text: 'Keep waiting',
@@ -410,8 +334,8 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const handleScanSuccess = useCallback((details?: { result: WalletActionResult }) => {
     setScanDialogVisible(false);
-    const successText = details?.result?.message || 'Request completed successfully.';
-    Alert.alert('Sign Completed', successText, [
+    const successText = details?.result?.message || 'Device attestation completed successfully.';
+    Alert.alert('Attestation Completed', successText, [
       {
         text: 'OK',
         onPress: () => navigation.goBack(),
@@ -430,10 +354,21 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
     setScanDialogVisible(true);
   }, [canSubmitPin]);
 
+  const pasteWalletConnectUri = useCallback(() => {
+    void (async () => {
+      const clipboardValue = (await Clipboard.getString()).trim();
+      if (!clipboardValue) {
+        setScanError('Clipboard is empty. Copy a wc: URI first.');
+        return;
+      }
+      await handleWalletConnectPair(clipboardValue);
+    })();
+  }, [handleWalletConnectPair]);
+
   return (
     <SafeAreaView style={styles.root}>
       <Text style={styles.title}>Scan QR</Text>
-      <Text style={styles.subtitle}>Scan the code from Chainora dApp, enter PIN, then tap your card to approve.</Text>
+      <Text style={styles.subtitle}>Scan WalletConnect QR (pairing) or device-attestation QR.</Text>
 
       {!hasPermission ? (
         <View>
@@ -462,17 +397,31 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
 
           {scannedPayload ? (
             <View style={styles.detailsCard}>
-              <Text style={styles.requestBadge}>{resolveRequestTypeLabel(scannedPayload)}</Text>
-              <Text style={styles.detailsTitle}>{resolveRequestTitle(scannedPayload)}</Text>
+              <Text style={styles.requestBadge}>Device Attestation</Text>
+              <Text style={styles.detailsTitle}>Verify card device</Text>
               <Text style={styles.payload}>{resolveRequestDescription(scannedPayload)}</Text>
-              <Text style={styles.payload}>You can scan another QR if this is not your request.</Text>
+              <Text style={styles.payload}>Enter wallet PIN and tap card to complete verification.</Text>
 
               <Pressable style={styles.secondaryButton} onPress={resetScanState}>
                 <Text style={styles.secondaryButtonText}>Scan Another QR</Text>
               </Pressable>
             </View>
           ) : (
-            <Text style={styles.payload}>Waiting for QR payload...</Text>
+            <View style={styles.detailsCard}>
+              <Text style={styles.detailsTitle}>WalletConnect pairing</Text>
+              <Text style={styles.payload}>Scan WC QR from dApp/desktop, or paste wc URI from clipboard.</Text>
+              <Pressable
+                style={styles.secondaryButton}
+                onPress={pasteWalletConnectUri}
+                disabled={isWalletConnectPairing}
+              >
+                <Text style={styles.secondaryButtonText}>
+                  {isWalletConnectPairing ? 'Pairing...' : 'Paste WalletConnect URI'}
+                </Text>
+              </Pressable>
+              <Text style={styles.walletConnectStatus}>Status: {walletConnectStatus}</Text>
+              {walletConnectError ? <Text style={styles.errorText}>{walletConnectError}</Text> : null}
+            </View>
           )}
         </>
       )}
@@ -497,7 +446,7 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
         <View style={styles.pinDialogBackdrop}>
           <View style={styles.pinDialogCard}>
             <Text style={styles.pinDialogTitle}>Enter Password</Text>
-            <Text style={styles.payload}>Use your wallet PIN, then tap your card to approve this request.</Text>
+            <Text style={styles.payload}>Use your wallet PIN, then tap your card to complete device attestation.</Text>
             <PinInput value={pin} onChange={setPin} disabled={scanDialogVisible} length={PIN_LENGTH} />
             <View style={styles.pinDialogActions}>
               <AppButton label="Cancel" variant="text" onPress={() => setPinDialogVisible(false)} />
@@ -595,6 +544,11 @@ const createStyles = (background: string, foreground: string) =>
     secondaryButtonText: {
       color: '#1d4ed8',
       fontWeight: '700',
+    },
+    walletConnectStatus: {
+      color: foreground,
+      fontSize: 12,
+      lineHeight: 18,
     },
     pinDialogBackdrop: {
       flex: 1,

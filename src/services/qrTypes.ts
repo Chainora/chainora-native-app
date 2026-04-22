@@ -24,6 +24,13 @@ export type PoolActionQrData = {
   poolAddress?: string;
 };
 
+export type DeviceAttestQrData = {
+  requestId: string;
+  address: string;
+  factoryAddress: string;
+  apiBase?: string;
+};
+
 export type QrLoginPayload = {
   feature?: string;
   sessionId?: string;
@@ -36,6 +43,7 @@ export type QrLoginPayload = {
   autoDeviceVerification?: boolean;
   createPool?: CreatePoolQrData;
   poolAction?: PoolActionQrData;
+  deviceAttest?: DeviceAttestQrData;
 };
 
 export type GenericQrEnvelope = {

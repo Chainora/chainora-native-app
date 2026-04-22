@@ -1,5 +1,6 @@
 import {
   CREATE_POOL_QR_FEATURE,
+  DEVICE_ATTEST_QR_FEATURE,
   POOL_ACTION_QR_FEATURE,
 } from './qr-login/constants';
 import {
@@ -44,6 +45,7 @@ export const parseQrLoginPayload = (rawValue: string): QrLoginPayload => {
       && feature !== 'username.set_primary'
       && feature !== CREATE_POOL_QR_FEATURE
       && feature !== POOL_ACTION_QR_FEATURE
+      && feature !== DEVICE_ATTEST_QR_FEATURE
     ) {
       throw new Error(`Unsupported QR feature: ${feature}`);
     }
@@ -157,6 +159,32 @@ export const parseQrLoginPayload = (rawValue: string): QrLoginPayload => {
           valueWei,
           label: typeof actionPayload.label === 'string' ? actionPayload.label.trim() : undefined,
           poolAddress: typeof actionPayload.poolAddress === 'string' ? actionPayload.poolAddress.trim() : undefined,
+        },
+      };
+    }
+
+    if (feature === DEVICE_ATTEST_QR_FEATURE) {
+      const sessionId =
+        typeof data.sessionId === 'string' && data.sessionId.trim()
+          ? data.sessionId.trim()
+          : undefined;
+      const requestId = ensureField(data.requestId, 'requestId');
+      const address = ensureField(data.address, 'address');
+      const factoryAddress = ensureField(data.factoryAddress, 'factoryAddress');
+      const payloadApiBase =
+        typeof data.apiBase === 'string' && data.apiBase.trim()
+          ? normalizeApiBase(data.apiBase)
+          : apiBase;
+
+      return {
+        feature: DEVICE_ATTEST_QR_FEATURE,
+        sessionId,
+        apiBase: payloadApiBase,
+        deviceAttest: {
+          requestId,
+          address,
+          factoryAddress,
+          apiBase: payloadApiBase,
         },
       };
     }
