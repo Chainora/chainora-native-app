@@ -15,12 +15,15 @@ import {
   Text,
   View,
 } from 'react-native';
+import NfcManager from 'react-native-nfc-manager';
 
 import { AppButton } from '../../components/AppButton';
 import { PinInput } from '../../components/ui/PinInput';
+import { ScanDialog } from '../../components/ui/ScanDialog';
 import { useAuth } from '../auth';
 import { useSettings } from '../settings';
 import { useToast } from '../toast';
+import type { WalletActionResult } from '../../services/cardService';
 import {
   walletConnectRuntime,
   type WalletConnectRequestDecision,
@@ -47,6 +50,7 @@ export const WalletConnectProvider: React.FC<React.PropsWithChildren> = ({ child
 
   const pendingDecisionRef = useRef<((decision: WalletConnectRequestDecision) => void) | null>(null);
   const pendingProposalDecisionRef = useRef<((accepted: boolean) => void) | null>(null);
+  const scanFlowResolverRef = useRef<((result: WalletActionResult) => void) | null>(null);
   const lastHandledUrlRef = useRef('');
 
   const [latestStatus, setLatestStatus] = useState('WalletConnect ready.');
@@ -56,6 +60,7 @@ export const WalletConnectProvider: React.FC<React.PropsWithChildren> = ({ child
   const [pendingProposal, setPendingProposal] = useState<WalletConnectSessionProposal | null>(null);
   const [requestPin, setRequestPin] = useState('');
   const [requestPinError, setRequestPinError] = useState('');
+  const [cardSigningMethod, setCardSigningMethod] = useState<string | null>(null);
 
   const closePromptWithDecision = useCallback((decision: WalletConnectRequestDecision) => {
     const resolver = pendingDecisionRef.current;
@@ -63,6 +68,17 @@ export const WalletConnectProvider: React.FC<React.PropsWithChildren> = ({ child
     setPendingPrompt(null);
     setRequestPin('');
     setRequestPinError('');
+    setCardSigningMethod(null);
+    resolver?.(decision);
+  }, []);
+
+  const resolveApprovedDecision = useCallback((decision: WalletConnectRequestDecision) => {
+    // Resolve the approval Promise but keep the modal open so that the
+    // user can see the card-tap instructions while NFC signing is in
+    // flight. The modal will be torn down when the runtime reports
+    // success or failure.
+    const resolver = pendingDecisionRef.current;
+    pendingDecisionRef.current = null;
     resolver?.(decision);
   }, []);
 
@@ -73,9 +89,41 @@ export const WalletConnectProvider: React.FC<React.PropsWithChildren> = ({ child
     resolver?.(accepted);
   }, []);
 
+  const handleWCFlowScan = useCallback(
+    (setStageStatus: (status: string) => void): Promise<WalletActionResult> => {
+      return new Promise<WalletActionResult>(resolve => {
+        scanFlowResolverRef.current = resolve;
+        setStageStatus('Signing with your card…');
+      });
+    },
+    [],
+  );
+
   useEffect(() => {
     walletConnectRuntime.setExpectedAddress(session?.address ?? '');
   }, [session?.address]);
+
+  useEffect(() => {
+    // Warm-up the NFC adapter so that the first WalletConnect card-sign does
+    // not have to pay the cost of initialising reader mode from scratch on a
+    // screen that does not already mount the NFC hook.
+    let cancelled = false;
+    const warmUp = async () => {
+      try {
+        const supported = await NfcManager.isSupported();
+        if (cancelled || !supported) {
+          return;
+        }
+        await NfcManager.start();
+      } catch (warmUpError) {
+        console.warn('[WC UI] NfcManager warm-up failed', warmUpError);
+      }
+    };
+    void warmUp();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     walletConnectRuntime.setApprovalHandler(async prompt => {
@@ -156,10 +204,30 @@ export const WalletConnectProvider: React.FC<React.PropsWithChildren> = ({ child
         case 'request_success':
           setLatestStatus(`Request completed: ${event.method}`);
           setLatestError('');
+          scanFlowResolverRef.current?.({
+            ok: true,
+            message: 'Signed via WalletConnect',
+          });
+          scanFlowResolverRef.current = null;
+          setCardSigningMethod(null);
+          setPendingPrompt(null);
+          setRequestPin('');
+          setRequestPinError('');
           break;
         case 'request_error':
+          console.warn('[WC UI] request_error method=', event.method, 'error=', event.error);
           setLatestStatus(`Request failed: ${event.method}`);
           setLatestError(event.error);
+          scanFlowResolverRef.current?.({
+            ok: false,
+            code: 'TRANSPORT_ERROR',
+            message: event.error,
+          });
+          scanFlowResolverRef.current = null;
+          setCardSigningMethod(null);
+          setPendingPrompt(null);
+          setRequestPin('');
+          setRequestPinError('');
           break;
         default:
           break;
@@ -242,10 +310,16 @@ export const WalletConnectProvider: React.FC<React.PropsWithChildren> = ({ child
       />
 
       <Modal
-        visible={Boolean(pendingPrompt)}
-        animationType="slide"
+        visible={Boolean(pendingPrompt) && !cardSigningMethod}
+        animationType="none"
         transparent
+        statusBarTranslucent
         onRequestClose={() => {
+          if (cardSigningMethod) {
+            // Do not allow dismiss during NFC signing — the runtime will
+            // close the modal once the request settles.
+            return;
+          }
           closePromptWithDecision({ approved: false });
         }}
       >
@@ -265,52 +339,85 @@ export const WalletConnectProvider: React.FC<React.PropsWithChildren> = ({ child
               <Text style={styles.modalMeta}>Chain: {pendingPrompt.chainId}</Text>
             ) : null}
 
-            <Text style={styles.pinLabel}>Enter card PIN to sign</Text>
-            <PinInput
-              value={requestPin}
-              onChange={next => {
-                setRequestPin(next);
-                setRequestPinError('');
-              }}
-              length={4}
-              autoFocus={Boolean(pendingPrompt)}
-            />
-            {requestPinError ? <Text style={styles.errorText}>{requestPinError}</Text> : null}
+            {cardSigningMethod ? null : (
+              <>
+                <Text style={styles.pinLabel}>Enter card PIN to sign</Text>
+                <PinInput
+                  value={requestPin}
+                  onChange={next => {
+                    setRequestPin(next);
+                    setRequestPinError('');
+                  }}
+                  length={4}
+                  autoFocus={Boolean(pendingPrompt)}
+                />
+                {requestPinError ? <Text style={styles.errorText}>{requestPinError}</Text> : null}
 
-            <View style={styles.actionRow}>
-              <AppButton
-                label="Reject"
-                variant="text"
-                onPress={() => {
-                  closePromptWithDecision({ approved: false });
-                }}
-              />
-              <AppButton
-                label="Approve & Sign"
-                onPress={() => {
-                  if (requestPin.length < 4) {
-                    setRequestPinError('PIN must be 4 digits.');
-                    return;
-                  }
-                  closePromptWithDecision({
-                    approved: true,
-                    pin: requestPin,
-                  });
-                }}
-              />
-            </View>
+                <View style={styles.actionRow}>
+                  <AppButton
+                    label="Reject"
+                    variant="text"
+                    onPress={() => {
+                      closePromptWithDecision({ approved: false });
+                    }}
+                    style={styles.actionButton}
+                  />
+                  <AppButton
+                    label="Approve & Sign"
+                    onPress={() => {
+                      if (requestPin.length < 4) {
+                        setRequestPinError('PIN must be 4 digits.');
+                        return;
+                      }
+                      const method = pendingPrompt?.method ?? 'request';
+                      setCardSigningMethod(method);
+                      resolveApprovedDecision({
+                        approved: true,
+                        pin: requestPin,
+                      });
+                    }}
+                    style={styles.actionButton}
+                  />
+                </View>
 
-            <Pressable
-              onPress={() => {
-                closePromptWithDecision({ approved: false });
-              }}
-              style={styles.closeHint}
-            >
-              <Text style={styles.closeHintText}>Close</Text>
-            </Pressable>
+                <Pressable
+                  onPress={() => {
+                    closePromptWithDecision({ approved: false });
+                  }}
+                  style={styles.closeHint}
+                >
+                  <Text style={styles.closeHintText}>Close</Text>
+                </Pressable>
+              </>
+            )}
           </View>
         </View>
       </Modal>
+
+      <ScanDialog
+        visible={Boolean(cardSigningMethod)}
+        isNfcEnabled={null}
+        onClose={() => {
+          // Resolve resolver so ScanDialog tears down; do not touch
+          // cardSigningMethod / pendingPrompt — runtime subscribe will
+          // clear them via request_success / request_error.
+          if (scanFlowResolverRef.current) {
+            scanFlowResolverRef.current({
+              ok: false,
+              message: 'Cancelled by user',
+            });
+            scanFlowResolverRef.current = null;
+          }
+        }}
+        onSuccess={async () => {
+          // no-op: state clearing happens in the runtime event subscribe.
+        }}
+        onShowToast={showToast}
+        initialMode="signin"
+        prefilledPin={requestPin}
+        types="flow"
+        onFlowScan={handleWCFlowScan}
+      />
     </WalletConnectContext.Provider>
   );
 };
@@ -364,6 +471,9 @@ const createStyles = (background: string, foreground: string) => StyleSheet.crea
     justifyContent: 'space-between',
     gap: 12,
     marginTop: 8,
+  },
+  actionButton: {
+    flex: 1,
   },
   errorText: {
     marginTop: -12,

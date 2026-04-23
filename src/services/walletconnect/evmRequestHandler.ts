@@ -232,14 +232,16 @@ const buildSignatureFromHash = async ({
       throw new Error(signResult.message || 'Failed to sign request with card.');
     }
 
-    // This keeps compatibility with existing backend which accepts compact (r||s) + optional v.
     const recovered = recoverSignature(
       hexToBytes(hashHex),
       signResult.signatureDer,
       signResult.publicKeyHex,
       getActiveNetwork().chainId,
     );
-    return `${recovered.r}${recovered.s.slice(2)}${recovered.v.slice(2)}` as `0x${string}`;
+    // EIP-191 / EIP-712 signatures use a 1-byte v of 27 + recovery, not the
+    // EIP-155 encoding (chainId * 2 + 35 + recovery) used for legacy tx.
+    const vByte = (27 + recovered.recovery).toString(16).padStart(2, '0');
+    return `${recovered.r}${recovered.s.slice(2)}${vByte}` as `0x${string}`;
   });
 };
 
@@ -297,7 +299,10 @@ export const handleWalletConnectEvmRequest = async ({
   switch (request.method) {
     case 'eth_requestAccounts':
     case 'eth_accounts': {
-      const address = await resolveSessionAddress(context);
+      // Return the session's expected address without requiring a fresh card
+      // tap. A dApp only needs the address here; any signing operation will
+      // verify the card identity separately.
+      const address = parseAddress(context.expectedAddress, 'expectedAddress');
       return [address];
     }
 

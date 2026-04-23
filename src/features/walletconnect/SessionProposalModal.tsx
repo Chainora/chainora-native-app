@@ -78,8 +78,8 @@ export const SessionProposalModal: React.FC<Props> = ({ proposal, onApprove, onR
           </ScrollView>
 
           <View style={styles.actionRow}>
-            <AppButton label="Reject" variant="text" onPress={onReject} />
-            <AppButton label="Approve" onPress={onApprove} />
+            <AppButton label="Reject" variant="text" onPress={onReject} style={styles.actionButton} />
+            <AppButton label="Approve" onPress={onApprove} style={styles.actionButton} />
           </View>
         </View>
       </View>
@@ -144,5 +144,8 @@ const createStyles = (background: string, foreground: string) =>
       justifyContent: 'space-between',
       gap: 12,
       marginTop: 8,
+    },
+    actionButton: {
+      flex: 1,
     },
   });

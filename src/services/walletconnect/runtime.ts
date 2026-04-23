@@ -499,6 +499,7 @@ class WalletConnectRuntime {
       });
       this.emit({ type: 'request_success', topic, id, method });
     } catch (error) {
+      console.warn('[WC runtime] handleWalletConnectEvmRequest error', error);
       const message = sanitizeErrorMessage(error, 'Wallet request failed.');
       const code = error instanceof WalletConnectUnsupportedMethodError ? error.code : 5000;
       await client.respond({
