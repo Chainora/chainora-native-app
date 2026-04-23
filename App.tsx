@@ -12,11 +12,11 @@ function App(): React.JSX.Element {
     <SafeAreaProvider>
       <SettingsProvider>
         <AuthProvider>
-          <WalletConnectProvider>
-            <ToastProvider>
+          <ToastProvider>
+            <WalletConnectProvider>
               <AppNavigator />
-            </ToastProvider>
-          </WalletConnectProvider>
+            </WalletConnectProvider>
+          </ToastProvider>
         </AuthProvider>
       </SettingsProvider>
     </SafeAreaProvider>

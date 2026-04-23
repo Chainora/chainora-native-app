@@ -6,6 +6,7 @@ import { getAddress, isAddress, type Address } from 'viem';
 import { getActiveNetwork } from '../../config/network';
 import {
   handleWalletConnectEvmRequest,
+  WalletConnectUnsupportedMethodError,
   type WalletConnectEvmRequest,
 } from './evmRequestHandler';
 import {
@@ -21,11 +22,26 @@ const EVM_SESSION_METHODS = [
   'eth_accounts',
   'eth_chainId',
   'personal_sign',
+  'eth_sign',
+  'eth_signTransaction',
+  'eth_signTypedData',
+  'eth_signTypedData_v3',
   'eth_signTypedData_v4',
   'eth_sendTransaction',
+  'eth_sendRawTransaction',
   'wallet_switchEthereumChain',
+  'wallet_addEthereumChain',
+  'wallet_getPermissions',
+  'wallet_requestPermissions',
+  'wallet_watchAsset',
 ] as const;
 const EVM_SESSION_EVENTS = ['accountsChanged', 'chainChanged'] as const;
+
+const wcLog = (...args: unknown[]): void => {
+  if (__DEV__) {
+    console.log('[WC]', ...args);
+  }
+};
 
 export type WalletConnectRequestPrompt = {
   id: number;
@@ -42,12 +58,24 @@ export type WalletConnectRequestDecision = {
   pin?: string;
 };
 
+export type WalletConnectSessionProposal = {
+  id: number;
+  proposerName: string;
+  proposerUrl: string;
+  proposerIcons: string[];
+  requestedChains: string[];
+  requestedMethods: string[];
+  requestedEvents: string[];
+  expectedAddress: string;
+};
+
 export type WalletConnectRuntimeEvent =
   | { type: 'client_ready' }
   | { type: 'pair_started'; uri: string }
   | { type: 'pair_success'; uri: string }
   | { type: 'pair_error'; uri: string; error: string }
   | { type: 'proposal_received'; proposer: string }
+  | { type: 'proposal_rejected'; proposer: string; reason: string }
   | { type: 'session_approved'; topic: string; peerName: string }
   | { type: 'session_deleted'; topic: string; reason: string }
   | { type: 'request_prompt'; prompt: WalletConnectRequestPrompt }
@@ -56,6 +84,7 @@ export type WalletConnectRuntimeEvent =
 
 type WalletConnectRuntimeListener = (event: WalletConnectRuntimeEvent) => void;
 type WalletConnectApprovalHandler = (prompt: WalletConnectRequestPrompt) => Promise<WalletConnectRequestDecision>;
+type WalletConnectProposalHandler = (proposal: WalletConnectSessionProposal) => Promise<boolean>;
 type WalletConnectRuntimeGlobalState = {
   runtime?: WalletConnectRuntime;
   client: SignClient | null;
@@ -124,16 +153,24 @@ const normalizeWalletConnectUri = (value: string): string => {
 
 const resolveExpectedAddress = (raw: string): Address | null => {
   const trimmed = String(raw ?? '').trim();
-  if (!trimmed || !isAddress(trimmed)) {
+  if (!trimmed) {
     return null;
   }
-  return getAddress(trimmed);
+  // EVM address identity is case-insensitive; normalize before validation so
+  // uppercase-only hex from the card does not fail viem's strict checksum check.
+  const lowered = trimmed.toLowerCase();
+  if (!isAddress(lowered)) {
+    return null;
+  }
+  return getAddress(lowered);
 };
 
 class WalletConnectRuntime {
   private listeners = new Set<WalletConnectRuntimeListener>();
 
   private approvalHandler: WalletConnectApprovalHandler | null = null;
+
+  private proposalHandler: WalletConnectProposalHandler | null = null;
 
   private expectedAddress: Address | null = null;
 
@@ -178,8 +215,16 @@ class WalletConnectRuntime {
     this.approvalHandler = handler;
   }
 
+  setProposalHandler(handler: WalletConnectProposalHandler | null) {
+    this.proposalHandler = handler;
+  }
+
   setExpectedAddress(rawAddress: string) {
     this.expectedAddress = resolveExpectedAddress(rawAddress);
+  }
+
+  getExpectedAddress(): Address | null {
+    return this.expectedAddress;
   }
 
   getSessions(): SessionTypes.Struct[] {
@@ -203,6 +248,7 @@ class WalletConnectRuntime {
         throw new Error('WalletConnect projectId is missing. Set WALLETCONNECT_PROJECT_ID before pairing.');
       }
 
+      wcLog('Initializing SignClient', { relayUrl: WALLETCONNECT_RELAY_URL });
       const next = await SignClient.init({
         projectId,
         relayUrl: WALLETCONNECT_RELAY_URL,
@@ -210,6 +256,7 @@ class WalletConnectRuntime {
       });
       this.client = next;
       this.registerHandlers(next);
+      wcLog('SignClient ready');
       this.emit({ type: 'client_ready' });
       return next;
     })().finally(() => {
@@ -258,13 +305,44 @@ class WalletConnectRuntime {
     const proposerName = proposal.proposer?.metadata?.name?.trim() || 'Unknown dApp';
     this.emit({ type: 'proposal_received', proposer: proposerName });
 
+    wcLog('session_proposal received', {
+      id: proposal.id,
+      proposer: proposerName,
+      requiredNamespaces: proposal.requiredNamespaces,
+      optionalNamespaces: proposal.optionalNamespaces,
+    });
+
     const expectedAddress = this.expectedAddress;
     if (!expectedAddress) {
+      const reason = 'Wallet address is not active. Please sign in first.';
       await client.reject({
         id: proposal.id,
-        reason: getSdkError('USER_REJECTED', 'Wallet address is not active.'),
-      });
+        reason: getSdkError('USER_REJECTED', reason),
+      }).catch(() => undefined);
+      this.emit({ type: 'proposal_rejected', proposer: proposerName, reason });
       return;
+    }
+
+    const summary = this.summarizeProposal(proposal, expectedAddress, proposerName);
+
+    if (this.proposalHandler) {
+      let accepted = false;
+      try {
+        accepted = await this.proposalHandler(summary);
+      } catch (handlerError) {
+        wcLog('Proposal handler threw', handlerError);
+        accepted = false;
+      }
+
+      if (!accepted) {
+        const reason = 'Session proposal rejected by user.';
+        await client.reject({
+          id: proposal.id,
+          reason: getSdkError('USER_REJECTED', reason),
+        }).catch(() => undefined);
+        this.emit({ type: 'proposal_rejected', proposer: proposerName, reason });
+        return;
+      }
     }
 
     try {
@@ -280,28 +358,65 @@ class WalletConnectRuntime {
         },
       });
 
+      wcLog('Approving proposal with namespaces', namespaces);
       const approved = await client.approve({
         id: proposal.id,
         namespaces,
       });
 
       const session = await approved.acknowledged();
+      wcLog('Session acknowledged', { topic: session.topic });
       this.emit({
         type: 'session_approved',
         topic: session.topic,
         peerName: session.peer.metadata.name?.trim() || proposerName,
       });
     } catch (error) {
+      const message = sanitizeErrorMessage(error, 'Unable to approve wallet session.');
+      wcLog('Approve failed', message);
       await client.reject({
         id: proposal.id,
-        reason: getSdkError('USER_REJECTED', sanitizeErrorMessage(error, 'Unable to approve wallet session.')),
+        reason: getSdkError('USER_REJECTED', message),
       }).catch(() => undefined);
-      this.emit({
-        type: 'pair_error',
-        uri: '',
-        error: sanitizeErrorMessage(error, 'Unable to approve wallet session.'),
-      });
+      this.emit({ type: 'proposal_rejected', proposer: proposerName, reason: message });
     }
+  }
+
+  private summarizeProposal(
+    proposal: SignClientTypes.EventArguments['session_proposal']['params'],
+    expectedAddress: Address,
+    proposerName: string,
+  ): WalletConnectSessionProposal {
+    const collectedChains = new Set<string>();
+    const collectedMethods = new Set<string>();
+    const collectedEvents = new Set<string>();
+
+    const absorb = (namespaces: typeof proposal.requiredNamespaces | undefined) => {
+      if (!namespaces) {
+        return;
+      }
+      for (const entry of Object.values(namespaces)) {
+        entry.chains?.forEach(chain => collectedChains.add(chain));
+        entry.methods?.forEach(method => collectedMethods.add(method));
+        entry.events?.forEach(eventName => collectedEvents.add(eventName));
+      }
+    };
+
+    absorb(proposal.requiredNamespaces);
+    absorb(proposal.optionalNamespaces);
+
+    const metadata = proposal.proposer?.metadata;
+
+    return {
+      id: proposal.id,
+      proposerName,
+      proposerUrl: metadata?.url?.trim() ?? '',
+      proposerIcons: Array.isArray(metadata?.icons) ? metadata!.icons.slice(0, 4) : [],
+      requestedChains: Array.from(collectedChains),
+      requestedMethods: Array.from(collectedMethods),
+      requestedEvents: Array.from(collectedEvents),
+      expectedAddress,
+    };
   }
 
   private async handleSessionRequest(
@@ -385,13 +500,14 @@ class WalletConnectRuntime {
       this.emit({ type: 'request_success', topic, id, method });
     } catch (error) {
       const message = sanitizeErrorMessage(error, 'Wallet request failed.');
+      const code = error instanceof WalletConnectUnsupportedMethodError ? error.code : 5000;
       await client.respond({
         topic,
         response: {
           id,
           jsonrpc: '2.0',
           error: {
-            code: 5000,
+            code,
             message,
           },
         },
@@ -413,15 +529,24 @@ class WalletConnectRuntime {
       return existingPromise;
     }
 
+    if (!this.expectedAddress) {
+      const message = 'Wallet address is not active. Please sign in to your wallet first.';
+      this.emit({ type: 'pair_error', uri, error: message });
+      throw new Error(message);
+    }
+
     this.emit({ type: 'pair_started', uri });
+    wcLog('pair() invoked', { uri });
 
     const pairPromise = (async () => {
       try {
         const client = await this.ensureClient();
         await client.pair({ uri });
+        wcLog('pairing established on relay');
         this.emit({ type: 'pair_success', uri });
       } catch (error) {
         const message = sanitizeErrorMessage(error, 'WalletConnect pair failed.');
+        wcLog('pair failed', message);
         this.emit({ type: 'pair_error', uri, error: message });
         throw new Error(message);
       } finally {

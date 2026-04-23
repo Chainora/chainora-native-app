@@ -23,6 +23,15 @@ export type WalletConnectRequestContext = {
   expectedAddress: string;
 };
 
+export class WalletConnectUnsupportedMethodError extends Error {
+  readonly code = 4200;
+
+  constructor(method: string) {
+    super(`Method not supported: ${method}`);
+    this.name = 'WalletConnectUnsupportedMethodError';
+  }
+}
+
 const parseAddress = (value: unknown, fieldName: string): Address => {
   const raw = String(value ?? '').trim();
   if (!isAddress(raw)) {
@@ -330,6 +339,6 @@ export const handleWalletConnectEvmRequest = async ({
     }
 
     default:
-      throw new Error(`Unsupported WalletConnect method: ${request.method}`);
+      throw new WalletConnectUnsupportedMethodError(request.method);
   }
 };

@@ -19,6 +19,7 @@ import { PinInput } from '../components/ui/PinInput';
 import { ScanDialog } from '../components/ui/ScanDialog';
 import { useNfcEnabled } from '../features/nfc/hooks/useNfcEnabled';
 import { useSettings } from '../features/settings';
+import { useToast } from '../features/toast';
 import { useWalletConnect } from '../features/walletconnect';
 import { ROUTES } from '../navigation/routes/routes';
 import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
@@ -126,6 +127,7 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
   const device = useCameraDevice('back');
   const { isEnabled: isNfcEnabled } = useNfcEnabled();
   const { themeTokens } = useSettings();
+  const { showToast } = useToast();
   const { pairWithInput, latestStatus: walletConnectStatus, latestError: walletConnectError } = useWalletConnect();
   const styles = useMemo(() => createStyles(themeTokens.background, themeTokens.foreground), [themeTokens.background, themeTokens.foreground]);
 
@@ -172,17 +174,14 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
 
     try {
       await pairWithInput(rawInput, route.params.ethAddress);
-      Alert.alert(
-        'WalletConnect Pairing Started',
-        'Pair request sent. Approve session in your dApp.',
-      );
+      showToast('Connecting to dApp... review the session request.', 'info');
     } catch (error) {
       setScanError(normalizeWalletConnectError(error));
     } finally {
       setIsWalletConnectPairing(false);
       walletConnectScanLockRef.current = false;
     }
-  }, [pairWithInput, route.params.ethAddress]);
+  }, [pairWithInput, route.params.ethAddress, showToast]);
 
   const codeScanner = useCodeScanner({
     codeTypes: ['qr'],

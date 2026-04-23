@@ -6,39 +6,43 @@ This document walks through preparing a development environment for the Chainora
 
 ## 1. Prerequisites
 
-- **Node.js 18+** (use nvm if you manage multiple versions)
-- **Yarn 1.22+** or npm (commands below use Yarn)
+- **Node.js 20+**
+- **Yarn 1.22+** (commands below assume Yarn)
 - **Java 17** (required by the Android Gradle build)
 - **Android Studio** with the following components installed via the SDK Manager:
-  - Android SDK Platform 34 (Android 14)
-  - Android SDK Build-Tools 34.x
+  - Android SDK Platform 36
+  - Android SDK Build-Tools 36.0.0
+  - Android NDK 27.1.12297006
   - Android Emulator (if you plan to use the emulator)
   - Google USB Driver (Windows only)
+- **adb / Android platform-tools**
 - **Watchman** (macOS optional, improves file watching)
 
-Add the Android tooling to your shell profile:
+On Windows PowerShell, the default SDK path is usually:
 
-```sh
-export ANDROID_HOME="$HOME/Library/Android/sdk"           # macOS
-export ANDROID_HOME="$HOME/Android/Sdk"                  # Linux
-export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
+```powershell
+$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
 ```
 
-Reload your shell after editing `.zshrc`/`.bashrc`.
+You can generate `android/local.properties` automatically with:
+
+```powershell
+.\scripts\setup-android-sdk.ps1
+```
 
 ---
 
 ## 2. Install Dependencies
 
-From the `chainora/` directory:
+From the `chainora-native-app/` directory:
 
-```sh
-yarn install
+```powershell
+corepack yarn install
 ```
 
 For iOS builds (on macOS):
 
-```sh
+```bash
 (cd ios && bundle install && bundle exec pod install)
 ```
 
@@ -48,8 +52,8 @@ For iOS builds (on macOS):
 
 Metro bundles JavaScript for React Native. Keep it running in its own terminal:
 
-```sh
-yarn start
+```powershell
+corepack yarn start
 ```
 
 Use `r` (reload) or `shift + r` (hard reload) inside the Metro terminal to refresh the app during development.
@@ -60,15 +64,18 @@ Use `r` (reload) or `shift + r` (hard reload) inside the Metro terminal to refre
 
 With Metro running, open another terminal in `chainora/` and run:
 
-```sh
-yarn android
+```powershell
+corepack yarn android
 ```
 
 This builds the native project, installs it on the attached device/emulator, and launches the Chainora app. If Gradle fails, run again with `--stacktrace` to inspect the error:
 
-```sh
-yarn android --stacktrace
+```powershell
+corepack yarn android --stacktrace
 ```
+
+If more than one `adb` target is connected, set `ANDROID_SERIAL` before running `corepack yarn device` or `corepack yarn android`.
+On Windows, `corepack yarn android` now prefers the Android Studio bundled JBR automatically when it is installed.
 
 > **Tip:** For a clean build, run `cd android && ./gradlew clean` before invoking `yarn android`.
 

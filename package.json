@@ -3,14 +3,15 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "android": "react-native run-android",
+    "android": "node ./scripts/run-android.cjs",
     "ios": "react-native run-ios",
     "lint": "eslint .",
+    "postinstall": "node ./scripts/patch-rn-gradle-plugin.cjs",
     "start": "react-native start",
     "start:reset": "react-native start --reset-cache",
     "test": "jest",
-    "tron": "adb reverse tcp:9090 tcp:9090",
-    "device": "adb reverse tcp:8545 tcp:8545 && adb reverse tcp:8546 tcp:8546 && adb reverse tcp:8547 tcp:8547 && adb reverse tcp:9090 tcp:9090"
+    "tron": "node ./scripts/adb-reverse.cjs 9090",
+    "device": "node ./scripts/adb-reverse.cjs 8545 8546 8547 9090"
   },
   "dependencies": {
     "@noble/hashes": "^2.0.1",

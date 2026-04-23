@@ -9,9 +9,9 @@ WALLETCONNECT_PROJECT_ID=<your_walletconnect_cloud_project_id>
 WALLETCONNECT_RELAY_URL=wss://relay.walletconnect.com
 ```
 
-This project uses `react-native-dotenv` (Babel) to inject these values at bundle time.
+This project reads these values from `.env` via `react-native-dotenv` first, then falls back to runtime env variables when available.
 
-If `WALLETCONNECT_PROJECT_ID` is missing, native wallet pairing is rejected with a runtime error.
+If `WALLETCONNECT_PROJECT_ID` is missing or left as `__TODO__`, native wallet pairing is rejected with a runtime error.
 
 ## Supported pairing inputs
 

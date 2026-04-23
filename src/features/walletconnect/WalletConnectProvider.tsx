@@ -20,12 +20,15 @@ import { AppButton } from '../../components/AppButton';
 import { PinInput } from '../../components/ui/PinInput';
 import { useAuth } from '../auth';
 import { useSettings } from '../settings';
+import { useToast } from '../toast';
 import {
   walletConnectRuntime,
   type WalletConnectRequestDecision,
   type WalletConnectRequestPrompt,
   type WalletConnectRuntimeEvent,
+  type WalletConnectSessionProposal,
 } from '../../services/walletconnect';
+import { SessionProposalModal } from './SessionProposalModal';
 
 type WalletConnectContextValue = {
   pairWithInput: (input: string, addressHint?: string) => Promise<void>;
@@ -36,26 +39,21 @@ type WalletConnectContextValue = {
 
 const WalletConnectContext = createContext<WalletConnectContextValue | undefined>(undefined);
 
-const normalizeErrorMessage = (raw: unknown): string => {
-  const message = raw instanceof Error ? raw.message.trim() : String(raw ?? '').trim();
-  if (!message) {
-    return 'WalletConnect request failed.';
-  }
-  return message;
-};
-
 export const WalletConnectProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
   const { session } = useAuth();
   const { themeTokens } = useSettings();
+  const { showToast } = useToast();
   const styles = useMemo(() => createStyles(themeTokens.background, themeTokens.foreground), [themeTokens.background, themeTokens.foreground]);
 
   const pendingDecisionRef = useRef<((decision: WalletConnectRequestDecision) => void) | null>(null);
+  const pendingProposalDecisionRef = useRef<((accepted: boolean) => void) | null>(null);
   const lastHandledUrlRef = useRef('');
 
   const [latestStatus, setLatestStatus] = useState('WalletConnect ready.');
   const [latestError, setLatestError] = useState('');
   const [activeSessionCount, setActiveSessionCount] = useState(0);
   const [pendingPrompt, setPendingPrompt] = useState<WalletConnectRequestPrompt | null>(null);
+  const [pendingProposal, setPendingProposal] = useState<WalletConnectSessionProposal | null>(null);
   const [requestPin, setRequestPin] = useState('');
   const [requestPinError, setRequestPinError] = useState('');
 
@@ -66,6 +64,13 @@ export const WalletConnectProvider: React.FC<React.PropsWithChildren> = ({ child
     setRequestPin('');
     setRequestPinError('');
     resolver?.(decision);
+  }, []);
+
+  const resolveProposalDecision = useCallback((accepted: boolean) => {
+    const resolver = pendingProposalDecisionRef.current;
+    pendingProposalDecisionRef.current = null;
+    setPendingProposal(null);
+    resolver?.(accepted);
   }, []);
 
   useEffect(() => {
@@ -82,11 +87,23 @@ export const WalletConnectProvider: React.FC<React.PropsWithChildren> = ({ child
       });
     });
 
+    walletConnectRuntime.setProposalHandler(async proposal => {
+      return new Promise<boolean>(resolve => {
+        pendingProposalDecisionRef.current = resolve;
+        setPendingProposal(proposal);
+      });
+    });
+
     return () => {
       walletConnectRuntime.setApprovalHandler(null);
+      walletConnectRuntime.setProposalHandler(null);
       if (pendingDecisionRef.current) {
         pendingDecisionRef.current({ approved: false });
         pendingDecisionRef.current = null;
+      }
+      if (pendingProposalDecisionRef.current) {
+        pendingProposalDecisionRef.current(false);
+        pendingProposalDecisionRef.current = null;
       }
     };
   }, []);
@@ -103,22 +120,29 @@ export const WalletConnectProvider: React.FC<React.PropsWithChildren> = ({ child
           setLatestError('');
           break;
         case 'pair_success':
-          setLatestStatus('WalletConnect pair request sent. Approve session in dApp.');
+          setLatestStatus('Waiting for dApp to send session proposal...');
           setLatestError('');
           setActiveSessionCount(walletConnectRuntime.getSessions().length);
           break;
         case 'pair_error':
           setLatestStatus('WalletConnect pairing failed.');
           setLatestError(event.error);
+          showToast(event.error, 'error');
           break;
         case 'proposal_received':
           setLatestStatus(`Session proposal received from ${event.proposer}.`);
           setLatestError('');
           break;
+        case 'proposal_rejected':
+          setLatestStatus(`Proposal rejected: ${event.proposer}.`);
+          setLatestError(event.reason);
+          showToast(event.reason, 'error');
+          break;
         case 'session_approved':
-          setLatestStatus(`Session approved: ${event.peerName}.`);
+          setLatestStatus(`Connected to ${event.peerName}.`);
           setLatestError('');
           setActiveSessionCount(walletConnectRuntime.getSessions().length);
+          showToast(`Connected to ${event.peerName}`, 'success');
           break;
         case 'session_deleted':
           setLatestStatus('WalletConnect session disconnected.');
@@ -144,7 +168,7 @@ export const WalletConnectProvider: React.FC<React.PropsWithChildren> = ({ child
 
     setActiveSessionCount(walletConnectRuntime.getSessions().length);
     return unsubscribe;
-  }, []);
+  }, [showToast]);
 
   const pairWithInput = useCallback(async (input: string, addressHint?: string) => {
     const normalizedInput = String(input ?? '').trim();
@@ -154,6 +178,10 @@ export const WalletConnectProvider: React.FC<React.PropsWithChildren> = ({ child
 
     if (addressHint?.trim()) {
       walletConnectRuntime.setExpectedAddress(addressHint.trim());
+    }
+
+    if (!walletConnectRuntime.getExpectedAddress()) {
+      throw new Error('Please sign in to your wallet before pairing.');
     }
 
     await walletConnectRuntime.pair(normalizedInput);
@@ -168,8 +196,16 @@ export const WalletConnectProvider: React.FC<React.PropsWithChildren> = ({ child
       }
       lastHandledUrlRef.current = candidate;
 
+      if (!session?.address) {
+        // Deep-link invoked but wallet not logged in — surface a toast, skip pairing.
+        if (candidate.toLowerCase().includes('wc:') || candidate.toLowerCase().includes('uri=wc')) {
+          showToast('Please sign in to your wallet before pairing.', 'error');
+        }
+        return;
+      }
+
       try {
-        await pairWithInput(candidate, session?.address ?? '');
+        await pairWithInput(candidate, session.address);
       } catch {
         // Ignore non-WalletConnect deep links.
       }
@@ -186,7 +222,7 @@ export const WalletConnectProvider: React.FC<React.PropsWithChildren> = ({ child
     return () => {
       subscription.remove();
     };
-  }, [pairWithInput, session?.address]);
+  }, [pairWithInput, session?.address, showToast]);
 
   const contextValue = useMemo<WalletConnectContextValue>(() => ({
     pairWithInput,
@@ -198,6 +234,12 @@ export const WalletConnectProvider: React.FC<React.PropsWithChildren> = ({ child
   return (
     <WalletConnectContext.Provider value={contextValue}>
       {children}
+
+      <SessionProposalModal
+        proposal={pendingProposal}
+        onApprove={() => resolveProposalDecision(true)}
+        onReject={() => resolveProposalDecision(false)}
+      />
 
       <Modal
         visible={Boolean(pendingPrompt)}
