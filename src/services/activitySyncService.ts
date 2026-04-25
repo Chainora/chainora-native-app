@@ -135,17 +135,20 @@ export const syncWalletActivities = async (walletAddress: string): Promise<void>
     const seenTxHashes = new Set<string>();
 
     const resolveTransaction = async (
-      tx: (Awaited<ReturnType<typeof client.getBlock>>['transactions'])[number],
-    ) => {
-      if (typeof tx !== 'string') {
-        return tx;
-      }
-
+      txHash: `0x${string}`,
+    ): Promise<{ tx: Awaited<ReturnType<typeof client.getTransaction>> | null; fatal: boolean }> => {
       try {
-        return await client.getTransaction({ hash: tx });
+        const tx = await client.getTransaction({ hash: txHash });
+        return { tx, fatal: false };
       } catch (error) {
-        console.warn('[activitySync] Failed reading transaction', tx, error);
-        return null;
+        const message = error instanceof Error ? error.message : String(error ?? '');
+        if (message.includes('IntegerOutOfRangeError')) {
+          console.warn('[activitySync] Skipping malformed transaction payload', txHash, message);
+          return { tx: null, fatal: false };
+        }
+
+        console.warn('[activitySync] Failed reading transaction', txHash, error);
+        return { tx: null, fatal: true };
       }
     };
 
@@ -156,7 +159,7 @@ export const syncWalletActivities = async (walletAddress: string): Promise<void>
       try {
         blockData = await client.getBlock({
           blockNumber: block,
-          includeTransactions: true,
+          includeTransactions: false,
         });
       } catch (error) {
         console.warn('[activitySync] Failed reading block', block.toString(), error);
@@ -169,13 +172,15 @@ export const syncWalletActivities = async (walletAddress: string): Promise<void>
         continue;
       }
 
-      const transactions = blockData.transactions ?? [];
+      const transactions = (blockData.transactions ?? []) as `0x${string}`[];
       let blockHasTxReadError = false;
 
-      for (const txItem of transactions) {
-        const tx = await resolveTransaction(txItem);
+      for (const txHash of transactions) {
+        const { tx, fatal } = await resolveTransaction(txHash);
         if (!tx) {
-          blockHasTxReadError = true;
+          if (fatal) {
+            blockHasTxReadError = true;
+          }
           continue;
         }
 

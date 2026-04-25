@@ -29,9 +29,9 @@ import {
 import { useWalletBalance } from '../features/wallet/hooks/useWalletBalance';
 import { ROUTES } from '../navigation/routes/routes';
 import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
-import type { ThemeTokens } from '../types/theme/colors';
 import type { SendTransactionSuccessPayload } from '../components/ui/SendTransactionDialog';
 import { syncWalletActivities } from '../services/activitySyncService';
+import { walletRelaySessionManager } from '../services/walletRelaySessionManager';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 const BALANCE_POLL_INTERVAL_MS = 15_000;
@@ -43,15 +43,18 @@ const ACTIVITY_SYNC_DEBOUNCE_MS = 800;
 const truncateAddress = (address: string) =>
   `${address.slice(0, 6)}...${address.slice(-4)}`;
 
+type TabKey = 'assets' | 'activity';
+
 export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
   const { ethAddress, publicKeyHex } = route.params;
-  const { resolvedTheme, t, themeTokens } = useSettings();
-  const styles = useMemo(() => createStyles(themeTokens), [themeTokens]);
+  const { resolvedTheme, t } = useSettings();
+  const styles = useMemo(() => createStyles(), []);
   const isFocused = useIsFocused();
   const { initializeSession } = useAuth();
   const balanceState = useWalletBalance(ethAddress);
   const refreshBalanceFn = balanceState.refresh;
   const network = getActiveNetwork();
+  const [activeTab, setActiveTab] = useState<TabKey>('assets');
   const [isAppActive, setIsAppActive] = useState(AppState.currentState === 'active');
   const wasAppActiveRef = useRef(isAppActive);
   const lastNetworkKeyRef = useRef(network.key);
@@ -94,6 +97,10 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
       console.warn('[Home] Failed to ensure auth session', error);
     });
   }, [ethAddress, initializeSession]);
+
+  useEffect(() => {
+    walletRelaySessionManager.setActiveAccount(ethAddress);
+  }, [ethAddress]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', nextAppState => {
@@ -279,93 +286,206 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
     setDialogState(prev => ({ ...prev, walletDetails: false }));
   }, []);
 
-  const handleBackup = useCallback(() => {
+  const openSettings = useCallback(() => {
     navigation.navigate(ROUTES.Settings);
   }, [navigation]);
 
-  const handleScanQr = () => {
+  const handleScanQr = useCallback(() => {
     navigation.navigate(ROUTES.QRScanner, { ethAddress });
-  };
+  }, [ethAddress, navigation]);
 
   const copyAddress = useCallback(() => {
     Clipboard.setString(ethAddress);
     Alert.alert(t('homeCopiedTitle'), t('homeCopiedMessage'));
   }, [ethAddress, t]);
 
+  const activitySummary = useMemo(() => {
+    if (balanceState.loading) {
+      return t('homeUpdating');
+    }
+    if (balanceState.error) {
+      return t('homeSyncDelayed');
+    }
+    return network.name;
+  }, [balanceState.error, balanceState.loading, network.name, t]);
+
   return (
     <View style={styles.screen}>
       <StatusBar
         barStyle={resolvedTheme === 'light' ? 'dark-content' : 'light-content'}
-        backgroundColor={themeTokens.background}
+        backgroundColor="#05070D"
       />
       <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+        <View style={styles.bgAuraLeft} />
+        <View style={styles.bgAuraRight} />
+
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          <View style={styles.balanceCard}>
-            <View style={styles.balanceHeader}>
-              <Text style={styles.cardLabel}>{t('homeTotalBalance')}</Text>
-              <View style={styles.headerActions}>
-                <Pressable
-                  onPress={refreshBalance}
-                  disabled={balanceState.loading}
-                  style={[styles.refreshButton, balanceState.loading && styles.refreshButtonDisabled]}
-                >
-                  <Ionicons name="refresh-outline" size={14} color={themeTokens.foregroundMuted} />
-                  <Text style={styles.refreshText}>{balanceState.loading ? t('homeUpdating') : t('homeRefresh')}</Text>
-                </Pressable>
-              </View>
+          <View style={styles.header}>
+            <Pressable style={styles.iconButton} onPress={openSettings}>
+              <Ionicons name="settings-outline" size={18} color="#C7D4E8" />
+            </Pressable>
+
+            <View style={styles.searchPill}>
+              <Ionicons name="search-outline" size={14} color="#7F90AC" />
+              <Text style={styles.searchText}>{t('homeSearchPlaceholder')}</Text>
             </View>
 
+            <Pressable style={styles.iconButton} onPress={handleScanQr}>
+              <Ionicons name="qr-code-outline" size={18} color="#C7D4E8" />
+            </Pressable>
+          </View>
+
+          <View style={styles.walletBar}>
+            <Pressable style={styles.walletPill} onPress={copyAddress}>
+              <View style={styles.walletDot} />
+              <Text style={styles.walletName}>{t('homePrimaryWallet')}</Text>
+              <Text style={styles.walletAddress}>{truncateAddress(ethAddress)}</Text>
+              <View style={styles.walletCopy}>
+                <Ionicons name="copy-outline" size={10} color="#A6B6D0" />
+              </View>
+            </Pressable>
+          </View>
+
+          <View style={styles.balanceBlock}>
+            <Text style={styles.balanceLabel}>{t('homeTotalBalance')}</Text>
             <View style={styles.balanceRow}>
               <Text style={styles.balanceValue}>{balanceValue}</Text>
-              <Text style={styles.currency}>{network.currencySymbol}</Text>
+              <Text style={styles.balanceUnit}>{network.currencySymbol}</Text>
             </View>
+            <View style={styles.balanceDelta}>
+              <Text style={styles.balanceDeltaText}>
+                {activities.length > 0 ? '▲' : '•'} {activitySummary}
+              </Text>
+            </View>
+          </View>
 
-            <View style={styles.divider} />
-
-            <View style={styles.addressRow}>
-              <View>
-                <Text style={styles.addressLabel}>{t('homeAddressLabel')}</Text>
-                <View style={styles.addressWrapper}>
-                  <Text style={styles.addressText}>{truncateAddress(ethAddress)}</Text>
-                  <Pressable onPress={copyAddress} hitSlop={12} style={styles.copyButton}>
-                    <Ionicons name="copy-outline" size={16} color={themeTokens.foregroundMuted} />
-                  </Pressable>
-                </View>
+          <View style={styles.quickActions}>
+            <Pressable style={styles.quickAction} onPress={openSendDialog}>
+              <View style={styles.quickIcon}>
+                <Ionicons name="arrow-up" size={18} color="#4FB4FF" />
               </View>
+              <Text style={styles.quickLabel}>{t('homeSendEth')}</Text>
+            </Pressable>
 
-              <Pressable onPress={openWalletDetails} style={styles.networkPill}>
-                <Ionicons name="trending-up-outline" size={14} color={themeTokens.primary} />
-                <Text style={styles.networkText}>{network.name}</Text>
+            <Pressable style={styles.quickAction} onPress={openWalletDetails}>
+              <View style={styles.quickIcon}>
+                <Ionicons name="arrow-down" size={18} color="#4FB4FF" />
+              </View>
+              <Text style={styles.quickLabel}>{t('homeReceive')}</Text>
+            </Pressable>
+
+            <Pressable style={[styles.quickAction, styles.quickActionPrimary]} onPress={handleScanQr}>
+              <View style={styles.quickIcon}>
+                <Ionicons name="swap-horizontal" size={20} color="#4FB4FF" />
+              </View>
+              <Text style={[styles.quickLabel, styles.quickLabelPrimary]}>{t('homeSwap')}</Text>
+            </Pressable>
+
+            <Pressable style={styles.quickAction} onPress={openSettings}>
+              <View style={styles.quickIcon}>
+                <Ionicons name="add-outline" size={20} color="#4FB4FF" />
+              </View>
+              <Text style={styles.quickLabel}>{t('homeBuy')}</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.tabsRow}>
+            <Pressable onPress={() => setActiveTab('assets')}>
+              <Text style={[styles.tabText, activeTab === 'assets' && styles.tabTextActive]}>
+                {t('homeTabAssets')}
+              </Text>
+              {activeTab === 'assets' ? <View style={styles.tabIndicator} /> : null}
+            </Pressable>
+
+            <Pressable onPress={() => setActiveTab('activity')}>
+              <Text style={[styles.tabText, activeTab === 'activity' && styles.tabTextActive]}>
+                {t('homeTabActivity')}
+              </Text>
+              {activeTab === 'activity' ? <View style={styles.tabIndicator} /> : null}
+            </Pressable>
+
+            <View style={styles.tabsSpacer} />
+
+            <Pressable style={styles.tabIconButton} onPress={refreshBalance}>
+              <Ionicons name="refresh-outline" size={15} color="#8EA0BC" />
+            </Pressable>
+            <Pressable style={styles.tabIconButton} onPress={openSettings}>
+              <Ionicons name="options-outline" size={15} color="#8EA0BC" />
+            </Pressable>
+          </View>
+
+          {activeTab === 'assets' ? (
+            <View style={styles.assetList}>
+              <Pressable style={styles.assetRow} onPress={openWalletDetails}>
+                <View style={styles.coinBadge}>
+                  <Text style={styles.coinBadgeText}>{network.currencySymbol.slice(0, 2).toUpperCase()}</Text>
+                </View>
+
+                <View style={styles.assetInfo}>
+                  <View style={styles.assetTopLine}>
+                    <Text style={styles.assetSymbol}>{network.currencySymbol.toUpperCase()}</Text>
+                    <Text style={styles.assetTag}>{network.name}</Text>
+                  </View>
+                  <Text style={styles.assetBottomLine}>{t('homeOnchainBalanceLive')}</Text>
+                </View>
+
+                <View style={styles.assetRight}>
+                  <Text style={styles.assetBalance}>{balanceValue}</Text>
+                  <Text style={styles.assetQuote}>{network.currencySymbol}</Text>
+                </View>
+              </Pressable>
+
+              <View style={styles.assetDivider} />
+
+              <Pressable style={styles.assetRow} onPress={copyAddress}>
+                <View style={[styles.coinBadge, styles.coinBadgeSecondary]}>
+                  <Ionicons name="finger-print-outline" size={16} color="#C9D8ED" />
+                </View>
+
+                <View style={styles.assetInfo}>
+                  <View style={styles.assetTopLine}>
+                    <Text style={styles.assetSymbol}>{t('homeWalletTag')}</Text>
+                    <Text style={styles.assetTag}>{t('homeAddressTag')}</Text>
+                  </View>
+                  <Text style={styles.assetBottomLine}>{truncateAddress(ethAddress)}</Text>
+                </View>
+
+                <View style={styles.assetRight}>
+                  <Ionicons name="copy-outline" size={18} color="#8EA0BC" />
+                </View>
               </Pressable>
             </View>
-          </View>
-
-          <Text style={styles.sectionLabel}>{t('homeQuickActions')}</Text>
-          <View style={styles.quickActions}>
-            <Pressable style={styles.actionCard} onPress={openSendDialog}>
-              <View style={styles.actionIconGold}>
-                <Ionicons name="paper-plane-outline" size={20} color={themeTokens.primary} />
-              </View>
-              <Text style={styles.actionTitle}>{t('homeSendEth')}</Text>
-            </Pressable>
-
-            <Pressable style={styles.actionCard} onPress={handleScanQr}>
-              <View style={styles.actionIconGold}>
-                <Ionicons name="qr-code-outline" size={20} color={themeTokens.primary} />
-              </View>
-              <Text style={styles.actionTitle}>{t('homeScanQrTitle')}</Text>
-            </Pressable>
-
-            <Pressable style={styles.actionCard} onPress={handleBackup}>
-              <View style={styles.actionIconGold}>
-                <Ionicons name="settings-outline" size={20} color={themeTokens.primary} />
-              </View>
-              <Text style={styles.actionTitle}>{t('homeSettings')}</Text>
-            </Pressable>
-          </View>
-
-          <RecentActivitySection activities={activities} />
+          ) : (
+            <RecentActivitySection activities={activities} />
+          )}
         </ScrollView>
+
+        <View style={styles.bottomNavWrap} pointerEvents="none">
+          <View style={styles.bottomNavInner}>
+            <View style={[styles.navItem, styles.navItemOn]}>
+              <Ionicons name="home-outline" size={18} color="#E7EEFA" />
+              <Text style={[styles.navText, styles.navTextOn]}>{t('homeBottomHome')}</Text>
+            </View>
+            <View style={styles.navItem}>
+              <Ionicons name="trending-up-outline" size={18} color="#8EA0BC" />
+              <Text style={styles.navText}>{t('homeBottomTrending')}</Text>
+            </View>
+            <View style={styles.navItemCenter}>
+              <View style={styles.navCenterBubble}>
+                <Ionicons name="swap-horizontal" size={21} color="#F3F9FF" />
+              </View>
+              <Text style={styles.navCenterText}>{t('homeBottomTrade')}</Text>
+            </View>
+            <View style={styles.navItem}>
+              <Ionicons name="gift-outline" size={18} color="#8EA0BC" />
+              <Text style={styles.navText}>{t('homeBottomRewards')}</Text>
+            </View>
+            <View style={styles.navItem}>
+              <Ionicons name="compass-outline" size={18} color="#8EA0BC" />
+              <Text style={styles.navText}>{t('homeBottomExplore')}</Text>
+            </View>
+          </View>
+        </View>
 
         <SendTransactionDialog
           visible={dialogState.send}
@@ -382,196 +502,357 @@ export const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
           publicKeyHex={publicKeyHex}
           networkName={network.name}
         />
-
       </SafeAreaView>
     </View>
   );
 };
 
-const createStyles = (theme: ThemeTokens) => StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: theme.background,
+    backgroundColor: '#05070D',
   },
   safeArea: {
     flex: 1,
   },
+  bgAuraLeft: {
+    position: 'absolute',
+    left: -120,
+    top: -70,
+    width: 330,
+    height: 330,
+    borderRadius: 165,
+    backgroundColor: 'rgba(40, 151, 255, 0.16)',
+  },
+  bgAuraRight: {
+    position: 'absolute',
+    right: -130,
+    top: 90,
+    width: 300,
+    height: 300,
+    borderRadius: 150,
+    backgroundColor: 'rgba(34, 211, 238, 0.09)',
+  },
   scrollContent: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 120,
-    gap: 16,
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 166,
   },
-  balanceCard: {
-    backgroundColor: theme.surfaceHighlight,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: theme.border,
-    padding: 18,
-  },
-  balanceHeader: {
+  header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    gap: 10,
+    paddingHorizontal: 4,
   },
-  headerActions: {
+  iconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#243248',
+    backgroundColor: '#111826',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchPill: {
+    flex: 1,
+    height: 36,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#243248',
+    backgroundColor: '#111826',
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  searchText: {
+    color: '#7F90AC',
+    fontSize: 13,
+  },
+  walletBar: {
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  walletPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-  },
-  refreshButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    borderRadius: 6,
+    height: 34,
+    paddingHorizontal: 11,
+    borderRadius: 999,
     borderWidth: 1,
-    borderColor: theme.border,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    backgroundColor: theme.surface,
+    borderColor: '#243248',
+    backgroundColor: '#111826',
   },
-  refreshButtonDisabled: {
-    opacity: 0.6,
+  walletDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#2897FF',
   },
-  refreshText: {
-    color: theme.foregroundMuted,
-    fontSize: theme.typography.subtext,
+  walletName: {
+    color: '#E7EEFA',
+    fontSize: 13,
     fontWeight: '600',
   },
-  cardLabel: {
-    color: '#7E8AA1',
-    fontSize: theme.typography.body,
-    fontWeight: '700',
+  walletAddress: {
+    color: '#8598B8',
+    fontSize: 11,
+    fontWeight: '500',
   },
-  liveBadge: {
-    backgroundColor: 'rgba(47, 214, 123, 0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(47, 214, 123, 0.45)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
+  walletCopy: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#192437',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  liveText: {
-    color: '#2FD67B',
-    fontSize: theme.typography.subtext,
-    fontWeight: '700',
+  balanceBlock: {
+    alignItems: 'center',
+    marginTop: 14,
+    marginBottom: 10,
+  },
+  balanceLabel: {
+    color: '#62BBFF',
+    fontSize: 10,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    fontWeight: '600',
+    marginBottom: 5,
   },
   balanceRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: 8,
+    gap: 6,
   },
   balanceValue: {
-    fontSize: 52,
-    lineHeight: 56,
-    color: theme.foreground,
+    color: '#E7EEFA',
+    fontSize: 50,
+    lineHeight: 54,
     fontWeight: '800',
-    letterSpacing: -1,
+    letterSpacing: -1.4,
   },
-  currency: {
-    fontSize: theme.typography.subtitle,
-    color: theme.foregroundMuted,
+  balanceUnit: {
+    color: '#8EA0BC',
+    fontSize: 26,
     marginBottom: 7,
-    fontWeight: '700',
+    fontWeight: '600',
   },
-  divider: {
-    height: 1,
-    backgroundColor: 'rgba(126, 138, 161, 0.2)',
-    marginVertical: 16,
-  },
-  addressRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 12,
-  },
-  addressLabel: {
-    fontSize: theme.typography.body,
-    color: '#8D98AE',
-    marginBottom: 4,
-  },
-  addressText: {
-    fontSize: theme.typography.subtitle,
-    color: theme.foreground,
-    fontWeight: '700',
-  },
-  addressWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  copyButton: {
-    padding: 2,
-    opacity: 0.8,
-  },
-  networkPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: theme.primaryLight,
-    backgroundColor: theme.glow,
+  balanceDelta: {
+    marginTop: 8,
     paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(79, 180, 255, 0.35)',
+    backgroundColor: 'rgba(40, 151, 255, 0.13)',
   },
-  networkText: {
-    color: theme.primary,
-    fontSize: theme.typography.body,
-    fontWeight: '700',
-  },
-  sectionLabel: {
-    color: '#7E8AA1',
-    fontSize: theme.typography.body,
-    letterSpacing: 2,
-    fontWeight: '700',
-    marginTop: 6,
+  balanceDeltaText: {
+    color: '#8CD0FF',
+    fontSize: 11,
+    fontWeight: '600',
   },
   quickActions: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 9,
+    marginBottom: 12,
   },
-  actionCard: {
+  quickAction: {
     flex: 1,
-    backgroundColor: theme.surfaceHighlight,
-    borderRadius: 20,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: theme.border,
-    minHeight: 100,
+    borderColor: '#243248',
+    backgroundColor: '#111826',
     alignItems: 'center',
     justifyContent: 'center',
+    paddingVertical: 12,
+    gap: 7,
+  },
+  quickActionPrimary: {
+    borderColor: 'rgba(79, 180, 255, 0.36)',
+    backgroundColor: 'rgba(40, 151, 255, 0.12)',
+  },
+  quickIcon: {
+    width: 34,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickLabel: {
+    color: '#B6C4DB',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  quickLabelPrimary: {
+    color: '#EAF4FF',
+  },
+  tabsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#243248',
+    paddingHorizontal: 4,
+    marginBottom: 10,
+  },
+  tabText: {
+    color: '#8EA0BC',
+    fontSize: 14,
+    fontWeight: '600',
+    paddingVertical: 10,
+  },
+  tabTextActive: {
+    color: '#E7EEFA',
+  },
+  tabIndicator: {
+    height: 2,
+    borderRadius: 999,
+    backgroundColor: '#2897FF',
+    marginTop: -1,
+  },
+  tabsSpacer: {
+    flex: 1,
+  },
+  tabIconButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  assetList: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#243248',
+    backgroundColor: '#101827',
+    overflow: 'hidden',
+  },
+  assetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 10,
-    padding: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 12,
   },
-  actionIconGold: {
-    width: 58,
-    height: 58,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: theme.primaryLight,
-    backgroundColor: theme.glow,
+  coinBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#254266',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  actionIconGreen: {
-    width: 58,
-    height: 58,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(47, 214, 123, 0.35)',
-    backgroundColor: 'rgba(47, 214, 123, 0.08)',
-    alignItems: 'center',
-    justifyContent: 'center',
+  coinBadgeSecondary: {
+    backgroundColor: '#1F2E44',
   },
-  actionTitle: {
-    color: theme.foreground,
-    fontSize: theme.typography.subtitle,
+  coinBadgeText: {
+    color: '#EAF4FF',
+    fontSize: 12,
     fontWeight: '700',
   },
-  actionSubtext: {
-    color: theme.foregroundMuted,
-    fontSize: theme.typography.body,
+  assetInfo: {
+    flex: 1,
+  },
+  assetTopLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  assetSymbol: {
+    color: '#E7EEFA',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  assetTag: {
+    color: '#8EA0BC',
+    fontSize: 11,
+    backgroundColor: '#1A2639',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  assetBottomLine: {
+    color: '#8EA0BC',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  assetRight: {
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  assetBalance: {
+    color: '#E7EEFA',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  assetQuote: {
+    color: '#8EA0BC',
+    fontSize: 12,
+    marginTop: 3,
+  },
+  assetDivider: {
+    height: 1,
+    backgroundColor: '#203149',
+    marginHorizontal: 16,
+  },
+  bottomNavWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 12,
+    paddingHorizontal: 8,
+    paddingTop: 10,
+    backgroundColor: 'rgba(5, 7, 13, 0.9)',
+  },
+  bottomNavInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: '#243248',
+    backgroundColor: '#111826',
+    paddingVertical: 7,
+    paddingHorizontal: 6,
+  },
+  navItem: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+  },
+  navItemOn: {
+    position: 'relative',
+  },
+  navText: {
+    color: '#7F90AC',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  navTextOn: {
+    color: '#E7EEFA',
+  },
+  navItemCenter: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 3,
+  },
+  navCenterBubble: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#2897FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: -16,
+  },
+  navCenterText: {
+    color: '#8FD1FF',
+    fontSize: 10,
+    fontWeight: '600',
+    marginTop: 1,
   },
 });
 

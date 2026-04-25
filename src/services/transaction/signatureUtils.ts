@@ -1,6 +1,7 @@
 import { Point, Signature } from '@noble/secp256k1';
 
 import { hexToBytes } from '../../utils/encoding';
+import { bytesToHex } from '../../utils/encoding';
 
 export type RecoveredSignature = {
   r: string;
@@ -123,6 +124,11 @@ const equalBytes = (a: Uint8Array, b: Uint8Array): boolean => {
 };
 
 const bigintToHex = (value: bigint): string => `0x${value.toString(16).padStart(64, '0')}`;
+
+export const derToCompactSignatureHex = (signatureDer: Uint8Array): string => {
+  const signature = derToSignature(signatureDer).normalizeS();
+  return `0x${bytesToHex(signature.toCompactRawBytes())}`;
+};
 
 export const recoverSignature = (
   messageHash: Uint8Array,
