@@ -19,6 +19,7 @@ import GeneralScreen from '../screens/GeneralScreen';
 import ChangePinScreen from '../screens/ChangePinScreen';
 import QRScannerScreen from '../screens/QRScannerScreen';
 import Header from '../components/layout/header';
+import { WalletRelayRequestModal } from '../components/ui/WalletRelayRequestModal';
 import { useSettings } from '../features/settings';
 import type { RootStackParamList } from './routes/rootStackParamList';
 import { ROUTES } from './routes/routes';
@@ -78,13 +79,29 @@ export const AppNavigator: React.FC = () => {
             component={WelcomeScreen}
             options={{ headerShown: false }}
           />
-          <Stack.Screen name={ROUTES.LoginPin} component={LoginPinScreen} />
-          <Stack.Screen name={ROUTES.ActivatePin} component={ActivatePinScreen} />
+          <Stack.Screen
+            name={ROUTES.LoginPin}
+            component={LoginPinScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name={ROUTES.ActivatePin}
+            component={ActivatePinScreen}
+            options={{ headerShown: false }}
+          />
           <Stack.Screen name={ROUTES.EcdhBackup} component={EcdhBackupScreen} />
-          <Stack.Screen name={ROUTES.Settings} component={SettingsScreen} />
+          <Stack.Screen
+            name={ROUTES.Settings}
+            component={SettingsScreen}
+            options={{ headerShown: false }}
+          />
           <Stack.Screen name={ROUTES.General} component={GeneralScreen} />
           <Stack.Screen name={ROUTES.ChangePin} component={ChangePinScreen} />
-          <Stack.Screen name={ROUTES.QRScanner} component={QRScannerScreen} />
+          <Stack.Screen
+            name={ROUTES.QRScanner}
+            component={QRScannerScreen}
+            options={{ headerShown: false }}
+          />
           <Stack.Screen
             name={ROUTES.Home}
             component={HomeScreen}
@@ -98,6 +115,7 @@ export const AppNavigator: React.FC = () => {
         </Stack.Navigator>
 
         <AmbientOrbsBackground compact />
+        <WalletRelayRequestModal />
       </View>
     </NavigationContainer>
   );
