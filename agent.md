@@ -24,6 +24,12 @@ Keep updates short and focused on: changed areas, verification commands, and cav
 - `yarn start`
 - `yarn android`
 
+## Session 2026-05-24 agent-doc ui exactness guardrail
+Summary: Tightened agent instructions so UI/screen-only requests stay scoped to the named screen, preserve flow/business invariants, reuse existing design tokens/primitives, and avoid off-pattern redesigns or hardcoded copy changes.
+Changed files: AGENTS.md; agent.md
+Validation: Documentation update only (no code/test run).
+Next steps: Apply these guardrails on future screen refreshes; when UI requests are ambiguous, choose the smallest visual diff that satisfies the prompt.
+
 ## Session 2026-04-15 createpool-hotfix
 Summary: Added createPool ABI minReputation support, auto card-attestation verify attempt on device-not-verified precheck, clearer on-chain verification error, and SafeAreaView migration.
 Changed files: chainora-dapp/.env.contracts.example, chainora-dapp/.env.local, chainora-dapp/src/contract/chainoraAbis.ts, chainora-dapp/src/contract/chainoraProtocol.ts, chainora-dapp/src/pages/create-group.tsx, chainora-dapp/src/pages/dashboard.tsx, chainora-native-app/src/services/qrLoginService.ts, chainora-native-app/src/screens/QRScannerScreen.tsx

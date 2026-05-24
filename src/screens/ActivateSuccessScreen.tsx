@@ -1,20 +1,28 @@
-import React, { useCallback, useMemo, useRef } from 'react';
-import { Alert, StatusBar, StyleSheet, Text, View, Pressable, ScrollView } from 'react-native';
+import React, { useCallback, useRef } from 'react';
+import { Alert, ScrollView, StatusBar, StyleSheet, Text, View, Pressable } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
-import { AppButton } from '../components/AppButton';
 import { useSettings } from '../features/settings';
-import { ROUTES } from '../navigation/routes/routes';
 import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
-import type { ThemeTokens } from '../types/theme/colors';
+import { ROUTES } from '../navigation/routes/routes';
+import {
+  DISPLAY_FONT,
+  WALLET_COLORS,
+  WalletAuras,
+  WalletButton,
+  WalletHeroCard,
+  WalletPanel,
+  buildWalletScreenStyles,
+} from '../components/ui/walletDesign';
 
 type Props = NativeStackScreenProps<RootStackParamList, typeof ROUTES.ActivateSuccess>;
 
-export const ActivateSuccessScreen: React.FC<Props> = ({ route, navigation }) => {
-  const { resolvedTheme, t, themeTokens } = useSettings();
-  const styles = useMemo(() => createStyles(themeTokens), [themeTokens]);
+const screenBase = buildWalletScreenStyles();
+
+const ActivateSuccessScreen: React.FC<Props> = ({ route, navigation }) => {
+  const { resolvedTheme, t } = useSettings();
   const { ethAddress, publicKeyHex, mode } = route.params;
   const hasNavigatedRef = useRef(false);
 
@@ -41,241 +49,147 @@ export const ActivateSuccessScreen: React.FC<Props> = ({ route, navigation }) =>
     });
   }, [ethAddress, mode, navigation, publicKeyHex]);
 
-  const handleCopyPress = useCallback(() => {
-    Alert.alert(t('activateSuccessWalletAddressTitle'), ethAddress);
-  }, [ethAddress, t]);
-
   return (
-    <View style={styles.container}>
+    <View style={screenBase.screen}>
       <StatusBar
         barStyle={resolvedTheme === 'light' ? 'dark-content' : 'light-content'}
-        backgroundColor={themeTokens.background}
+        backgroundColor={WALLET_COLORS.background}
       />
-      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
-        <View style={styles.frame}>
-          <ScrollView
-            contentContainerStyle={styles.frameContent}
-            showsVerticalScrollIndicator={false}
-            bounces
-          >
-            <View style={styles.centerGroup}>
-              <View style={styles.successOuter}>
-                <View style={styles.successInner}>
-                  <Ionicons name="checkmark-circle-outline" size={44} color={themeTokens.success} />
-                </View>
+      <SafeAreaView style={screenBase.safeArea} edges={['top', 'bottom']}>
+        <WalletAuras />
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <View style={styles.successBadgeWrap}>
+            <View style={styles.successBadgeRing}>
+              <View style={styles.successBadgeCore}>
+                <Ionicons name="checkmark" size={34} color={WALLET_COLORS.success} />
               </View>
-              <Text style={styles.title}>{t('activateSuccessWalletActivated')}</Text>
-              <Text style={styles.subtitle}>{t('activateSuccessCardReady')}</Text>
             </View>
+          </View>
 
-            <View style={styles.divider} />
+          <Text style={styles.title}>{t('activateSuccessWalletActivated')}</Text>
+          <Text style={styles.subtitle}>{t('activateSuccessCardReady')}</Text>
 
-            <View style={styles.walletCard}>
-              <View style={styles.cardTapIconWrap}>
-                <Ionicons name="wifi-outline" size={21} color={themeTokens.foregroundMuted} style={styles.cardTapIcon} />
-              </View>
-              <View style={styles.chip} />
-              <Text style={styles.brand}>CHAINORA</Text>
-              <Text style={styles.shortAddress}>{shortAddress}</Text>
-            </View>
+          <WalletHeroCard addressText={shortAddress} style={styles.heroCard} />
 
-            <View style={styles.addressBox}>
-              <View style={styles.addressTextWrap}>
-                <Text style={styles.addressLabel}>{t('activateSuccessAddressLabel')}</Text>
-                <Text style={styles.addressValue}>{ethAddress}</Text>
-              </View>
-              <Pressable style={styles.copyButton} accessibilityRole="button" onPress={handleCopyPress}>
-                <Ionicons name="copy-outline" size={22} color={themeTokens.foregroundMuted} />
-              </Pressable>
-            </View>
+          <WalletPanel style={styles.addressCard}>
+            <Text style={styles.addressLabel}>{t('activateSuccessAddressLabel')}</Text>
+            <Text style={styles.addressValue}>{ethAddress}</Text>
+            <Pressable
+              style={styles.copyButton}
+              onPress={() => Alert.alert(t('activateSuccessWalletAddressTitle'), ethAddress)}
+            >
+              <Ionicons name="copy-outline" size={16} color={WALLET_COLORS.text} />
+              <Text style={styles.copyButtonText}>View</Text>
+            </Pressable>
+          </WalletPanel>
 
-            <View style={styles.noteBox}>
-              <Text style={styles.noteText}>
-                {t('activateSuccessShareNote')}
-              </Text>
-            </View>
+          <WalletPanel style={styles.noteCard}>
+            <Text style={styles.noteText}>{t('activateSuccessShareNote')}</Text>
+          </WalletPanel>
 
-            <View style={styles.footerActions}>
-              <AppButton label={t('commonDone')} onPress={goToHome} />
-            </View>
-
-            <Text style={styles.footerBrand}>chainora</Text>
-          </ScrollView>
-        </View>
+          <View style={styles.actions}>
+            <WalletButton label={t('commonDone')} onPress={goToHome} />
+          </View>
+        </ScrollView>
       </SafeAreaView>
     </View>
   );
 };
 
-const createStyles = (theme: ThemeTokens) => StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: theme.background,
+const styles = StyleSheet.create({
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 28,
+    paddingBottom: 24,
+    gap: 18,
   },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  frame: {
-    flex: 1,
-    borderRadius: 44,
-    borderWidth: 1,
-    borderColor: theme.border,
-    backgroundColor: theme.surface,
-    paddingTop: 22,
-    paddingHorizontal: 18,
-    paddingBottom: 22,
-  },
-  frameContent: {
-    paddingBottom: 8,
-  },
-  centerGroup: {
+  successBadgeWrap: {
     alignItems: 'center',
   },
-  successOuter: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: theme.glow,
+  successBadgeRing: {
+    width: 118,
+    height: 118,
+    borderRadius: 59,
     borderWidth: 1,
-    borderColor: theme.success,
+    borderColor: 'rgba(52, 211, 153, 0.28)',
+    backgroundColor: 'rgba(52, 211, 153, 0.08)',
+    alignItems: 'center',
     justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 22,
   },
-  successInner: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+  successBadgeCore: {
+    width: 78,
+    height: 78,
+    borderRadius: 39,
+    borderWidth: 1,
+    borderColor: 'rgba(52, 211, 153, 0.38)',
+    backgroundColor: 'rgba(52, 211, 153, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   title: {
-    fontSize: 52,
-    lineHeight: 56,
+    color: WALLET_COLORS.text,
+    fontSize: 32,
+    lineHeight: 36,
     fontWeight: '800',
-    color: theme.foreground,
+    fontFamily: DISPLAY_FONT,
     textAlign: 'center',
-    letterSpacing: -1,
+    letterSpacing: -0.8,
   },
   subtitle: {
-    marginTop: 12,
-    fontSize: 20,
-    lineHeight: 28,
-    fontWeight: '500',
-    color: theme.foregroundMuted,
+    color: WALLET_COLORS.textMuted,
+    fontSize: 15,
+    lineHeight: 22,
     textAlign: 'center',
+    paddingHorizontal: 8,
   },
-  divider: {
-    height: 1,
-    backgroundColor: theme.border,
-    marginTop: 34,
-  },
-  walletCard: {
-    marginTop: 24,
-    borderRadius: 18,
-    minHeight: 160,
-    padding: 16,
-    backgroundColor: theme.surfaceHighlight,
-    borderWidth: 1,
-    borderColor: theme.border,
-  },
-  cardTapIconWrap: {
-    alignItems: 'flex-end',
-    marginBottom: 26,
-  },
-  cardTapIcon: {
-    transform: [{ rotate: '-90deg' }],
-  },
-  chip: {
-    width: 56,
-    height: 40,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: theme.border,
-    backgroundColor: theme.surface,
-    marginBottom: 20,
-  },
-  brand: {
-    color: theme.foregroundMuted,
-    fontSize: 22,
-    fontWeight: '800',
-    letterSpacing: 2,
-  },
-  shortAddress: {
+  heroCard: {
     marginTop: 8,
-    color: theme.foregroundMuted,
-    fontSize: 30,
-    lineHeight: 34,
-    fontWeight: '500',
-    letterSpacing: -0.8,
   },
-  addressBox: {
-    marginTop: 20,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: theme.border,
-    backgroundColor: theme.surfaceHighlight,
-    paddingVertical: 16,
-    paddingLeft: 16,
-    paddingRight: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  addressTextWrap: {
-    flex: 1,
+  addressCard: {
+    padding: 16,
+    gap: 10,
   },
   addressLabel: {
-    color: theme.foregroundMuted,
-    fontSize: 12,
-    marginBottom: 8,
-    fontWeight: '600',
+    color: WALLET_COLORS.textSoft,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
   },
   addressValue: {
-    color: theme.foreground,
-    fontSize: 30,
-    lineHeight: 36,
-    fontWeight: '700',
-    letterSpacing: -0.8,
+    color: WALLET_COLORS.text,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '600',
   },
   copyButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 13,
-    backgroundColor: theme.surface,
-    borderWidth: 1,
-    borderColor: theme.border,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-  },
-  noteBox: {
-    marginTop: 14,
-    borderRadius: 16,
+    gap: 6,
+    borderRadius: 999,
     borderWidth: 1,
-    borderColor: theme.border,
-    backgroundColor: theme.surface,
-    paddingVertical: 16,
-    paddingHorizontal: 18,
+    borderColor: WALLET_COLORS.border,
+    backgroundColor: WALLET_COLORS.surfaceSoft,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  copyButtonText: {
+    color: WALLET_COLORS.text,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  noteCard: {
+    padding: 16,
   },
   noteText: {
-    textAlign: 'center',
-    color: theme.foregroundMuted,
+    color: WALLET_COLORS.textMuted,
     fontSize: 12,
     lineHeight: 20,
-    fontWeight: '500',
+    textAlign: 'center',
   },
-  footerActions: {
-    marginTop: 16,
-    width: '100%',
-  },
-  footerBrand: {
-    marginTop: 14,
-    color: theme.foregroundMuted,
-    fontSize: 22,
-    fontWeight: '800',
-    letterSpacing: 1.2,
+  actions: {
+    marginTop: 6,
   },
 });
 

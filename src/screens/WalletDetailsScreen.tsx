@@ -1,17 +1,15 @@
 import React, { useCallback } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
-import { useSettings } from '../../features/settings';
+import { useSettings } from '../features/settings';
+import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
+import { WALLET_COLORS } from '../components/ui/walletDesign';
 
-type WalletDetailsDialogProps = {
-  visible: boolean;
-  onClose: () => void;
-  address: string;
-  publicKeyHex: string | undefined;
-  networkName: string;
-};
+type Props = NativeStackScreenProps<RootStackParamList, 'WalletDetails'>;
 
 const ACCENT = {
   overlay: 'rgba(3, 5, 9, 0.82)',
@@ -28,14 +26,9 @@ const ACCENT = {
   signalBright: '#2897FF',
 };
 
-export const WalletDetailsDialog: React.FC<WalletDetailsDialogProps> = ({
-  visible,
-  onClose,
-  address,
-  publicKeyHex,
-  networkName,
-}) => {
-  const { t } = useSettings();
+const WalletDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
+  const { address, publicKeyHex, networkName } = route.params;
+  const { t, resolvedTheme } = useSettings();
 
   const copyAddress = useCallback(() => {
     Clipboard.setString(address);
@@ -49,23 +42,30 @@ export const WalletDetailsDialog: React.FC<WalletDetailsDialogProps> = ({
   }, [publicKeyHex]);
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <View style={styles.backdrop}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-
-        <View style={styles.dialog}>
-          <View style={styles.grab} />
-
+    <View style={styles.screen}>
+      <StatusBar
+        barStyle={resolvedTheme === 'light' ? 'dark-content' : 'light-content'}
+        backgroundColor={WALLET_COLORS.background}
+      />
+      <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
+        <View style={styles.screenContent}>
           <ScrollView
             style={styles.scrollArea}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
           >
+            <View style={styles.headerRow}>
+              <Pressable style={styles.headerIcon} onPress={() => navigation.goBack()}>
+                <Ionicons name="chevron-back" size={16} color={ACCENT.textSecondary} />
+              </Pressable>
+              <Text style={styles.headerTitle}>{t('homeWalletDetailsTitle')}</Text>
+              <View style={styles.headerSpacer} />
+            </View>
+
             <View style={styles.head}>
               <View style={styles.iconWrap}>
                 <Ionicons name="wallet-outline" size={24} color={ACCENT.signalBright} />
               </View>
-              <Text style={styles.title}>{t('homeWalletDetailsTitle')}</Text>
               <Text style={styles.subtitle}>{t('walletDetailsCardSubtitle')}</Text>
             </View>
 
@@ -131,50 +131,57 @@ export const WalletDetailsDialog: React.FC<WalletDetailsDialogProps> = ({
               <Text style={styles.networkBadgeText}>{networkName}</Text>
             </View>
 
-            <Pressable style={styles.primaryButton} onPress={onClose}>
+            <Pressable style={styles.primaryButton} onPress={() => navigation.goBack()}>
               <Text style={styles.primaryButtonText}>{t('commonDone')}</Text>
             </Pressable>
           </ScrollView>
         </View>
-      </View>
-    </Modal>
+      </SafeAreaView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  backdrop: {
+  screen: {
     flex: 1,
-    backgroundColor: ACCENT.overlay,
+    backgroundColor: WALLET_COLORS.background,
+  },
+  screenContent: {
+    flex: 1,
+    backgroundColor: ACCENT.card,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 12,
+  },
+  headerIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 12,
-  },
-  dialog: {
-    width: '100%',
-    maxWidth: 390,
-    maxHeight: '90%',
-    borderRadius: 22,
     borderWidth: 1,
-    borderColor: ACCENT.border,
-    backgroundColor: ACCENT.card,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 20 },
-    shadowOpacity: 0.5,
-    shadowRadius: 32,
-    elevation: 24,
-    overflow: 'hidden',
+    borderColor: ACCENT.borderStrong,
+    backgroundColor: ACCENT.surfaceAlt,
   },
-  grab: {
-    width: 38,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: ACCENT.borderStrong,
-    alignSelf: 'center',
-    marginTop: 8,
-    marginBottom: 4,
+  headerTitle: {
+    flex: 1,
+    color: ACCENT.text,
+    fontSize: 18,
+    fontWeight: '800',
+    letterSpacing: -0.4,
+    textAlign: 'center',
+  },
+  headerSpacer: {
+    width: 30,
+    height: 30,
   },
   scrollArea: {
-    flexGrow: 0,
+    flex: 1,
   },
   scrollContent: {
     paddingHorizontal: 16,
@@ -200,12 +207,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 16,
     elevation: 4,
-  },
-  title: {
-    color: ACCENT.text,
-    fontSize: 21,
-    fontWeight: '800',
-    letterSpacing: -0.4,
   },
   subtitle: {
     color: ACCENT.textLow,
@@ -377,4 +378,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default WalletDetailsDialog;
+export default WalletDetailsScreen;

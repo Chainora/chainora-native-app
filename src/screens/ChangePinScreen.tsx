@@ -1,31 +1,59 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { SafeAreaView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { StatusBar, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Ionicons } from '@react-native-vector-icons/ionicons';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { AppButton } from '../components/AppButton';
-import { PinKeypad } from '../components/ui/PinKeypad';
-import { ScanDialog } from '../components/ui/ScanDialog';
-import { StepProgressBar } from '../components/ui/StepProgressBar';
+import {
+  PinGhostButton,
+  PIN_COLORS,
+  PinAuras,
+  PinTopBar,
+} from '../components/ui/pinTheme';
+import { PinInput } from '../components/ui/PinInput';
 import { useNfcEnabled } from '../features/nfc/hooks/useNfcEnabled';
 import { useSettings } from '../features/settings';
 import { useToast } from '../features/toast';
-import { ROUTES } from '../navigation/routes/routes';
 import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
+import { ROUTES } from '../navigation/routes/routes';
 import { changeWalletPin, type WalletActionResult } from '../services/cardService';
-import type { ThemeTokens } from '../types/theme/colors';
+import { registerScanCardFlow } from '../services/scanCardFlowRegistry';
 
 type Props = NativeStackScreenProps<RootStackParamList, typeof ROUTES.ChangePin>;
-
 type StepKey = 'old' | 'next' | 'confirm';
 
 const PIN_LENGTH = 4;
 const TOTAL_STEPS = 3;
+const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: PIN_COLORS.background,
+  },
+  safeArea: {
+    flex: 1,
+  },
+  content: {
+    flex: 1,
+    paddingHorizontal: 18,
+    paddingTop: 6,
+    paddingBottom: 14,
+  },
+  stepText: {
+    color: PIN_COLORS.textSoft,
+    fontSize: 10,
+    letterSpacing: 1.5,
+    fontWeight: '600',
+  },
+  footerStatus: {
+    color: PIN_COLORS.textSoft,
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: 'center',
+  },
+});
 
-export const ChangePinScreen: React.FC<Props> = ({ navigation }) => {
+const ChangePinScreen: React.FC<Props> = ({ navigation }) => {
   const { isEnabled } = useNfcEnabled();
-  const { resolvedTheme, t, themeTokens } = useSettings();
-  const styles = useMemo(() => createStyles(themeTokens), [themeTokens]);
+  const { resolvedTheme, t } = useSettings();
   const { showToast } = useToast();
   const [stepIndex, setStepIndex] = useState(0);
   const [pins, setPins] = useState<Record<StepKey, string>>({
@@ -35,25 +63,20 @@ export const ChangePinScreen: React.FC<Props> = ({ navigation }) => {
   });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState(t('changePinStatusStart'));
-  const [scanVisible, setScanVisible] = useState(false);
 
-  const stepMeta: Array<{ key: StepKey; title: string; subtitle: string }> = useMemo(
+  const stepMeta = useMemo(
     () => [
-      { key: 'old', title: t('changePinCurrentTitle'), subtitle: t('changePinCurrentSubtitle') },
-      { key: 'next', title: t('changePinNewTitle'), subtitle: t('changePinNewSubtitle') },
-      { key: 'confirm', title: t('changePinConfirmTitle'), subtitle: t('changePinConfirmSubtitle') },
+      { key: 'old' as const, title: t('changePinCurrentTitle'), subtitle: t('changePinCurrentSubtitle') },
+      { key: 'next' as const, title: t('changePinNewTitle'), subtitle: t('changePinNewSubtitle') },
+      { key: 'confirm' as const, title: t('changePinConfirmTitle'), subtitle: t('changePinConfirmSubtitle') },
     ],
     [t],
   );
 
   const currentStep = stepMeta[stepIndex];
   const currentPin = pins[currentStep.key];
-
   const canSubmit = currentPin.length === PIN_LENGTH;
-
-  const progressMessage = useMemo(() => {
-    return `${currentStep.title} — ${currentStep.subtitle}`;
-  }, [currentStep.subtitle, currentStep.title]);
+  const submitLabel = stepIndex < 2 ? t('changePinPrimaryContinue') : t('changePinPrimaryAction');
 
   const handleDigit = useCallback(
     (digit: string) => {
@@ -80,15 +103,14 @@ export const ChangePinScreen: React.FC<Props> = ({ navigation }) => {
 
   const handleFlowSuccess = useCallback(
     ({ result }: { result: WalletActionResult }) => {
-      setScanVisible(false);
-
       if (!result.ok) {
         setErrorMessage(result.statusWord ? `${result.message} (SW: ${result.statusWord})` : result.message);
+        navigation.goBack();
         return;
       }
 
       showToast(t('changePinSuccess'), 'success');
-      navigation.goBack();
+      navigation.pop(2);
     },
     [navigation, showToast, t],
   );
@@ -117,159 +139,59 @@ export const ChangePinScreen: React.FC<Props> = ({ navigation }) => {
 
     setErrorMessage(null);
     setStatusMessage(t('changePinStatusSwipe'));
-    setScanVisible(true);
+    const flowId = registerScanCardFlow({
+      isNfcEnabled: isEnabled,
+      onShowToast: showToast,
+      flowType: 'flow',
+      prefilledPin: pins.old,
+      onFlowScan: executeChangePin,
+      onSuccess: handleFlowSuccess,
+    });
+    navigation.navigate(ROUTES.ScanCard, { flowId });
   }, [canSubmit, pins.confirm, pins.next, pins.old, stepIndex, stepMeta, t]);
 
   return (
-    <View style={styles.container}>
+    <View style={styles.screen}>
       <StatusBar
         barStyle={resolvedTheme === 'light' ? 'dark-content' : 'light-content'}
-        backgroundColor={themeTokens.background}
+        backgroundColor={PIN_COLORS.background}
       />
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+        <PinAuras />
         <View style={styles.content}>
-          <Text style={styles.stepSubtitle}>{`${t('commonStep')} ${stepIndex + 1} ${t('commonOf')} ${TOTAL_STEPS} — ${t('changePinStepSuffix')}`}</Text>
-          <StepProgressBar currentStep={stepIndex + 1} totalSteps={TOTAL_STEPS} />
+          <PinTopBar
+            onBack={() => navigation.goBack()}
+            right={(
+              <Text style={styles.stepText}>
+                {`${t('commonStep').toUpperCase()} ${stepIndex + 1}/${TOTAL_STEPS}`}
+              </Text>
+            )}
+          />
 
-          <View style={styles.header}>
-            <View style={styles.iconWrapper}>
-              <Ionicons name="key-outline" size={42} color={themeTokens.primary} />
-            </View>
-            <Text style={styles.title}>{currentStep.title}</Text>
-            <Text style={styles.bodyText}>{progressMessage}</Text>
-          </View>
-
-          <View style={styles.dotsRow}>
-            {Array.from({ length: PIN_LENGTH }, (_, index) => (
-              <View key={index} style={[styles.dot, index < currentPin.length && styles.dotFilled]} />
-            ))}
-          </View>
-
-          <View style={styles.keypadWrapper}>
-            <PinKeypad
-              onDigit={handleDigit}
-              onBackspace={handleBackspace}
-              onSubmit={handleSubmit}
-              submitDisabled={!canSubmit}
-            />
-          </View>
-
-          <Text style={styles.statusText}>{statusMessage}</Text>
-          {errorMessage && <Text style={styles.errorText}>{errorMessage}</Text>}
-
-          <View style={styles.footerButtons}>
-            <AppButton label={t('commonCancel')} variant="text" onPress={() => navigation.goBack()} />
-          </View>
+          <PinInput
+            variant="screen"
+            value={currentPin}
+            onDigit={handleDigit}
+            onBackspace={handleBackspace}
+            onSubmit={handleSubmit}
+            submitDisabled={!canSubmit}
+            title={currentStep.title}
+            subtitle={currentStep.subtitle}
+            ctaLabel={submitLabel}
+            heroIconName="key-outline"
+            progressCurrent={stepIndex + 1}
+            progressTotal={TOTAL_STEPS}
+            progressLabel={`${t('commonStep')} ${stepIndex + 1}/${TOTAL_STEPS}`}
+            supportingText={statusMessage}
+            errorMessage={errorMessage}
+            afterActionSlot={
+              <PinGhostButton label={t('commonCancel')} onPress={() => navigation.goBack()} />
+            }
+          />
         </View>
-
-        <ScanDialog
-          visible={scanVisible}
-          isNfcEnabled={isEnabled}
-          onClose={() => setScanVisible(false)}
-          onSuccess={handleFlowSuccess}
-          onShowToast={showToast}
-          types="flow"
-          prefilledPin={pins.old}
-          onFlowScan={executeChangePin}
-        />
       </SafeAreaView>
     </View>
   );
 };
-
-const createStyles = (theme: ThemeTokens) => StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: theme.background,
-  },
-  safeArea: {
-    flex: 1,
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 6,
-    paddingBottom: 16,
-    alignItems: 'center',
-  },
-  stepSubtitle: {
-    fontSize: theme.typography.subtext,
-    color: theme.foregroundMuted,
-    marginBottom: 4,
-    alignSelf: 'flex-start',
-  },
-  header: {
-    alignItems: 'center',
-    marginTop: 2,
-    marginBottom: 12,
-  },
-  iconWrapper: {
-    width: 78,
-    height: 78,
-    borderRadius: 20,
-    backgroundColor: theme.surfaceHighlight,
-    borderWidth: 1,
-    borderColor: theme.primaryLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 10,
-    shadowColor: theme.shadow,
-    shadowOffset: { width: 0, height: 14 },
-    shadowOpacity: 0.22,
-    shadowRadius: 24,
-    elevation: 10,
-  },
-  title: {
-    fontSize: theme.typography.title,
-    lineHeight: 28,
-    fontWeight: '800',
-    color: theme.foreground,
-    marginBottom: 6,
-    textAlign: 'center',
-  },
-  bodyText: {
-    fontSize: theme.typography.subtext,
-    color: theme.foregroundMuted,
-    textAlign: 'center',
-    paddingHorizontal: 16,
-  },
-  dotsRow: {
-    flexDirection: 'row',
-    gap: 16,
-    marginBottom: 10,
-  },
-  dot: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: theme.border,
-  },
-  dotFilled: {
-    backgroundColor: theme.primary,
-    borderColor: theme.primaryLight,
-  },
-  keypadWrapper: {
-    marginTop: 4,
-    marginBottom: 12,
-  },
-  statusText: {
-    color: '#9AA5BA',
-    fontSize: theme.typography.subtext,
-    textAlign: 'center',
-    minHeight: 18,
-  },
-  errorText: {
-    color: theme.danger,
-    fontSize: theme.typography.subtext,
-    fontWeight: '600',
-    textAlign: 'center',
-    minHeight: 22,
-  },
-  footerButtons: {
-    width: '100%',
-    marginTop: 12,
-  },
-});
 
 export default ChangePinScreen;

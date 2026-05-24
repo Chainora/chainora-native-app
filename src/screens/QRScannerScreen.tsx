@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Linking,
-  Modal,
   Pressable,
   StyleSheet,
   Text,
@@ -17,9 +16,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { Camera, useCameraDevice, useCameraPermission, useCodeScanner } from 'react-native-vision-camera';
 
-import { AppButton } from '../components/AppButton';
 import { PinInput } from '../components/ui/PinInput';
-import { ScanDialog } from '../components/ui/ScanDialog';
+import { PinGhostButton } from '../components/ui/pinTheme';
+import { useAuth } from '../features/auth';
 import { useNfcEnabled } from '../features/nfc/hooks/useNfcEnabled';
 import { useSettings } from '../features/settings';
 import { ROUTES } from '../navigation/routes/routes';
@@ -28,6 +27,7 @@ import { withVerifiedWalletSession, type WalletActionResult } from '../services/
 import { parseWalletRelayPairingUri } from '../services/walletRelayUri';
 import { walletRelaySessionManager } from '../services/walletRelaySessionManager';
 import type { WalletRelayPairingPayload } from '../services/walletRelayProtocol';
+import { registerScanCardFlow } from '../services/scanCardFlowRegistry';
 
 type Props = NativeStackScreenProps<RootStackParamList, typeof ROUTES.QRScanner>;
 const PIN_LENGTH = 4;
@@ -81,6 +81,7 @@ const toFriendlyPairingError = (
 };
 
 const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
+  const { session } = useAuth();
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice('back');
   const { isEnabled } = useNfcEnabled();
@@ -91,8 +92,6 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
   const [scanError, setScanError] = useState('');
   const [pairingPayload, setPairingPayload] = useState<WalletRelayPairingPayload | null>(null);
   const [pin, setPin] = useState('');
-  const [pinDialogVisible, setPinDialogVisible] = useState(false);
-  const [scanDialogVisible, setScanDialogVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [resolvedCardAddress, setResolvedCardAddress] = useState('');
   const pairingFlowLockRef = useRef(false);
@@ -142,8 +141,6 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
   const resetScanState = useCallback(() => {
     setPairingPayload(null);
     setPin('');
-    setPinDialogVisible(false);
-    setScanDialogVisible(false);
     setResolvedCardAddress('');
     setSubmitting(false);
     setScanError('');
@@ -156,7 +153,7 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
   const codeScanner = useCodeScanner({
     codeTypes: ['qr'],
     onCodeScanned: codes => {
-      if (pairingPayload || !codes.length || submitting || scanDialogVisible) {
+      if (pairingPayload || !codes.length || submitting) {
         return;
       }
 
@@ -180,7 +177,6 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
           version: parsed.version,
         });
         setPairingPayload(parsed);
-        setPinDialogVisible(true);
         setScanError('');
       } catch (error) {
         console.warn('[wallet-relay][scanner] qr.parse_failed', {
@@ -225,9 +221,37 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
     }
 
     setScanError('');
-    setPinDialogVisible(false);
     setSubmitting(true);
-    setScanDialogVisible(true);
+    const flowId = registerScanCardFlow({
+      isNfcEnabled: isEnabled,
+      flowType: 'flow',
+      prefilledPin: pin,
+      onFlowScan: executePairFlow,
+      onSuccess: async ({ result }: { result: WalletActionResult }) => {
+        const cardAddress = (result.ethAddress || resolvedCardAddress || '').trim();
+        console.log('[wallet-relay][scanner] pair.success', {
+          sessionIdPreview: pairingPayload?.sessionId.slice(0, 8) ?? '',
+          cardAddress,
+        });
+
+        setSubmitting(false);
+        setScanError('');
+        if (pairingFlowLockRef.current) {
+          pairingFlowLockRef.current = false;
+          walletRelaySessionManager.endPairingFlow();
+        }
+
+        navigation.pop(2);
+      },
+      onClose: () => {
+        setSubmitting(false);
+        if (pairingFlowLockRef.current) {
+          pairingFlowLockRef.current = false;
+          walletRelaySessionManager.endPairingFlow();
+        }
+      },
+    });
+    navigation.navigate(ROUTES.ScanCard, { flowId });
   }, [canSubmitPin, pairingPayload]);
 
   const executePairFlow = useCallback(async (setStageStatus: (status: string) => void): Promise<WalletActionResult> => {
@@ -270,7 +294,7 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
         sessionIdPreview: `${pairingPayload.sessionId.slice(0, 8)}...`,
         cardAddress: result.address,
       });
-      walletRelaySessionManager.setActiveAccount(result.address || route.params.ethAddress);
+      walletRelaySessionManager.setActiveAccount(result.address || route.params.ethAddress || session?.address || '');
       setResolvedCardAddress(result.address);
 
       return {
@@ -292,38 +316,7 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
         message: friendly,
       };
     }
-  }, [pairingPayload, pin, route.params.ethAddress, t]);
-
-  const handlePairFlowSuccess = useCallback(async ({ result }: { result: WalletActionResult }) => {
-    const cardAddress = (result.ethAddress || resolvedCardAddress || '').trim();
-    console.log('[wallet-relay][scanner] pair.success', {
-      sessionIdPreview: pairingPayload?.sessionId.slice(0, 8) ?? '',
-      cardAddress,
-    });
-
-    setSubmitting(false);
-    setScanDialogVisible(false);
-    setPinDialogVisible(false);
-    setScanError('');
-    if (pairingFlowLockRef.current) {
-      pairingFlowLockRef.current = false;
-      walletRelaySessionManager.endPairingFlow();
-    }
-
-    navigation.goBack();
-  }, [navigation, pairingPayload?.sessionId, resolvedCardAddress]);
-
-  const handleScanDialogClose = useCallback(() => {
-    setScanDialogVisible(false);
-    setSubmitting(false);
-    if (pairingFlowLockRef.current) {
-      pairingFlowLockRef.current = false;
-      walletRelaySessionManager.endPairingFlow();
-    }
-    if (pairingPayload) {
-      setPinDialogVisible(true);
-    }
-  }, [pairingPayload]);
+  }, [pairingPayload, pin, route.params.ethAddress, session?.address, t]);
 
   const handlePasteUri = useCallback(async () => {
     try {
@@ -331,7 +324,6 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
       const parsed = parseWalletRelayPairingUri(raw);
       setPairingPayload(parsed);
       setScanError('');
-      setPinDialogVisible(true);
     } catch (error) {
       setScanError(toFriendlyPairingError(error, t));
     }
@@ -354,7 +346,7 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
             <Camera
               style={StyleSheet.absoluteFill}
               device={device}
-              isActive={!pinDialogVisible && !scanDialogVisible}
+              isActive={!pairingPayload}
               codeScanner={codeScanner}
             />
             <View style={styles.cameraOverlay} />
@@ -469,44 +461,37 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
           </>
         ) : null}
 
-        <Modal visible={pinDialogVisible} transparent animationType="fade" onRequestClose={() => setPinDialogVisible(false)}>
-          <View style={styles.pinDialogBackdrop}>
-            <View style={styles.pinDialogCard}>
-              <Text style={styles.pinDialogTitle}>{t('qrPinDialogTitle')}</Text>
-              <Text style={styles.pinDialogSub}>{t('qrPinDialogSubtitle')}</Text>
-              <PinInput value={pin} onChange={setPin} disabled={submitting} length={PIN_LENGTH} />
-              <View style={styles.pinDialogActions}>
-                <AppButton
-                  label={t('commonCancel')}
-                  variant="text"
-                  onPress={() => {
-                    setPinDialogVisible(false);
-                    setSubmitting(false);
-                  }}
-                />
-                <AppButton
-                  label={submitting ? t('qrPairingInProgress') : t('sendConfirm')}
-                  onPress={() => {
-                    handlePairConfirm().catch(error => {
-                      console.warn('[wallet-relay][scanner] pair.confirm_failed', error);
-                    });
-                  }}
-                  disabled={!canSubmitPin || submitting}
-                />
-              </View>
+        {pairingPayload ? (
+          <View style={styles.pairingSheetBackdrop}>
+            <View style={styles.pairingSheetCard}>
+              <PinInput
+                value={pin}
+                onChange={setPin}
+                onSubmit={() => {
+                  handlePairConfirm().catch(error => {
+                    console.warn('[wallet-relay][scanner] pair.confirm_failed', error);
+                  });
+                }}
+                disabled={submitting}
+                submitDisabled={!canSubmitPin || submitting}
+                title={t('qrPinDialogTitle')}
+                subtitle={t('qrPinDialogSubtitle')}
+                ctaLabel={submitting ? t('qrPairingInProgress') : t('qrConfirmPairingAction')}
+                heroIconName="qr-code-outline"
+                afterActionSlot={(
+                  <PinGhostButton
+                    label={t('commonCancel')}
+                    onPress={() => {
+                      setPairingPayload(null);
+                      setPin('');
+                      setSubmitting(false);
+                    }}
+                  />
+                )}
+              />
             </View>
           </View>
-        </Modal>
-
-        <ScanDialog
-          visible={scanDialogVisible}
-          isNfcEnabled={isEnabled}
-          onClose={handleScanDialogClose}
-          onSuccess={handlePairFlowSuccess}
-          types="flow"
-          prefilledPin={pin}
-          onFlowScan={executePairFlow}
-        />
+        ) : null}
       </SafeAreaView>
     </View>
   );
@@ -821,34 +806,19 @@ const createStyles = () =>
       fontSize: 14,
       fontWeight: '700',
     },
-    pinDialogBackdrop: {
+    pairingSheetBackdrop: {
       flex: 1,
       backgroundColor: 'rgba(2, 6, 23, 0.68)',
       justifyContent: 'center',
       paddingHorizontal: 16,
     },
-    pinDialogCard: {
+    pairingSheetCard: {
       borderRadius: 18,
       backgroundColor: '#0F172A',
       borderWidth: 1,
       borderColor: '#1E293B',
       padding: 16,
-      gap: 10,
-    },
-    pinDialogTitle: {
-      color: '#F8FAFC',
-      fontSize: 18,
-      fontWeight: '700',
-    },
-    pinDialogSub: {
-      color: '#CBD5E1',
-      fontSize: 13,
-      lineHeight: 18,
-    },
-    pinDialogActions: {
-      flexDirection: 'row',
-      justifyContent: 'flex-end',
-      gap: 8,
+      gap: 12,
     },
   });
 

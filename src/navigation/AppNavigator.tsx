@@ -7,21 +7,33 @@ import {
 } from '@react-navigation/native-stack';
 import { enableScreens } from 'react-native-screens';
 
-import { AmbientOrbsBackground } from '../components/ui/animations/AmbientOrbsBackground';
 import HomeScreen from '../screens/HomeScreen.tsx';
 import WelcomeScreen from '../screens/WelcomeScreen.tsx';
 import LoginPinScreen from '../screens/LoginPinScreen.tsx';
 import ActivatePinScreen from '../screens/ActivatePinScreen.tsx';
 import ActivateSuccessScreen from '../screens/ActivateSuccessScreen.tsx';
+import ScanCardScreen from '../screens/ScanCardScreen';
 import EcdhBackupScreen from '../screens/EcdhBackupScreen.tsx';
 import SettingsScreen from '../screens/SettingsScreen';
 import GeneralScreen from '../screens/GeneralScreen';
 import ChangePinScreen from '../screens/ChangePinScreen';
 import QRScannerScreen from '../screens/QRScannerScreen';
+import SendTransactionScreen from '../screens/SendTransactionScreen';
+import WalletDetailsScreen from '../screens/WalletDetailsScreen';
+import WalletRelayRequestScreen from '../screens/WalletRelayRequestScreen';
+import {
+  AddTokenScreen,
+  ReceiveScreen,
+  SendBtcScreen,
+  SendPickScreen,
+  TokenManageScreen,
+  TouchSignScreen,
+} from '../screens/WalletFlowScreens';
 import Header from '../components/layout/header';
-import { WalletRelayRequestModal } from '../components/ui/WalletRelayRequestModal';
 import { useSettings } from '../features/settings';
+import { walletRelaySessionManager } from '../services/walletRelaySessionManager';
 import type { RootStackParamList } from './routes/rootStackParamList';
+import { navigationRef } from './navigationRef';
 import { ROUTES } from './routes/routes';
 
 enableScreens(true);
@@ -30,6 +42,20 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export const AppNavigator: React.FC = () => {
   const { t, resolvedTheme, themeTokens } = useSettings();
+
+  React.useEffect(() => {
+    return walletRelaySessionManager.subscribe(snapshot => {
+      if (!navigationRef.isReady()) {
+        return;
+      }
+
+      const currentRoute = navigationRef.getCurrentRoute()?.name;
+      const shouldOpen = snapshot.pendingRequests.length > 0 && !snapshot.requestModalSuppressed;
+      if (shouldOpen && currentRoute !== ROUTES.WalletRelayRequest) {
+        navigationRef.navigate(ROUTES.WalletRelayRequest);
+      }
+    });
+  }, []);
 
   const headerMeta: Partial<Record<keyof RootStackParamList, { title: string; subtitle?: string }>> = {
     [ROUTES.LoginPin]: { title: t('headerEnterPinTitle'), subtitle: t('headerEnterPinSubtitle') },
@@ -68,7 +94,7 @@ export const AppNavigator: React.FC = () => {
   };
 
   return (
-    <NavigationContainer theme={navigationTheme}>
+    <NavigationContainer ref={navigationRef} theme={navigationTheme}>
       <View style={styles.navigatorRoot}>
         <Stack.Navigator
           initialRouteName={ROUTES.Welcome}
@@ -89,6 +115,11 @@ export const AppNavigator: React.FC = () => {
             component={ActivatePinScreen}
             options={{ headerShown: false }}
           />
+          <Stack.Screen
+            name={ROUTES.ScanCard}
+            component={ScanCardScreen}
+            options={{ headerShown: false, animation: 'none' }}
+          />
           <Stack.Screen name={ROUTES.EcdhBackup} component={EcdhBackupScreen} />
           <Stack.Screen
             name={ROUTES.Settings}
@@ -108,14 +139,56 @@ export const AppNavigator: React.FC = () => {
             options={{ headerShown: false }}
           />
           <Stack.Screen
+            name={ROUTES.SendTransaction}
+            component={SendTransactionScreen}
+            options={{ headerShown: false, animation: 'none' }}
+          />
+          <Stack.Screen
+            name={ROUTES.WalletDetails}
+            component={WalletDetailsScreen}
+            options={{ headerShown: false, animation: 'none' }}
+          />
+          <Stack.Screen
+            name={ROUTES.WalletRelayRequest}
+            component={WalletRelayRequestScreen}
+            options={{ headerShown: false, animation: 'none' }}
+          />
+          <Stack.Screen
+            name={ROUTES.SendPick}
+            component={SendPickScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name={ROUTES.SendBtc}
+            component={SendBtcScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name={ROUTES.Receive}
+            component={ReceiveScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name={ROUTES.TouchSign}
+            component={TouchSignScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name={ROUTES.TokenManage}
+            component={TokenManageScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name={ROUTES.AddToken}
+            component={AddTokenScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
             name={ROUTES.ActivateSuccess}
             component={ActivateSuccessScreen}
             options={{ headerShown: false }}
           />
         </Stack.Navigator>
-
-        <AmbientOrbsBackground compact />
-        <WalletRelayRequestModal />
       </View>
     </NavigationContainer>
   );

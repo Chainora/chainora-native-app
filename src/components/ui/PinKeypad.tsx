@@ -1,24 +1,14 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
-import { useSettings } from '../../features/settings';
-import type { ThemeTokens } from '../../types/theme/colors';
+import {
+  PIN_COLORS,
+  PIN_DISPLAY_FONT_MEDIUM,
+  pinShadow,
+} from './pinTheme';
 
-const KEYPAD_KEYS = [
-  '1',
-  '2',
-  '3',
-  '4',
-  '5',
-  '6',
-  '7',
-  '8',
-  '9',
-  'back-right',
-  '0',
-  'submit',
-];
+const KEYPAD_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'ghost', '0', 'back'] as const;
 
 type PinKeypadProps = {
   onDigit: (digit: string) => void;
@@ -26,118 +16,100 @@ type PinKeypadProps = {
   onSubmit?: () => void;
   submitDisabled?: boolean;
   disabled?: boolean;
+  compact?: boolean;
 };
 
 export const PinKeypad: React.FC<PinKeypadProps> = ({
   onDigit,
   onBackspace,
-  onSubmit,
-  submitDisabled = false,
   disabled = false,
-}) => {
-  const { themeTokens } = useSettings();
-  const styles = useMemo(() => createStyles(themeTokens), [themeTokens]);
+  compact = false,
+}) => (
+  <View style={styles.container}>
+    {KEYPAD_KEYS.map(key => {
+      const isBack = key === 'back';
+      const isGhost = key === 'ghost';
 
-  const handlePress = (key: string) => {
-    if (disabled) return;
-    if (key === 'submit') {
-      if (!submitDisabled) {
-        onSubmit?.();
-      }
-      return;
-    }
-    if (key === 'back-right') {
-      onBackspace();
-      return;
-    }
-    onDigit(key);
-  };
+      return (
+        <Pressable
+          key={key}
+          style={({ pressed }) => [
+            styles.key,
+            compact && styles.keyCompact,
+            isGhost && styles.keyGhost,
+            disabled && styles.keyDisabled,
+            pressed && !disabled && !isGhost && styles.keyPressed,
+          ]}
+          onPress={() => {
+            if (disabled || isGhost) {
+              return;
+            }
+            if (isBack) {
+              onBackspace();
+              return;
+            }
+            onDigit(key);
+          }}
+          disabled={disabled || isGhost}
+          accessibilityRole={isGhost ? undefined : 'button'}
+          accessibilityLabel={isBack ? 'Delete' : `Digit ${key}`}
+        >
+          {isBack ? (
+            <Ionicons name="backspace-outline" size={24} color={PIN_COLORS.text} />
+          ) : isGhost ? null : (
+            <Text style={[styles.keyText, compact && styles.keyTextCompact]}>{key}</Text>
+          )}
+        </Pressable>
+      );
+    })}
+  </View>
+);
 
-  return (
-    <View style={styles.container}>
-      {KEYPAD_KEYS.map(key => {
-        const isBack = key === 'back-right';
-        const isSubmit = key === 'submit';
-
-        return (
-          <Pressable
-            key={key}
-            style={({ pressed }) => [
-              styles.keyWrapper,
-              styles.key,
-              isSubmit && styles.submitKey,
-              (disabled || (isSubmit && submitDisabled)) && styles.keyDisabled,
-              pressed && styles.keyPressed,
-            ]}
-            onPress={() => handlePress(key)}
-            disabled={disabled || (isSubmit && submitDisabled)}
-            accessibilityRole="button"
-            accessibilityLabel={isBack ? 'Delete' : isSubmit ? 'Submit PIN' : `Digit ${key}`}
-          >
-            {isBack ? (
-              <Ionicons
-                name="backspace-outline"
-                size={26}
-                color={themeTokens.foregroundMuted}
-              />
-            ) : isSubmit ? (
-              <View style={styles.submitContent}>
-                <Ionicons name="arrow-forward-circle" size={28} color={themeTokens.background} />
-              </View>
-            ) : (
-              <Text style={styles.keyText}>{key}</Text>
-            )}
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-};
-
-const createStyles = (theme: ThemeTokens) => StyleSheet.create({
+const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 10,
+    justifyContent: 'space-between',
+    rowGap: 12,
     width: '100%',
-    maxWidth: 258,
-  },
-  keyWrapper: {
-    width: 78,
-    height: 78,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   key: {
-    backgroundColor: theme.surfaceHighlight,
-    borderRadius: 18,
+    width: '31.5%',
+    height: 78,
+    borderRadius: 22,
     borderWidth: 1,
-    borderColor: theme.border,
-    shadowColor: theme.shadow,
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.2,
-    shadowRadius: 18,
-    elevation: 8,
+    borderColor: PIN_COLORS.border,
+    backgroundColor: PIN_COLORS.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...pinShadow(),
+  },
+  keyCompact: {
+    height: 72,
+    borderRadius: 20,
+  },
+  keyGhost: {
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
+    shadowOpacity: 0,
+    elevation: 0,
   },
   keyPressed: {
-    backgroundColor: theme.surface,
-    transform: [{ scale: 0.97 }],
+    backgroundColor: PIN_COLORS.surfaceAlt,
+    transform: [{ scale: 0.98 }],
   },
   keyDisabled: {
     opacity: 0.5,
   },
-  submitKey: {
-    backgroundColor: theme.primary,
-    borderColor: theme.primaryLight,
-  },
   keyText: {
-    fontSize: theme.typography.subtitle,
-    fontWeight: '700',
-    color: theme.foreground,
+    color: PIN_COLORS.text,
+    fontSize: 32,
+    lineHeight: 36,
+    fontFamily: PIN_DISPLAY_FONT_MEDIUM,
+    textAlign: 'center',
   },
-  submitContent: {
-    alignItems: 'center',
-    justifyContent: 'center',
+  keyTextCompact: {
+    fontSize: 28,
+    lineHeight: 32,
   },
 });

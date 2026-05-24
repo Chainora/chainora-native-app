@@ -1,31 +1,38 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
-import { PinInput } from './PinInput';
-import { ScanDialog } from './ScanDialog';
-import { useSettings } from '../../features/settings';
-import type { ThemeTokens } from '../../types/theme/colors';
-import { useNfcEnabled } from '../../features/nfc/hooks/useNfcEnabled';
+import { PinInput } from '../components/ui/PinInput';
+import { PinGhostButton } from '../components/ui/pinTheme';
+import { WALLET_COLORS } from '../components/ui/walletDesign';
+import { useSettings } from '../features/settings';
+import type { ThemeTokens } from '../types/theme/colors';
+import { useNfcEnabled } from '../features/nfc/hooks/useNfcEnabled';
 import {
   fetchSuggestedGasPriceWei,
   parseEther,
   sendEthTransaction,
   type SendEthResult,
-} from '../../services/transactionService';
-import type { WalletActionResult } from '../../services/cardService';
-import { getActiveNetwork } from '../../config/network';
+} from '../services/transactionService';
+import type { WalletActionResult } from '../services/cardService';
+import { getActiveNetwork } from '../config/network';
+import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
+import { ROUTES } from '../navigation/routes/routes';
+import { addRecentActivity } from '../features/wallet/recentActivityStorage';
+import { registerScanCardFlow } from '../services/scanCardFlowRegistry';
 
 const ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/;
 const PIN_LENGTH = 4;
@@ -39,21 +46,7 @@ type PendingTxConfig = {
   gasLimitWei?: bigint;
 };
 
-export type SendTransactionSuccessPayload = {
-  result: SendEthResult;
-  recipient: string;
-  amountDisplay: string;
-  currencySymbol: string;
-  networkName: string;
-};
-
-type SendTransactionDialogProps = {
-  visible: boolean;
-  fromAddress: string;
-  availableAmount: string;
-  onClose: () => void;
-  onSuccess?: (payload: SendTransactionSuccessPayload) => void;
-};
+type Props = NativeStackScreenProps<RootStackParamList, 'SendTransaction'>;
 
 const ACCENT = {
   overlay: 'rgba(3, 5, 9, 0.82)',
@@ -71,18 +64,12 @@ const ACCENT = {
   success: '#10B981',
 };
 
-export const SendTransactionDialog: React.FC<SendTransactionDialogProps> = ({
-  visible,
-  fromAddress,
-  availableAmount,
-  onClose,
-  onSuccess,
-}) => {
-  const { t, themeTokens } = useSettings();
+const SendTransactionScreen: React.FC<Props> = ({ navigation, route }) => {
+  const { fromAddress, availableAmount } = route.params;
+  const { t, themeTokens, resolvedTheme } = useSettings();
   const styles = useMemo(() => createStyles(themeTokens), [themeTokens]);
   const { isEnabled } = useNfcEnabled();
   const [phase, setPhase] = useState<Phase>('details');
-  const [scanDialogVisible, setScanDialogVisible] = useState(false);
   const [recipient, setRecipient] = useState('');
   const [amount, setAmount] = useState('');
   const [gasPriceGwei, setGasPriceGwei] = useState('');
@@ -123,11 +110,7 @@ export const SendTransactionDialog: React.FC<SendTransactionDialogProps> = ({
   }, []);
 
   useEffect(() => {
-    if (!visible) {
-      return;
-    }
     setPhase('details');
-    setScanDialogVisible(false);
     setRecipient('');
     setAmount('');
     setGasPriceGwei('');
@@ -139,12 +122,9 @@ export const SendTransactionDialog: React.FC<SendTransactionDialogProps> = ({
     setPendingTxConfig(null);
     setReviewGasPriceWei(null);
     pendingResultRef.current = null;
-  }, [visible]);
+  }, []);
 
-  const isCloseDisabled = useMemo(
-    () => scanDialogVisible,
-    [scanDialogVisible],
-  );
+  const isCloseDisabled = false;
 
   const handleValidateDetails = useCallback(() => {
     const trimmedRecipient = recipient.trim();
@@ -214,6 +194,38 @@ export const SendTransactionDialog: React.FC<SendTransactionDialogProps> = ({
     };
   }, [pendingTxConfig, phase]);
 
+  const handleFlowScan = useCallback(async (): Promise<WalletActionResult> => {
+    if (!pendingTxConfig) {
+      return {
+        ok: false,
+        message: t('sendErrorMissingDetails'),
+      };
+    }
+
+    try {
+      const outcome = await sendEthTransaction({
+        from: fromAddress,
+        to: recipient.trim(),
+        valueWei: pendingTxConfig.valueWei,
+        pin,
+        gasPriceWei: pendingTxConfig.gasPriceWei,
+        gasLimitWei: pendingTxConfig.gasLimitWei,
+      });
+
+      pendingResultRef.current = outcome;
+      return {
+        ok: true,
+        message: t('sendStatusSuccess'),
+      };
+    } catch (caughtError) {
+      const message = caughtError instanceof Error ? caughtError.message : String(caughtError);
+      return {
+        ok: false,
+        message,
+      };
+    }
+  }, [fromAddress, pendingTxConfig, pin, recipient, t]);
+
   const handleConfirmReview = useCallback(() => {
     if (!pendingTxConfig) {
       setError(t('sendErrorMissingDetails'));
@@ -258,68 +270,49 @@ export const SendTransactionDialog: React.FC<SendTransactionDialogProps> = ({
     });
     setReviewGasPriceWei(nextGasPriceWei ?? null);
     setError(null);
-    setScanDialogVisible(true);
-  }, [gasLimit, gasPriceGwei, parseGwei, pendingTxConfig, pin, reviewGasPriceWei, t]);
+    const flowId = registerScanCardFlow({
+      isNfcEnabled: isEnabled,
+      flowType: 'flow',
+      prefilledPin: pin,
+      onFlowScan: handleFlowScan,
+      onSuccess: async () => {
+        const outcome = pendingResultRef.current;
+        if (!outcome) {
+          setError(t('sendErrorMissingDetails'));
+          setPhase('review');
+          navigation.goBack();
+          return;
+        }
 
-  const handleFlowScan = useCallback(async (): Promise<WalletActionResult> => {
-    if (!pendingTxConfig) {
-      return {
-        ok: false,
-        message: t('sendErrorMissingDetails'),
-      };
-    }
+        setResult(outcome);
+        setPhase('result');
 
-    try {
-      const outcome = await sendEthTransaction({
-        from: fromAddress,
-        to: recipient.trim(),
-        valueWei: pendingTxConfig.valueWei,
-        pin,
-        gasPriceWei: pendingTxConfig.gasPriceWei,
-        gasLimitWei: pendingTxConfig.gasLimitWei,
-      });
+        try {
+          await addRecentActivity({
+            transactionHash: outcome.transactionHash,
+            networkKey: network.key,
+            fromAddress,
+            toAddress: recipient.trim(),
+            amountDisplay: amount.trim(),
+            currencySymbol: network.currencySymbol,
+            networkName: network.name,
+          });
+        } catch (error) {
+          console.warn('[SendTransaction] Failed to persist recent activity', error);
+        }
 
-      pendingResultRef.current = outcome;
-      return {
-        ok: true,
-        message: t('sendStatusSuccess'),
-      };
-    } catch (caughtError) {
-      const message = caughtError instanceof Error ? caughtError.message : String(caughtError);
-      return {
-        ok: false,
-        message,
-      };
-    }
-  }, [fromAddress, pendingTxConfig, pin, recipient, t]);
-
-  const handleScanSuccess = useCallback(async () => {
-    const outcome = pendingResultRef.current;
-    if (!outcome) {
-      setScanDialogVisible(false);
-      setError(t('sendErrorMissingDetails'));
-      setPhase('review');
-      return;
-    }
-
-    setResult(outcome);
-    setScanDialogVisible(false);
-    setPhase('result');
-    onSuccess?.({
-      result: outcome,
-      recipient: recipient.trim(),
-      amountDisplay: amount.trim(),
-      currencySymbol: network.currencySymbol,
-      networkName: network.name,
+        navigation.goBack();
+      },
     });
-  }, [amount, network.currencySymbol, network.name, onSuccess, recipient, t]);
+    navigation.navigate(ROUTES.ScanCard, { flowId });
+  }, [amount, fromAddress, gasLimit, gasPriceGwei, handleFlowScan, isEnabled, navigation, network.key, network.currencySymbol, network.name, parseGwei, pendingTxConfig, pin, recipient, reviewGasPriceWei, t]);
 
   const handleClose = useCallback(() => {
     if (isCloseDisabled) {
       return;
     }
-    onClose();
-  }, [isCloseDisabled, onClose]);
+    navigation.goBack();
+  }, [isCloseDisabled, navigation]);
 
   const handleHeaderBack = useCallback(() => {
     if (phase === 'review') {
@@ -531,19 +524,23 @@ export const SendTransactionDialog: React.FC<SendTransactionDialogProps> = ({
         </>
       )}
 
-      <Text style={styles.pinHeading}>{t('sendStatusEnterPin')}</Text>
-      <PinInput value={pin} onChange={setPin} length={PIN_LENGTH} colorScheme="dark" />
-
-      {error && <Text style={styles.errorText}>{error}</Text>}
-
-      <View style={styles.actions}>
-        <Pressable style={styles.primaryButton} onPress={handleConfirmReview}>
-          <Text style={styles.primaryButtonText}>{t('sendConfirm')}</Text>
-        </Pressable>
-        <Pressable style={styles.ghostButton} onPress={handleBackToDetails}>
-          <Text style={styles.ghostButtonText}>{t('sendBack')}</Text>
-        </Pressable>
-      </View>
+      <PinInput
+        value={pin}
+        onChange={nextValue => {
+          setPin(nextValue);
+          if (error) {
+            setError(null);
+          }
+        }}
+        onSubmit={handleConfirmReview}
+        submitDisabled={pin.length < PIN_LENGTH}
+        title={t('sendPinTitle')}
+        subtitle={t('sendPinSubtitle')}
+        ctaLabel={t('sendConfirm')}
+        heroIconName="paper-plane-outline"
+        errorMessage={error}
+        afterActionSlot={<PinGhostButton label={t('sendBack')} onPress={handleBackToDetails} />}
+      />
     </View>
   );
 
@@ -579,16 +576,17 @@ export const SendTransactionDialog: React.FC<SendTransactionDialogProps> = ({
   );
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose} statusBarTranslucent>
-      <View style={styles.backdrop}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={handleClose} />
-
+    <View style={styles.screen}>
+      <StatusBar
+        barStyle={resolvedTheme === 'light' ? 'dark-content' : 'light-content'}
+        backgroundColor={WALLET_COLORS.background}
+      />
+      <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
         <KeyboardAvoidingView
-          style={styles.dialogContainer}
+          style={styles.screenContainer}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
-          <View style={styles.dialog}>
-            <View style={styles.grab} />
+          <View style={styles.screenShell}>
 
             <View style={styles.headerRow}>
               <Pressable style={styles.headerIcon} onPress={handleHeaderBack}>
@@ -620,59 +618,29 @@ export const SendTransactionDialog: React.FC<SendTransactionDialogProps> = ({
             </ScrollView>
           </View>
         </KeyboardAvoidingView>
-
-        <ScanDialog
-          visible={scanDialogVisible}
-          isNfcEnabled={isEnabled}
-          onClose={() => setScanDialogVisible(false)}
-          onSuccess={handleScanSuccess}
-          types="flow"
-          prefilledPin={pin}
-          onFlowScan={handleFlowScan}
-        />
-      </View>
-    </Modal>
+      </SafeAreaView>
+    </View>
   );
 };
 
 const createStyles = (theme: ThemeTokens) =>
   StyleSheet.create({
-    backdrop: {
+    screen: {
       flex: 1,
-      backgroundColor: ACCENT.overlay,
+      backgroundColor: WALLET_COLORS.background,
     },
-    dialogContainer: {
+    screenContainer: {
       flex: 1,
-      justifyContent: 'center',
-      paddingHorizontal: 12,
     },
-    dialog: {
-      borderRadius: 22,
-      borderWidth: 1,
-      borderColor: ACCENT.border,
+    screenShell: {
+      flex: 1,
       backgroundColor: ACCENT.card,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 20 },
-      shadowOpacity: 0.5,
-      shadowRadius: 32,
-      elevation: 24,
-      maxHeight: '92%',
-      overflow: 'hidden',
-    },
-    grab: {
-      width: 38,
-      height: 4,
-      borderRadius: 2,
-      backgroundColor: ACCENT.borderStrong,
-      alignSelf: 'center',
-      marginTop: 8,
-      marginBottom: 4,
     },
     headerRow: {
       flexDirection: 'row',
       alignItems: 'center',
       paddingHorizontal: 16,
-      paddingTop: 8,
+      paddingTop: 12,
       paddingBottom: 10,
       gap: 10,
     },
@@ -944,14 +912,6 @@ const createStyles = (theme: ThemeTokens) =>
       letterSpacing: 1,
       textTransform: 'uppercase',
     },
-    pinHeading: {
-      textAlign: 'center',
-      color: ACCENT.textLow,
-      fontSize: 10,
-      fontWeight: '700',
-      letterSpacing: 1,
-      textTransform: 'uppercase',
-    },
     resultIconWrap: {
       alignItems: 'center',
       justifyContent: 'center',
@@ -1012,4 +972,4 @@ const createStyles = (theme: ThemeTokens) =>
     },
   });
 
-export default SendTransactionDialog;
+export default SendTransactionScreen;

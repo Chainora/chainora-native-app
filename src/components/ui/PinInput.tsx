@@ -1,86 +1,231 @@
-import React, { useRef } from 'react';
-import { StyleSheet, TextInput, View, Text } from 'react-native';
+import React, { useEffect, useMemo, useRef } from 'react';
+import {
+  Animated,
+  Pressable,
+  StyleProp,
+  StyleSheet,
+  Text,
+  View,
+  ViewStyle,
+} from 'react-native';
+import { Ionicons } from '@react-native-vector-icons/ionicons';
 
-import { THEME } from '../../types/theme/colors';
+import { PinKeypad } from './PinKeypad';
+import {
+  PIN_COLORS,
+  PIN_DISPLAY_FONT_BOLD,
+  PIN_SANS_FONT,
+  PIN_SANS_FONT_EXTRABOLD,
+  PIN_SANS_FONT_SEMIBOLD,
+  pinShadow,
+} from './pinTheme';
 
 type PinInputProps = {
   value: string;
-  onChange: (nextValue: string) => void;
+  onChange?: (nextValue: string) => void;
+  onDigit?: (digit: string) => void;
+  onBackspace?: () => void;
+  onSubmit?: () => void;
+  title?: string;
+  subtitle?: string;
+  ctaLabel?: string;
   length?: number;
   disabled?: boolean;
-  colorScheme?: 'light' | 'dark';
+  submitDisabled?: boolean;
+  variant?: 'screen' | 'card';
+  heroIconName?: React.ComponentProps<typeof Ionicons>['name'];
+  animateHero?: boolean;
+  progressCurrent?: number;
+  progressTotal?: number;
+  progressLabel?: string;
+  supportingText?: string | null;
+  errorMessage?: string | null;
+  headerSlot?: React.ReactNode;
+  contentSlot?: React.ReactNode;
+  footerSlot?: React.ReactNode;
+  afterActionSlot?: React.ReactNode;
+  style?: StyleProp<ViewStyle>;
   autoFocus?: boolean;
+  colorScheme?: 'light' | 'dark';
+};
+
+const Hero: React.FC<{
+  iconName?: React.ComponentProps<typeof Ionicons>['name'];
+  animateHero: boolean;
+}> = ({ iconName = 'wifi-outline', animateHero }) => {
+  const pulse = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!animateHero) {
+      return undefined;
+    }
+
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 1800,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0,
+          duration: 0,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+
+    animation.start();
+    return () => {
+      animation.stop();
+      pulse.setValue(0);
+    };
+  }, [animateHero, pulse]);
+
+  const animatedStyle = useMemo(
+    () => ({
+      transform: [
+        {
+          scale: pulse.interpolate({
+            inputRange: [0, 1],
+            outputRange: [1, 1.12],
+          }),
+        },
+      ],
+      opacity: pulse.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0.34, 0.08],
+      }),
+    }),
+    [pulse],
+  );
+
+  return (
+    <View style={styles.heroWrap}>
+      <Animated.View style={[styles.heroRing, animatedStyle]} />
+      <View style={styles.heroCore}>
+        <Ionicons name={iconName} size={34} color={PIN_COLORS.signalBright} />
+      </View>
+    </View>
+  );
 };
 
 export const PinInput: React.FC<PinInputProps> = ({
   value,
   onChange,
+  onDigit,
+  onBackspace,
+  onSubmit,
+  title,
+  subtitle,
+  ctaLabel,
   length = 4,
   disabled = false,
-  colorScheme = 'light',
-  autoFocus = true,
+  submitDisabled = false,
+  variant = 'card',
+  heroIconName = 'wifi-outline',
+  animateHero = true,
+  progressCurrent,
+  progressTotal,
+  progressLabel,
+  supportingText,
+  errorMessage,
+  headerSlot,
+  contentSlot,
+  footerSlot,
+  afterActionSlot,
+  style,
 }) => {
-  const inputRef = useRef<TextInput>(null);
-  const boxes = Array.from({ length }, (_, i) => i);
+  const filled = value.slice(0, length).length;
 
-  const isDark = colorScheme === 'dark';
-  
-  // Colors
-  const containerBg = isDark ? 'rgba(0,0,0,0.2)' : '#F8FAFC';
-  const cellBg = isDark ? '#1E293B' : '#FFFFFF';
-  const cellBorder = isDark ? '#334155' : '#E2E8F0';
-  const cellActiveBorder = isDark ? '#60A5FA' : THEME.primary;
-  const textColor = isDark ? '#F1F5F9' : '#0F172A';
+  const handleDigit = (digit: string) => {
+    if (disabled) {
+      return;
+    }
+    if (onDigit) {
+      onDigit(digit);
+      return;
+    }
+    onChange?.(`${value}${digit}`.replace(/\D/g, '').slice(0, length));
+  };
+
+  const handleBackspace = () => {
+    if (disabled) {
+      return;
+    }
+    if (onBackspace) {
+      onBackspace();
+      return;
+    }
+    onChange?.(value.slice(0, -1));
+  };
 
   return (
-    <View style={styles.container}>
-      {/* Background pill */}
-      <View style={[styles.backgroundPill, { backgroundColor: containerBg }]} />
-      
-      {/* Visual Cells */}
-      <View style={styles.cellsContainer} pointerEvents="none">
-        {boxes.map((index) => {
-          const char = value[index];
-          const isActive = !disabled && index === value.length;
-          const isFilled = !!char;
+    <View style={[styles.container, variant === 'screen' && styles.screenContainer, style]}>
+      {headerSlot}
 
-          return (
-            <View
-              key={index}
-              style={[
-                styles.cell,
-                // eslint-disable-next-line react-native/no-inline-styles
-                { 
-                  backgroundColor: cellBg, 
-                  borderColor: isActive ? cellActiveBorder : cellBorder,
-                  shadowOpacity: isActive ? 0.1 : 0,
-                },
-              ]}
-            >
-              {isFilled ? (
-                <Text style={[styles.cellText, { color: textColor }]}>•</Text>
-              ) : (
-                 isActive && <View style={[styles.cursor, { backgroundColor: cellActiveBorder }]} />
-              )}
-            </View>
-          );
-        })}
+      {typeof progressCurrent === 'number' && typeof progressTotal === 'number' ? (
+        <View style={styles.progressWrap}>
+          {progressLabel ? <Text style={styles.progressLabel}>{progressLabel}</Text> : null}
+          <View style={styles.progressRow}>
+            {Array.from({ length: progressTotal }, (_, index) => (
+              <View
+                key={index}
+                style={[
+                  styles.progressSegment,
+                  progressCurrent > index && styles.progressSegmentOn,
+                ]}
+              />
+            ))}
+          </View>
+        </View>
+      ) : null}
+
+      <View style={styles.header}>
+        <Hero iconName={heroIconName} animateHero={animateHero} />
+        {title ? <Text style={[styles.title, variant === 'screen' && styles.titleScreen]}>{title}</Text> : null}
+        {subtitle ? (
+          <Text style={[styles.subtitle, variant === 'screen' && styles.subtitleScreen]}>{subtitle}</Text>
+        ) : null}
       </View>
 
-      {/* Invisible Interactive Input Overlay */}
-      <TextInput
-        ref={inputRef}
-        style={styles.hiddenInput}
-        value={value}
-        onChangeText={(text) => onChange(text.replace(/\D/g, '').slice(0, length))}
-        keyboardType="number-pad"
-        maxLength={length}
-        editable={!disabled}
-        autoFocus={autoFocus}
-        caretHidden={true}
-        contextMenuHidden={true}
-        selectTextOnFocus={false}
-      />
+      {contentSlot}
+
+      <View style={styles.pinBlock}>
+        <View style={styles.dotsRow}>
+          {Array.from({ length }, (_, index) => (
+            <View key={index} style={[styles.dot, index < filled && styles.dotFilled]} />
+          ))}
+        </View>
+
+        {supportingText ? <Text style={styles.supportingText}>{supportingText}</Text> : null}
+        {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
+
+        <PinKeypad
+          onDigit={handleDigit}
+          onBackspace={handleBackspace}
+          disabled={disabled}
+          compact={variant === 'card'}
+        />
+      </View>
+
+      <View style={[styles.actions, variant === 'screen' && styles.actionsScreen]}>
+        {footerSlot}
+        {ctaLabel ? (
+          <Pressable
+            style={({ pressed }) => [
+              styles.primaryButton,
+              (submitDisabled || disabled) && styles.buttonDisabled,
+              pressed && !(submitDisabled || disabled) && styles.primaryButtonPressed,
+            ]}
+            onPress={onSubmit}
+            disabled={submitDisabled || disabled}
+          >
+            <Text style={styles.primaryButtonText}>{ctaLabel}</Text>
+          </Pressable>
+        ) : null}
+        {afterActionSlot}
+      </View>
     </View>
   );
 };
@@ -88,55 +233,166 @@ export const PinInput: React.FC<PinInputProps> = ({
 const styles = StyleSheet.create({
   container: {
     width: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-    position: 'relative',
-    marginBottom: 20,
-    height: 80, // Ensure container has height for absolute children
+    borderRadius: 28,
   },
-  backgroundPill: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    left: 20,
-    right: 20,
-    borderRadius: 24,
+  screenContainer: {
+    flex: 1,
+    paddingTop: 18,
+    paddingBottom: 8,
   },
-  hiddenInput: {
-    ...StyleSheet.absoluteFillObject,
-    opacity: 0.01, // Near-zero opacity to ensure interactivity on all devices
-    zIndex: 99, // Ensure it sits on top
-    elevation: 99, // Android elevation to ensure it's on top of cells
+  progressWrap: {
+    gap: 8,
+    marginBottom: 18,
   },
-  cellsContainer: {
+  progressLabel: {
+    color: PIN_COLORS.textSoft,
+    fontSize: 10,
+    lineHeight: 14,
+    letterSpacing: 1.5,
+    fontFamily: PIN_SANS_FONT_SEMIBOLD,
+    textTransform: 'uppercase',
+  },
+  progressRow: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 8,
+  },
+  progressSegment: {
+    flex: 1,
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: '#1B2536',
+  },
+  progressSegmentOn: {
+    backgroundColor: PIN_COLORS.signal,
+    shadowColor: PIN_COLORS.signalBright,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
+  },
+  header: {
+    alignItems: 'center',
+    marginBottom: 18,
+  },
+  heroWrap: {
+    width: 110,
+    height: 110,
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: 14,
   },
-  cell: {
-    width: 56,
-    height: 64,
-    borderRadius: 16,
-    borderWidth: 2,
+  heroRing: {
+    position: 'absolute',
+    width: 104,
+    height: 104,
+    borderRadius: 52,
+    borderWidth: 1,
+    borderColor: 'rgba(79, 180, 255, 0.24)',
+  },
+  heroCore: {
+    width: 82,
+    height: 82,
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: PIN_COLORS.signalBorder,
+    backgroundColor: 'rgba(15, 25, 39, 0.88)',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 8,
-    elevation: 2,
+    ...pinShadow(PIN_COLORS.signalBright),
   },
-  cellText: {
-    fontSize: THEME.typography.display,
-    fontWeight: '700',
+  title: {
+    color: PIN_COLORS.text,
+    fontSize: 24,
+    lineHeight: 32,
+    fontFamily: PIN_DISPLAY_FONT_BOLD,
+    textAlign: 'center',
+    letterSpacing: -0.8,
+  },
+  titleScreen: {
+    fontSize: 28,
     lineHeight: 36,
+  },
+  subtitle: {
+    marginTop: 10,
+    color: PIN_COLORS.textMuted,
+    fontSize: 13,
+    lineHeight: 19,
+    fontFamily: PIN_SANS_FONT,
     textAlign: 'center',
   },
-  cursor: {
-    width: 2,
-    height: 24,
-    borderRadius: 1,
-    opacity: 0.8,
+  subtitleScreen: {
+    fontSize: 14,
+    lineHeight: 20,
+    maxWidth: 320,
+  },
+  pinBlock: {
+    gap: 14,
+  },
+  dotsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 16,
+    marginBottom: 2,
+  },
+  dot: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 1.8,
+    borderColor: '#2C384C',
+    backgroundColor: '#0D1320',
+  },
+  dotFilled: {
+    borderColor: PIN_COLORS.signalBright,
+    backgroundColor: PIN_COLORS.signal,
+  },
+  supportingText: {
+    minHeight: 18,
+    color: PIN_COLORS.textSoft,
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: PIN_SANS_FONT,
+    textAlign: 'center',
+  },
+  errorText: {
+    minHeight: 18,
+    color: PIN_COLORS.danger,
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: PIN_SANS_FONT_SEMIBOLD,
+    textAlign: 'center',
+  },
+  actions: {
+    gap: 10,
+    marginTop: 20,
+  },
+  actionsScreen: {
+    marginTop: 'auto',
+    paddingTop: 20,
+  },
+  primaryButton: {
+    minHeight: 56,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: PIN_COLORS.signalBright,
+    backgroundColor: PIN_COLORS.signal,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    ...pinShadow(PIN_COLORS.signalBright),
+  },
+  primaryButtonPressed: {
+    backgroundColor: '#1D87E9',
+    transform: [{ scale: 0.99 }],
+  },
+  primaryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    lineHeight: 19,
+    fontFamily: PIN_SANS_FONT_EXTRABOLD,
+    textAlign: 'center',
+  },
+  buttonDisabled: {
+    opacity: 0.52,
   },
 });

@@ -1,186 +1,169 @@
-import React, { useMemo } from 'react';
-import { Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
+import React from 'react';
+import { Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useSettings } from '../features/settings';
-import { ROUTES } from '../navigation/routes/routes';
 import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
-import type { ThemeTokens } from '../types/theme/colors';
+import { ROUTES } from '../navigation/routes/routes';
+import {
+  MONO_FONT,
+  WALLET_COLORS,
+  WalletAuras,
+  WalletPanel,
+  WalletSectionLabel,
+  WalletTopBar,
+  buildWalletScreenStyles,
+} from '../components/ui/walletDesign';
 
 type Props = NativeStackScreenProps<RootStackParamList, typeof ROUTES.General>;
+type Option = { value: string; label: string };
 
-type OptionItem = {
-  value: string;
-  label: string;
-};
+const screenBase = buildWalletScreenStyles();
 
 const OptionGroup: React.FC<{
   title: string;
-  options: OptionItem[];
+  options: Option[];
   selected: string;
   onSelect: (value: string) => void;
-  theme: ThemeTokens;
-}> = ({ title, options, selected, onSelect, theme }) => {
-  const styles = useMemo(() => createStyles(theme), [theme]);
-
-  return (
-    <View style={styles.groupCard}>
-      <Text style={styles.groupTitle}>{title}</Text>
+}> = ({ title, options, selected, onSelect }) => (
+  <View style={styles.groupWrap}>
+    <WalletSectionLabel label={title} />
+    <WalletPanel style={styles.groupCard}>
       <View style={styles.optionRow}>
         {options.map(option => {
-          const active = selected === option.value;
+          const active = option.value === selected;
           return (
             <Pressable
               key={option.value}
-              style={[styles.optionChip, active && styles.optionChipActive]}
+              style={[styles.optionChip, active && styles.optionChipOn]}
               onPress={() => onSelect(option.value)}
             >
-              <Text style={[styles.optionChipText, active && styles.optionChipTextActive]}>
-                {option.label.toUpperCase()}
+              <Text style={[styles.optionChipText, active && styles.optionChipTextOn]}>
+                {option.label}
               </Text>
             </Pressable>
           );
         })}
       </View>
-    </View>
-  );
-};
+    </WalletPanel>
+  </View>
+);
 
-export const GeneralScreen: React.FC<Props> = () => {
-  const { settings, resolvedTheme, setCurrency, setLanguage, setNetwork, setTheme, t, themeTokens } = useSettings();
-  const styles = useMemo(() => createStyles(themeTokens), [themeTokens]);
-
-  const languageOptions: OptionItem[] = [
-    { value: 'en', label: t('languageEnglish') },
-    { value: 'vi', label: t('languageVietnamese') },
-  ];
-
-  const currencyOptions: OptionItem[] = [
-    { value: 'bnb', label: t('currencyBnb') },
-    { value: 'btc', label: t('currencyBtc') },
-    { value: 'usd', label: t('currencyUsd') },
-  ];
-
-  const themeOptions: OptionItem[] = [
-    { value: 'dark', label: t('themeDark') },
-    { value: 'light', label: t('themeLight') },
-    { value: 'system', label: t('themeSystem') },
-  ];
-
-  const networkOptions: OptionItem[] = [
-    { value: 'chainora', label: t('networkChainoraTestnet') },
-    { value: 'eth', label: t('networkEth') },
-  ];
+const GeneralScreen: React.FC<Props> = ({ navigation }) => {
+  const { settings, resolvedTheme, setCurrency, setLanguage, setNetwork, setTheme, t } = useSettings();
 
   return (
-    <View style={styles.container}>
+    <View style={screenBase.screen}>
       <StatusBar
         barStyle={resolvedTheme === 'light' ? 'dark-content' : 'light-content'}
-        backgroundColor={themeTokens.background}
+        backgroundColor={WALLET_COLORS.background}
       />
-      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
-        <View style={styles.content}>
-          <OptionGroup
-            title={t('generalLanguage')}
-            options={languageOptions}
-            selected={settings.language}
-            onSelect={value => setLanguage(value as 'en' | 'vi')}
-            theme={themeTokens}
-          />
+      <SafeAreaView style={screenBase.safeArea} edges={['top', 'bottom']}>
+        <WalletAuras />
+        <View style={screenBase.content}>
+          <WalletTopBar title={t('headerGeneralTitle')} onBack={() => navigation.goBack()} />
 
-          <OptionGroup
-            title={t('generalCurrency')}
-            options={currencyOptions}
-            selected={settings.currency}
-            onSelect={value => setCurrency(value as 'bnb' | 'btc' | 'usd')}
-            theme={themeTokens}
-          />
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+            <OptionGroup
+              title={t('generalLanguage')}
+              selected={settings.language}
+              onSelect={value => setLanguage(value as 'en' | 'vi')}
+              options={[
+                { value: 'en', label: t('languageEnglish') },
+                { value: 'vi', label: t('languageVietnamese') },
+              ]}
+            />
 
-          <OptionGroup
-            title={t('generalTheme')}
-            options={themeOptions}
-            selected={settings.theme}
-            onSelect={value => setTheme(value as 'dark' | 'light' | 'system')}
-            theme={themeTokens}
-          />
+            <OptionGroup
+              title={t('generalCurrency')}
+              selected={settings.currency}
+              onSelect={value => setCurrency(value as 'bnb' | 'btc' | 'usd')}
+              options={[
+                { value: 'bnb', label: t('currencyBnb') },
+                { value: 'btc', label: t('currencyBtc') },
+                { value: 'usd', label: t('currencyUsd') },
+              ]}
+            />
 
-          <OptionGroup
-            title={t('generalNetwork')}
-            options={networkOptions}
-            selected={settings.network}
-            onSelect={value => setNetwork(value as 'eth' | 'chainora')}
-            theme={themeTokens}
-          />
+            <OptionGroup
+              title={t('generalTheme')}
+              selected={settings.theme}
+              onSelect={value => setTheme(value as 'dark' | 'light' | 'system')}
+              options={[
+                { value: 'dark', label: t('themeDark') },
+                { value: 'light', label: t('themeLight') },
+                { value: 'system', label: t('themeSystem') },
+              ]}
+            />
 
-          <Text style={styles.helperText}>
-            {t('generalHelper')}
-          </Text>
+            <OptionGroup
+              title={t('generalNetwork')}
+              selected={settings.network}
+              onSelect={value => setNetwork(value as 'eth' | 'chainora')}
+              options={[
+                { value: 'chainora', label: t('networkChainoraTestnet') },
+                { value: 'eth', label: t('networkEth') },
+              ]}
+            />
+
+            <WalletPanel style={styles.helperCard}>
+              <Text style={styles.helperText}>{t('generalHelper')}</Text>
+            </WalletPanel>
+          </ScrollView>
         </View>
       </SafeAreaView>
     </View>
   );
 };
 
-const createStyles = (theme: ThemeTokens) =>
-  StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: theme.background,
-    },
-    safeArea: {
-      flex: 1,
-    },
-    content: {
-      flex: 1,
-      paddingHorizontal: 16,
-      paddingTop: 16,
-      gap: 12,
-    },
-    groupCard: {
-      backgroundColor: theme.surfaceHighlight,
-      borderRadius: 18,
-      borderWidth: 1,
-      borderColor: theme.border,
-      padding: 14,
-      gap: 12,
-    },
-    groupTitle: {
-      color: theme.foreground,
-      fontSize: theme.typography.subtitle,
-      fontWeight: '700',
-    },
-    optionRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 8,
-    },
-    optionChip: {
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: theme.border,
-      backgroundColor: theme.surface,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-    },
-    optionChipActive: {
-      borderColor: theme.primaryLight,
-      backgroundColor: theme.glow,
-    },
-    optionChipText: {
-      color: theme.foregroundMuted,
-      fontSize: theme.typography.subtext,
-      fontWeight: '700',
-      letterSpacing: 0.3,
-    },
-    optionChipTextActive: {
-      color: theme.primary,
-    },
-    helperText: {
-      color: theme.foregroundMuted,
-      fontSize: theme.typography.subtext,
-      marginTop: 2,
-    },
-  });
+const styles = StyleSheet.create({
+  scrollContent: {
+    paddingTop: 16,
+    paddingBottom: 24,
+    gap: 18,
+  },
+  groupWrap: {
+    gap: 8,
+  },
+  groupCard: {
+    padding: 14,
+  },
+  optionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  optionChip: {
+    minHeight: 40,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: WALLET_COLORS.border,
+    backgroundColor: WALLET_COLORS.surfaceAlt,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  optionChipOn: {
+    borderColor: WALLET_COLORS.signalBorder,
+    backgroundColor: WALLET_COLORS.signalSoft,
+  },
+  optionChipText: {
+    color: WALLET_COLORS.textMuted,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  optionChipTextOn: {
+    color: WALLET_COLORS.text,
+  },
+  helperCard: {
+    padding: 14,
+  },
+  helperText: {
+    color: WALLET_COLORS.textSoft,
+    fontFamily: MONO_FONT,
+    fontSize: 11,
+    lineHeight: 18,
+  },
+});
 
 export default GeneralScreen;
