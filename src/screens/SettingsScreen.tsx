@@ -1,39 +1,31 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
-import { getActiveNetwork } from '../config/network';
+import { DISPLAY_FONT, MONO_FONT, WALLET_COLORS } from '../components/ui/walletDesign';
 import { useAuth } from '../features/auth';
 import { useSettings } from '../features/settings';
 import { clearRecentActivities } from '../features/wallet/recentActivityStorage';
 import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
 import { ROUTES } from '../navigation/routes/routes';
 import { clearActivitySyncState } from '../services/activitySyncService';
-import {
-  DISPLAY_FONT,
-  MONO_FONT,
-  WALLET_COLORS,
-  WalletPanel,
-  WalletPill,
-  WalletSectionLabel,
-  WalletTopBar,
-  buildWalletScreenStyles,
-} from '../components/ui/walletDesign';
 
 type Props = NativeStackScreenProps<RootStackParamList, typeof ROUTES.Settings>;
-type RowMeta = {
+type IconName = React.ComponentProps<typeof Ionicons>['name'];
+
+type RowItem = {
   id: string;
   title: string;
   subtitle: string;
-  icon: React.ComponentProps<typeof Ionicons>['name'];
+  icon: IconName;
   onPress?: () => void;
   meta?: string;
   danger?: 'soft' | 'hard';
+  toggle?: boolean;
+  social?: 'x' | 'facebook' | 'youtube';
 };
-
-const screenBase = buildWalletScreenStyles();
 
 const truncateAddress = (value: string) => {
   if (!value || value.length < 10) {
@@ -44,8 +36,12 @@ const truncateAddress = (value: string) => {
 
 const SettingsScreen: React.FC<Props> = ({ navigation }) => {
   const { session, clearSession } = useAuth();
-  const { settings, resolvedTheme, t } = useSettings();
-  const network = getActiveNetwork();
+  const { settings, resolvedTheme, setTheme, t } = useSettings();
+  const [biometricEnabled, setBiometricEnabled] = useState(true);
+
+  const languageLabel = settings.language === 'vi' ? t('languageVietnamese') : t('languageEnglish');
+  const currencyCode = settings.currency.toUpperCase();
+  const isDarkTheme = resolvedTheme === 'dark';
 
   const handleGeneral = useCallback(() => {
     navigation.navigate(ROUTES.General);
@@ -102,220 +98,298 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
     ]);
   }, [t]);
 
-  const languageLabel = settings.language === 'vi' ? t('languageVietnamese') : t('languageEnglish');
-  const currencyLabel =
-    settings.currency === 'usd' ? t('currencyUsd') : settings.currency === 'btc' ? t('currencyBtc') : t('currencyBnb');
-  const themeLabel =
-    settings.theme === 'light' ? t('themeLight') : settings.theme === 'dark' ? t('themeDark') : t('themeSystem');
+  const handleThemeToggle = useCallback(() => {
+    setTheme(isDarkTheme ? 'light' : 'dark');
+  }, [isDarkTheme, setTheme]);
 
-  const groups = useMemo<Array<{ label: string; rows: RowMeta[] }>>(
+  const optionRows = useMemo<RowItem[]>(
     () => [
       {
-        label: t('settingsGroupWallet'),
-        rows: [
-          {
-            id: 'wallet-address',
-            title: t('settingsWalletAddressTitle'),
-            subtitle: truncateAddress(session?.address ?? ''),
-            icon: 'location-outline',
-            meta: t('settingsMetaPrimary'),
-          },
-          {
-            id: 'wallet-card',
-            title: t('settingsWalletCardTitle'),
-            subtitle: t('settingsWalletCardSubtitle'),
-            icon: 'card-outline',
-            meta: t('settingsMetaActive'),
-          },
-          {
-            id: 'wallet-network',
-            title: t('settingsWalletNetworkTitle'),
-            subtitle: network.name,
-            icon: 'git-network-outline',
-            meta: network.currencySymbol,
-            onPress: handleGeneral,
-          },
-        ],
+        id: 'theme',
+        title: t('settingsThemeTitle'),
+        subtitle: t('settingsThemeSubtitle'),
+        icon: 'moon-outline',
+        toggle: isDarkTheme,
+        onPress: handleThemeToggle,
       },
       {
-        label: t('settingsGroupSecurity'),
-        rows: [
-          {
-            id: 'security-pin',
-            title: t('settingsChangePinTitle'),
-            subtitle: t('settingsChangePinSubtitle'),
-            icon: 'key-outline',
-            onPress: handleChangePin,
-          },
-          {
-            id: 'security-backup',
-            title: t('settingsBackupTitle'),
-            subtitle: t('settingsBackupSubtitle'),
-            icon: 'shield-checkmark-outline',
-            onPress: handleBackup,
-          },
-        ],
-      },
-      {
-        label: t('settingsGroupDisplay'),
-        rows: [
-          {
-            id: 'display-language',
-            title: t('generalLanguage'),
-            subtitle: languageLabel,
-            icon: 'language-outline',
-            meta: settings.language.toUpperCase(),
-            onPress: handleGeneral,
-          },
-          {
-            id: 'display-currency',
-            title: t('generalCurrency'),
-            subtitle: currencyLabel,
-            icon: 'cash-outline',
-            meta: settings.currency.toUpperCase(),
-            onPress: handleGeneral,
-          },
-          {
-            id: 'display-theme',
-            title: t('generalTheme'),
-            subtitle: themeLabel,
-            icon: 'contrast-outline',
-            onPress: handleGeneral,
-          },
-        ],
-      },
-      {
-        label: t('settingsGroupSystem'),
-        rows: [
-          {
-            id: 'system-clear-cache',
-            title: t('settingsDeleteCacheTitle'),
-            subtitle: t('settingsDeleteCacheSubtitle'),
-            icon: 'trash-outline',
-            onPress: handleDeleteCache,
-            danger: 'soft',
-          },
-          {
-            id: 'system-logout',
-            title: t('settingsLogoutTitle'),
-            subtitle: t('settingsLogoutSubtitle'),
-            icon: 'log-out-outline',
-            onPress: handleLogout,
-            danger: 'hard',
-          },
-        ],
+        id: 'biometric',
+        title: t('settingsBiometricTitle'),
+        subtitle: t('settingsBiometricSubtitle'),
+        icon: 'finger-print-outline',
+        toggle: biometricEnabled,
+        onPress: () => setBiometricEnabled(prev => !prev),
       },
     ],
-    [
-      currencyLabel,
-      handleBackup,
-      handleChangePin,
-      handleDeleteCache,
-      handleGeneral,
-      handleLogout,
-      languageLabel,
-      network.currencySymbol,
-      network.name,
-      session?.address,
-      settings.currency,
-      settings.language,
-      t,
-      themeLabel,
+    [biometricEnabled, handleThemeToggle, isDarkTheme, t],
+  );
+
+  const securityRows = useMemo<RowItem[]>(
+    () => [
+      {
+        id: 'change-pin',
+        title: t('settingsChangePinTitle'),
+        subtitle: t('settingsChangePinSubtitle'),
+        icon: 'key-outline',
+        onPress: handleChangePin,
+      },
+      {
+        id: 'backup',
+        title: t('settingsBackupTitle'),
+        subtitle: t('settingsBackupSubtitle'),
+        icon: 'shield-checkmark-outline',
+        onPress: handleBackup,
+      },
     ],
+    [handleBackup, handleChangePin, t],
+  );
+
+  const displayRows = useMemo<RowItem[]>(
+    () => [
+      {
+        id: 'language',
+        title: t('generalLanguage'),
+        subtitle: languageLabel,
+        icon: 'language-outline',
+        meta: settings.language.toUpperCase(),
+        onPress: handleGeneral,
+      },
+      {
+        id: 'currency',
+        title: t('settingsCurrencyPrimaryTitle'),
+        subtitle: t('settingsCurrencyPrimarySubtitle'),
+        icon: 'cash-outline',
+        meta: currencyCode,
+        onPress: handleGeneral,
+      },
+    ],
+    [currencyCode, handleGeneral, languageLabel, settings.language, t],
+  );
+
+  const socialRows = useMemo<RowItem[]>(
+    () => [
+      {
+        id: 'social-x',
+        title: t('settingsSocialXTitle'),
+        subtitle: t('settingsSocialXHandle'),
+        icon: 'logo-twitter',
+        social: 'x',
+      },
+      {
+        id: 'social-facebook',
+        title: t('settingsSocialFacebookTitle'),
+        subtitle: t('settingsSocialFacebookHandle'),
+        icon: 'logo-facebook',
+        social: 'facebook',
+      },
+      {
+        id: 'social-youtube',
+        title: t('settingsSocialYoutubeTitle'),
+        subtitle: t('settingsSocialYoutubeHandle'),
+        icon: 'logo-youtube',
+        social: 'youtube',
+      },
+    ],
+    [t],
+  );
+
+  const systemRows = useMemo<RowItem[]>(
+    () => [
+      {
+        id: 'clear-cache',
+        title: t('settingsDeleteCacheTitle'),
+        subtitle: t('settingsDeleteCacheSubtitle'),
+        icon: 'trash-outline',
+        onPress: handleDeleteCache,
+        danger: 'soft',
+      },
+      {
+        id: 'logout',
+        title: t('settingsLogoutTitle'),
+        subtitle: t('settingsLogoutSubtitle'),
+        icon: 'log-out-outline',
+        onPress: handleLogout,
+        danger: 'hard',
+      },
+    ],
+    [handleDeleteCache, handleLogout, t],
+  );
+
+  const renderRows = (rows: RowItem[], displayOnly = false) => (
+    <View style={styles.groupCard}>
+      {rows.map((row, index) => {
+        const hardDanger = row.danger === 'hard';
+        const softDanger = row.danger === 'soft';
+        const isInteractive = !displayOnly && Boolean(row.onPress);
+
+        const content = (
+          <>
+            <View
+              style={[
+                styles.rowIcon,
+                softDanger && styles.rowIconSoftDanger,
+                hardDanger && styles.rowIconHardDanger,
+                row.social === 'x' && styles.rowIconX,
+                row.social === 'facebook' && styles.rowIconFacebook,
+                row.social === 'youtube' && styles.rowIconYoutube,
+              ]}
+            >
+              <Ionicons
+                name={row.icon}
+                size={18}
+                color={
+                  hardDanger
+                    ? '#FF8A8A'
+                    : softDanger
+                      ? '#FFB38E'
+                      : row.social === 'facebook'
+                        ? '#5EA0FF'
+                        : row.social === 'youtube'
+                          ? '#FF6B6B'
+                          : '#A7D4FF'
+                }
+              />
+            </View>
+
+            <View style={styles.rowTextCol}>
+              <Text style={[styles.rowTitle, hardDanger && styles.rowTitleDanger]}>{row.title}</Text>
+              <Text style={styles.rowSubtitle}>{row.subtitle}</Text>
+            </View>
+
+            {typeof row.toggle === 'boolean' ? (
+              <View style={[styles.toggle, row.toggle && styles.toggleOn]}>
+                <View style={[styles.toggleKnob, row.toggle && styles.toggleKnobOn]} />
+              </View>
+            ) : row.social ? (
+              <View style={styles.socialCta}>
+                <Text style={styles.socialCtaText}>{t('settingsSocialOpen')}</Text>
+                <Ionicons name="arrow-up-outline" size={10} color={WALLET_COLORS.textMuted} />
+              </View>
+            ) : row.meta ? (
+              <View style={styles.metaWrap}>
+                <Text style={styles.metaText}>{row.meta}</Text>
+                <Ionicons name="chevron-forward" size={12} color={WALLET_COLORS.textSoft} />
+              </View>
+            ) : (
+              <Ionicons name="chevron-forward" size={14} color={WALLET_COLORS.textSoft} />
+            )}
+
+            {index < rows.length - 1 ? <View style={styles.rowSeparator} /> : null}
+          </>
+        );
+
+        if (isInteractive && row.onPress) {
+          return (
+            <Pressable
+              key={row.id}
+              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+              onPress={row.onPress}
+            >
+              {content}
+            </Pressable>
+          );
+        }
+
+        return (
+          <View key={row.id} style={styles.row}>
+            {content}
+          </View>
+        );
+      })}
+    </View>
   );
 
   return (
-    <View style={screenBase.screen}>
+    <View style={styles.root}>
       <StatusBar
         barStyle={resolvedTheme === 'light' ? 'dark-content' : 'light-content'}
         backgroundColor={WALLET_COLORS.background}
       />
-      <SafeAreaView style={screenBase.safeArea} edges={['top', 'bottom']}>
-        <View style={screenBase.content}>
-          <WalletTopBar
-            title={t('headerSettingsTitle')}
-            onBack={() => navigation.goBack()}
-            right={
-              <Pressable style={styles.iconButton}>
-                <Ionicons name="ellipsis-vertical" size={14} color={WALLET_COLORS.textMuted} />
-              </Pressable>
-            }
-          />
 
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-            <WalletPanel style={styles.profileCard}>
-              <View style={styles.profileAvatar}>
-                <View style={styles.profileAvatarGlow} />
-                <View style={styles.profileAvatarDot} />
-              </View>
-              <View style={styles.profileText}>
-                <Text style={styles.profileName}>{t('settingsMetaPrimary')}</Text>
-                <Text style={styles.profileAddress}>{truncateAddress(session?.address ?? '')}</Text>
-              </View>
-              <WalletPill style={styles.statusPill}>
-                <View style={styles.statusDot} />
-                <Text style={styles.statusText}>{t('settingsStatusOnline')}</Text>
-              </WalletPill>
-            </WalletPanel>
-
-            {groups.map(group => (
-              <View key={group.label} style={styles.groupWrap}>
-                <WalletSectionLabel label={group.label} style={styles.groupLabel} />
-                <WalletPanel>
-                  {group.rows.map((row, index) => {
-                    const hardDanger = row.danger === 'hard';
-                    const softDanger = row.danger === 'soft';
-                    return (
-                      <Pressable key={row.id} style={styles.row} onPress={row.onPress} disabled={!row.onPress}>
-                        <View
-                          style={[
-                            styles.rowIconWrap,
-                            softDanger && styles.rowIconSoftDanger,
-                            hardDanger && styles.rowIconHardDanger,
-                          ]}
-                        >
-                          <Ionicons
-                            name={row.icon}
-                            size={17}
-                            color={hardDanger ? WALLET_COLORS.danger : softDanger ? '#FFB38E' : WALLET_COLORS.text}
-                          />
-                        </View>
-                        <View style={styles.rowText}>
-                          <Text style={[styles.rowTitle, hardDanger && styles.rowTitleDanger]}>{row.title}</Text>
-                          <Text style={styles.rowSubtitle}>{row.subtitle}</Text>
-                        </View>
-                        {row.meta ? (
-                          <View style={styles.metaWrap}>
-                            <Text style={styles.metaText}>{row.meta}</Text>
-                            <Ionicons name="chevron-forward" size={12} color={WALLET_COLORS.textSoft} />
-                          </View>
-                        ) : (
-                          <Ionicons name="chevron-forward" size={14} color={WALLET_COLORS.textSoft} />
-                        )}
-                        {index < group.rows.length - 1 ? <View style={styles.rowDivider} /> : null}
-                      </Pressable>
-                    );
-                  })}
-                </WalletPanel>
-              </View>
-            ))}
-
-            <Text style={styles.versionText}>
-              Chainora · v1.2.4
-              {'\n'}
-              <Text style={styles.versionSub}>{t('settingsVersionSubtext')}</Text>
-            </Text>
-          </ScrollView>
+      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+        <View style={styles.topBar}>
+          <Pressable style={styles.backButton} onPress={() => navigation.goBack()}>
+            <Ionicons name="chevron-back" size={14} color={WALLET_COLORS.textMuted} />
+          </Pressable>
+          <Text style={styles.topTitle}>{t('headerSettingsTitle')}</Text>
+          <View style={styles.backButtonGhost} />
         </View>
+
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+          <View style={styles.profileCard}>
+            <View style={styles.profileAvatar}>
+              <View style={styles.profileAvatarGradient} />
+              <View style={styles.profileAvatarCore} />
+            </View>
+
+            <View style={styles.profileText}>
+              <Text style={styles.profileName}>{t('settingsProfilePrimaryLabel')}</Text>
+              <Text style={styles.profileAddress}>{truncateAddress(session?.address ?? '')}</Text>
+            </View>
+
+            <View style={styles.profileStatus}>
+              <View style={styles.profileStatusDot} />
+              <Text style={styles.profileStatusText}>{t('settingsStatusOnline')}</Text>
+            </View>
+          </View>
+
+          <View style={styles.groupWrap}>
+            <Text style={styles.groupLabel}>{t('settingsGroupOptions')}</Text>
+            {renderRows(optionRows)}
+          </View>
+
+          <View style={styles.groupWrap}>
+            <Text style={styles.groupLabel}>{t('settingsGroupSecurity')}</Text>
+            {renderRows(securityRows)}
+          </View>
+
+          <View style={styles.groupWrap}>
+            <Text style={styles.groupLabel}>{t('settingsGroupDisplay')}</Text>
+            {renderRows(displayRows)}
+          </View>
+
+          <View style={styles.groupWrap}>
+            <Text style={styles.groupLabel}>{t('settingsGroupFollowChainora')}</Text>
+            {renderRows(socialRows, true)}
+          </View>
+
+          <View style={styles.groupWrap}>
+            <Text style={styles.groupLabel}>{t('settingsGroupSystem')}</Text>
+            {renderRows(systemRows)}
+          </View>
+
+          <Text style={styles.versionText}>
+            {t('settingsVersionLine')}
+            {'\n'}
+            <Text style={styles.versionSub}>{t('settingsVersionSubtext')}</Text>
+          </Text>
+        </ScrollView>
       </SafeAreaView>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  iconButton: {
-    width: 34,
-    height: 34,
+  root: {
+    flex: 1,
+    backgroundColor: WALLET_COLORS.background,
+  },
+  safeArea: {
+    flex: 1,
+  },
+  topBar: {
+    paddingTop: 6,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: WALLET_COLORS.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  backButton: {
+    width: 32,
+    height: 32,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: WALLET_COLORS.border,
@@ -323,73 +397,87 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  backButtonGhost: {
+    width: 32,
+    height: 32,
+  },
+  topTitle: {
+    flex: 1,
+    textAlign: 'center',
+    fontFamily: DISPLAY_FONT,
+    fontSize: 16,
+    color: WALLET_COLORS.text,
+    letterSpacing: -0.4,
+  },
   scrollContent: {
-    paddingTop: 16,
-    paddingBottom: 24,
-    gap: 18,
+    paddingTop: 14,
+    paddingHorizontal: 14,
+    paddingBottom: 50,
   },
   profileCard: {
-    padding: 14,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    padding: 14,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(40, 151, 255, 0.3)',
+    backgroundColor: WALLET_COLORS.surfaceAlt,
+    marginBottom: 18,
   },
   profileAvatar: {
-    width: 46,
-    height: 46,
+    width: 44,
+    height: 44,
     borderRadius: 14,
-    backgroundColor: WALLET_COLORS.surfaceSoft,
-    borderWidth: 1,
-    borderColor: 'rgba(79, 180, 255, 0.28)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    overflow: 'hidden',
   },
-  profileAvatarGlow: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: WALLET_COLORS.signal,
+  profileAvatarGradient: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#2577D8',
   },
-  profileAvatarDot: {
+  profileAvatarCore: {
     position: 'absolute',
-    right: 8,
-    bottom: 8,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: WALLET_COLORS.success,
-    borderWidth: 1.5,
-    borderColor: WALLET_COLORS.surface,
+    top: 6,
+    left: 6,
+    right: 6,
+    bottom: 6,
+    borderRadius: 10,
+    backgroundColor: '#0D1A2E',
   },
   profileText: {
     flex: 1,
-    gap: 2,
   },
   profileName: {
     color: WALLET_COLORS.text,
-    fontSize: 15,
-    fontWeight: '700',
     fontFamily: DISPLAY_FONT,
+    fontSize: 15,
+    letterSpacing: -0.2,
   },
   profileAddress: {
+    marginTop: 2,
     color: WALLET_COLORS.textMuted,
     fontFamily: MONO_FONT,
     fontSize: 11,
+    letterSpacing: 0.4,
   },
-  statusPill: {
-    minHeight: 28,
-    paddingHorizontal: 10,
+  profileStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 6,
-    borderColor: 'rgba(52, 211, 153, 0.3)',
-    backgroundColor: 'rgba(52, 211, 153, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
   },
-  statusDot: {
+  profileStatusDot: {
     width: 5,
     height: 5,
     borderRadius: 2.5,
     backgroundColor: WALLET_COLORS.success,
   },
-  statusText: {
+  profileStatusText: {
     color: '#8DE9C5',
     fontFamily: MONO_FONT,
     fontSize: 10,
@@ -397,26 +485,42 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   groupWrap: {
-    gap: 8,
+    marginBottom: 18,
   },
   groupLabel: {
-    paddingHorizontal: 2,
+    paddingHorizontal: 4,
+    paddingBottom: 8,
+    color: WALLET_COLORS.textSoft,
+    fontFamily: MONO_FONT,
+    fontSize: 10,
+    letterSpacing: 1.6,
+    textTransform: 'uppercase',
+  },
+  groupCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: WALLET_COLORS.border,
+    backgroundColor: WALLET_COLORS.surface,
+    overflow: 'hidden',
   },
   row: {
     minHeight: 76,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
   },
-  rowIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
+  rowPressed: {
+    backgroundColor: WALLET_COLORS.surfaceAlt,
+  },
+  rowIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 9,
     borderWidth: 1,
-    borderColor: WALLET_COLORS.border,
-    backgroundColor: WALLET_COLORS.surfaceSoft,
+    borderColor: 'rgba(40, 151, 255, 0.25)',
+    backgroundColor: 'rgba(40, 151, 255, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -425,25 +529,67 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 180, 120, 0.12)',
   },
   rowIconHardDanger: {
-    borderColor: 'rgba(255, 122, 122, 0.42)',
-    backgroundColor: WALLET_COLORS.dangerSoft,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+    backgroundColor: 'rgba(239, 68, 68, 0.14)',
   },
-  rowText: {
+  rowIconX: {
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  rowIconFacebook: {
+    borderColor: 'rgba(24, 119, 242, 0.32)',
+    backgroundColor: 'rgba(24, 119, 242, 0.14)',
+  },
+  rowIconYoutube: {
+    borderColor: 'rgba(239, 68, 68, 0.32)',
+    backgroundColor: 'rgba(239, 68, 68, 0.14)',
+  },
+  rowTextCol: {
     flex: 1,
-    gap: 3,
+    minWidth: 0,
   },
   rowTitle: {
     color: WALLET_COLORS.text,
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '600',
+    letterSpacing: -0.1,
   },
   rowTitleDanger: {
-    color: '#FFB4B4',
+    color: '#FF8A8A',
   },
   rowSubtitle: {
+    marginTop: 2,
     color: WALLET_COLORS.textSoft,
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: 11,
+    letterSpacing: -0.05,
+  },
+  rowSeparator: {
+    position: 'absolute',
+    left: 54,
+    right: 14,
+    bottom: 0,
+    height: 1,
+    backgroundColor: WALLET_COLORS.border,
+  },
+  toggle: {
+    width: 40,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#223044',
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+  },
+  toggleOn: {
+    backgroundColor: WALLET_COLORS.signal,
+  },
+  toggleKnob: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#FFFFFF',
+  },
+  toggleKnobOn: {
+    alignSelf: 'flex-end',
   },
   metaWrap: {
     flexDirection: 'row',
@@ -454,27 +600,41 @@ const styles = StyleSheet.create({
     color: WALLET_COLORS.textMuted,
     fontFamily: MONO_FONT,
     fontSize: 11,
+    letterSpacing: 0.4,
   },
-  rowDivider: {
-    position: 'absolute',
-    left: 58,
-    right: 12,
-    bottom: 0,
-    height: 1,
-    backgroundColor: '#203149',
+  socialCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: WALLET_COLORS.border,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+  },
+  socialCtaText: {
+    color: WALLET_COLORS.textMuted,
+    fontFamily: MONO_FONT,
+    fontSize: 10,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
   },
   versionText: {
+    marginTop: 2,
+    paddingTop: 2,
+    textAlign: 'center',
     color: WALLET_COLORS.textSoft,
     fontSize: 11,
-    lineHeight: 17,
-    textAlign: 'center',
-    marginTop: 2,
+    lineHeight: 18,
   },
   versionSub: {
     color: WALLET_COLORS.textMuted,
     fontFamily: MONO_FONT,
     fontSize: 10,
+    letterSpacing: 0.6,
   },
 });
 
 export default SettingsScreen;
+
