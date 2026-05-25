@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getAddress } from 'viem';
 
-import { getActiveNetwork } from '../config/network';
+import { getActiveNetwork, type NetworkConfig } from '../config/network';
 import {
   addRecentActivities,
   type AddRecentActivityParams,
@@ -58,13 +58,15 @@ export const clearActivitySyncState = async (): Promise<void> => {
   }
 };
 
-export const syncWalletActivities = async (walletAddress: string): Promise<void> => {
+export const syncWalletActivities = async (
+  walletAddress: string,
+  network: NetworkConfig = getActiveNetwork(),
+): Promise<void> => {
   if (activitySyncPauseCount > 0) {
     return;
   }
 
   const normalizedWallet = walletAddress.toLowerCase();
-  const network = getActiveNetwork();
   const client = getPublicViemClient(network);
   const wallet = getAddress(normalizedWallet).toLowerCase();
   const syncKey = `${network.key}:${normalizedWallet}`;

@@ -1,6 +1,6 @@
 import { erc20Abi, formatEther, formatUnits, getAddress } from 'viem';
 
-import { getActiveNetwork } from '../config/network';
+import { getActiveNetwork, type NetworkConfig } from '../config/network';
 import { getPublicViemClient } from './web3Client';
 
 const toFixedBalance = (value: bigint, decimals: number): string => {
@@ -17,8 +17,10 @@ const toFixedNativeBalance = (value: bigint): string => {
   return `${whole}.${fractionPadded}`;
 };
 
-export const fetchEthBalance = async (address: string): Promise<{ wei: bigint; formatted: string }> => {
-  const network = getActiveNetwork();
+export const fetchWalletBalance = async (
+  address: string,
+  network: NetworkConfig = getActiveNetwork(),
+): Promise<{ wei: bigint; formatted: string }> => {
   const client = getPublicViemClient(network);
   const walletAddress = getAddress(address);
 
@@ -81,3 +83,6 @@ export const fetchEthBalance = async (address: string): Promise<{ wei: bigint; f
     formatted,
   };
 };
+
+export const fetchEthBalance = async (address: string): Promise<{ wei: bigint; formatted: string }> =>
+  fetchWalletBalance(address, getActiveNetwork());

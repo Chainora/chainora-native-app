@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { fetchEthBalance } from '../../../services/balanceService';
+import type { NetworkConfig } from '../../../config/network';
+import { fetchWalletBalance } from '../../../services/balanceService';
 
 export type WalletBalanceState = {
   formatted: string | null;
@@ -9,7 +10,10 @@ export type WalletBalanceState = {
   refresh: () => void;
 };
 
-export const useWalletBalance = (address: string | undefined | null): WalletBalanceState => {
+export const useWalletBalance = (
+  address: string | undefined | null,
+  network?: NetworkConfig,
+): WalletBalanceState => {
   const [formatted, setFormatted] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,7 +33,7 @@ export const useWalletBalance = (address: string | undefined | null): WalletBala
       setLoading(true);
       setError(null);
       try {
-        const result = await fetchEthBalance(address);
+        const result = await fetchWalletBalance(address, network);
         if (isMounted) {
           setFormatted(prev => (prev === result.formatted ? prev : result.formatted));
         }
@@ -55,7 +59,7 @@ export const useWalletBalance = (address: string | undefined | null): WalletBala
     return () => {
       isMounted = false;
     };
-  }, [address, requestId]);
+  }, [address, network, requestId]);
 
   const refresh = useCallback(() => {
     if (inFlightRef.current) {

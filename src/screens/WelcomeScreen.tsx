@@ -40,11 +40,6 @@ const SANS_FONT_SEMIBOLD = Platform.select({
   android: 'Geist-SemiBold',
   default: 'System',
 });
-const SANS_FONT_EXTRABOLD = Platform.select({
-  ios: 'Geist-ExtraBold',
-  android: 'Geist-ExtraBold',
-  default: 'System',
-});
 const MONO_FONT = Platform.select({
   ios: 'GeistMono-Regular',
   android: 'GeistMono-Regular',
@@ -197,21 +192,23 @@ const createStyles = ({
     },
     cardGlowPrimary: {
       position: 'absolute',
-      top: -42 * scale,
-      left: -28 * scale,
-      width: 190 * scale,
-      height: 190 * scale,
-      borderRadius: 95 * scale,
-      backgroundColor: 'rgba(39, 89, 170, 0.72)',
+      top: -54 * scale,
+      left: -36 * scale,
+      width: 220 * scale,
+      height: 136 * scale,
+      borderRadius: 999,
+      backgroundColor: 'rgba(67, 146, 255, 0.24)',
+      transform: [{ rotate: '-10deg' }, { scaleX: 1.18 }],
     },
     cardGlowSecondary: {
       position: 'absolute',
-      top: 12 * scale,
-      left: 60 * scale,
-      width: 160 * scale,
-      height: 120 * scale,
-      borderRadius: 80 * scale,
-      backgroundColor: 'rgba(11, 26, 51, 0.8)',
+      top: 6 * scale,
+      left: 54 * scale,
+      width: 150 * scale,
+      height: 110 * scale,
+      borderRadius: 999,
+      backgroundColor: 'rgba(12, 32, 63, 0.76)',
+      transform: [{ rotate: '12deg' }],
     },
     cardGlowDepth: {
       position: 'absolute',

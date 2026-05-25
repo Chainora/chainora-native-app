@@ -1,140 +1,99 @@
 import React, { useCallback } from 'react';
-import { Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Clipboard from '@react-native-clipboard/clipboard';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
+import { getNetworkConfig } from '../config/network';
 import { useSettings } from '../features/settings';
 import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
-import { WALLET_COLORS } from '../components/ui/walletDesign';
+import { ROUTES } from '../navigation/routes/routes';
+import {
+  DISPLAY_FONT,
+  MONO_FONT,
+  SANS_FONT,
+  SANS_FONT_SEMIBOLD,
+  WALLET_COLORS,
+} from '../components/ui/walletDesign';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'WalletDetails'>;
-
-const ACCENT = {
-  overlay: 'rgba(3, 5, 9, 0.82)',
-  card: '#11161F',
-  surface: '#171C27',
-  surfaceAlt: '#1E2431',
-  border: '#272E3E',
-  borderStrong: '#384053',
-  text: '#E8ECF3',
-  textSecondary: '#B6BDCC',
-  textMuted: '#7A829A',
-  textLow: '#525B73',
-  signal: '#0A7CF2',
-  signalBright: '#2897FF',
-};
+type Props = NativeStackScreenProps<RootStackParamList, typeof ROUTES.WalletDetails>;
 
 const WalletDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
-  const { address, publicKeyHex, networkName } = route.params;
-  const { t, resolvedTheme } = useSettings();
+  const { address, publicKeyHex, networkName, networkKey } = route.params;
+  const { t } = useSettings();
+  const network = networkKey ? getNetworkConfig(networkKey) : null;
 
-  const copyAddress = useCallback(() => {
-    Clipboard.setString(address);
-  }, [address]);
-
-  const copyPublicKey = useCallback(() => {
-    if (!publicKeyHex) {
-      return;
-    }
-    Clipboard.setString(publicKeyHex);
-  }, [publicKeyHex]);
+  const copyText = useCallback((value: string) => {
+    Clipboard.setString(value);
+  }, []);
 
   return (
-    <View style={styles.screen}>
-      <StatusBar
-        barStyle={resolvedTheme === 'light' ? 'dark-content' : 'light-content'}
-        backgroundColor={WALLET_COLORS.background}
-      />
-      <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
-        <View style={styles.screenContent}>
-          <ScrollView
-            style={styles.scrollArea}
-            contentContainerStyle={styles.scrollContent}
-            showsVerticalScrollIndicator={false}
-          >
-            <View style={styles.headerRow}>
-              <Pressable style={styles.headerIcon} onPress={() => navigation.goBack()}>
-                <Ionicons name="chevron-back" size={16} color={ACCENT.textSecondary} />
-              </Pressable>
-              <Text style={styles.headerTitle}>{t('homeWalletDetailsTitle')}</Text>
-              <View style={styles.headerSpacer} />
+    <View style={styles.host}>
+      <SafeAreaView style={styles.host} edges={['top', 'bottom']}>
+        <Pressable style={styles.scrim} onPress={() => navigation.goBack()} />
+        <View style={styles.sheet}>
+          <View style={styles.grab} />
+
+          <View style={styles.header}>
+            <View style={styles.headerIcon}>
+              <Ionicons name="wallet-outline" size={22} color={WALLET_COLORS.signal} />
             </View>
+            <Text style={styles.headerTitle}>{t('homeWalletDetailsTitle')}</Text>
+            <Text style={styles.headerSubtitle}>{t('walletDetailsCardSubtitle')}</Text>
+          </View>
 
-            <View style={styles.head}>
-              <View style={styles.iconWrap}>
-                <Ionicons name="wallet-outline" size={24} color={ACCENT.signalBright} />
-              </View>
-              <Text style={styles.subtitle}>{t('walletDetailsCardSubtitle')}</Text>
+          <View style={styles.qrCard}>
+            <View style={styles.qrMock}>
+              <View style={styles.qrCorner} />
+              <Ionicons name="shield-checkmark-outline" size={28} color={WALLET_COLORS.text} />
             </View>
-
-            <View style={styles.qrCard}>
-              <View style={styles.qrMock}>
-                <View style={styles.qrCornerTL} />
-                <View style={styles.qrCornerTR} />
-                <View style={styles.qrCornerBL} />
-              </View>
-
-              <View style={styles.qrTextWrap}>
-                <Text style={styles.qrTitle}>{t('walletDetailsReceiveTitle')}</Text>
-                <Text style={styles.qrSubtitle}>
-                  {t('walletDetailsReceiveDescription')}
-                </Text>
-              </View>
+            <View style={styles.qrText}>
+              <Text style={styles.qrTitle}>{t('walletDetailsReceiveTitle')}</Text>
+              <Text style={styles.qrBody}>{t('walletDetailsReceiveDescription')}</Text>
             </View>
+          </View>
 
-            <View style={styles.detailCard}>
-              <View style={styles.labelRow}>
-                <Text style={styles.labelText}>{t('homeAddressLine')}</Text>
-                <Text style={styles.badgeText}>{t('walletDetailsBadgeEvm')}</Text>
-              </View>
-
-              <Text style={styles.valueText} selectable>
-                {address}
-              </Text>
-
-              <Pressable style={styles.copyChip} onPress={copyAddress}>
-                <Ionicons name="copy-outline" size={12} color={ACCENT.signalBright} />
-                <Text style={styles.copyChipText}>{t('homeWalletCopyAddress')}</Text>
-              </Pressable>
+          <View style={styles.detailCard}>
+            <View style={styles.detailLabelRow}>
+              <Text style={styles.detailLabel}>{t('homeAddressLine')}</Text>
+              <Text style={styles.detailBadge}>{t('walletDetailsBadgeEvm')}</Text>
             </View>
-
-            <View style={styles.detailCard}>
-              <View style={styles.labelRow}>
-                <Text style={styles.labelText}>{t('homePublicKeyLine')}</Text>
-                <Text style={styles.badgeText}>{t('walletDetailsBadgeSecp')}</Text>
-              </View>
-
-              <Text style={styles.valueText} selectable>
-                {publicKeyHex ?? t('homeUnavailable')}
-              </Text>
-
-              <Pressable
-                style={[styles.copyChip, !publicKeyHex && styles.copyChipDisabled]}
-                onPress={copyPublicKey}
-                disabled={!publicKeyHex}
-              >
-                <Ionicons
-                  name="copy-outline"
-                  size={12}
-                  color={publicKeyHex ? ACCENT.signalBright : ACCENT.textLow}
-                />
-                <Text style={[styles.copyChipText, !publicKeyHex && styles.copyChipTextDisabled]}>
-                  {t('homeWalletCopyPublicKey')}
-                </Text>
-              </Pressable>
-            </View>
-
-            <View style={styles.networkBadge}>
-              <Ionicons name="globe-outline" size={12} color={ACCENT.signalBright} />
-              <Text style={styles.networkBadgeText}>{networkName}</Text>
-            </View>
-
-            <Pressable style={styles.primaryButton} onPress={() => navigation.goBack()}>
-              <Text style={styles.primaryButtonText}>{t('commonDone')}</Text>
+            <Text style={styles.detailValue}>{address}</Text>
+            <Pressable style={styles.copyChip} onPress={() => copyText(address)}>
+              <Ionicons name="copy-outline" size={12} color={WALLET_COLORS.signal} />
+              <Text style={styles.copyChipText}>{t('homeWalletCopyAddress')}</Text>
             </Pressable>
-          </ScrollView>
+          </View>
+
+          <View style={styles.detailCard}>
+            <View style={styles.detailLabelRow}>
+              <Text style={styles.detailLabel}>{t('homePublicKeyLine')}</Text>
+              <Text style={styles.detailBadge}>{t('walletDetailsBadgeSecp')}</Text>
+            </View>
+            <Text style={styles.detailValue}>{publicKeyHex ?? t('homeUnavailable')}</Text>
+            <Pressable
+              style={[styles.copyChip, !publicKeyHex && styles.copyChipDisabled]}
+              disabled={!publicKeyHex}
+              onPress={() => publicKeyHex && copyText(publicKeyHex)}
+            >
+              <Ionicons name="copy-outline" size={12} color={publicKeyHex ? WALLET_COLORS.signal : WALLET_COLORS.textLow} />
+              <Text style={[styles.copyChipText, !publicKeyHex && styles.copyChipTextDisabled]}>
+                {t('homeWalletCopyPublicKey')}
+              </Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.networkPill}>
+            <Ionicons name="globe-outline" size={12} color={WALLET_COLORS.signal} />
+            <Text style={styles.networkPillText}>
+              {network ? `${networkName} · Chain ${network.chainId}` : networkName}
+            </Text>
+          </View>
+
+          <Pressable style={styles.doneButton} onPress={() => navigation.goBack()}>
+            <Text style={styles.doneButtonText}>{t('commonDone')}</Text>
+          </Pressable>
         </View>
       </SafeAreaView>
     </View>
@@ -142,176 +101,135 @@ const WalletDetailsScreen: React.FC<Props> = ({ navigation, route }) => {
 };
 
 const styles = StyleSheet.create({
-  screen: {
+  host: {
     flex: 1,
-    backgroundColor: WALLET_COLORS.background,
+    backgroundColor: 'rgba(3, 6, 10, 0.82)',
+    justifyContent: 'flex-end',
   },
-  screenContent: {
-    flex: 1,
-    backgroundColor: ACCENT.card,
+  scrim: {
+    ...StyleSheet.absoluteFillObject,
   },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 12,
-  },
-  headerIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
+  sheet: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     borderWidth: 1,
-    borderColor: ACCENT.borderStrong,
-    backgroundColor: ACCENT.surfaceAlt,
-  },
-  headerTitle: {
-    flex: 1,
-    color: ACCENT.text,
-    fontSize: 18,
-    fontWeight: '800',
-    letterSpacing: -0.4,
-    textAlign: 'center',
-  },
-  headerSpacer: {
-    width: 30,
-    height: 30,
-  },
-  scrollArea: {
-    flex: 1,
-  },
-  scrollContent: {
+    borderColor: WALLET_COLORS.border,
+    backgroundColor: '#11161F',
     paddingHorizontal: 16,
-    paddingBottom: 20,
-    gap: 12,
+    paddingTop: 10,
+    paddingBottom: 24,
+    gap: 14,
   },
-  head: {
+  grab: {
+    alignSelf: 'center',
+    width: 44,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: WALLET_COLORS.borderStrong,
+  },
+  header: {
     alignItems: 'center',
-    paddingTop: 6,
     gap: 4,
   },
-  iconWrap: {
+  headerIcon: {
     width: 56,
     height: 56,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: ACCENT.border,
-    backgroundColor: ACCENT.surface,
+    borderColor: WALLET_COLORS.border,
+    backgroundColor: WALLET_COLORS.surface,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: ACCENT.signalBright,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-    elevation: 4,
   },
-  subtitle: {
-    color: ACCENT.textLow,
+  headerTitle: {
+    color: WALLET_COLORS.text,
+    fontFamily: DISPLAY_FONT,
+    fontSize: 24,
+  },
+  headerSubtitle: {
+    color: WALLET_COLORS.textLow,
+    fontFamily: MONO_FONT,
     fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 1,
     textTransform: 'uppercase',
   },
   qrCard: {
-    borderRadius: 14,
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: ACCENT.border,
-    backgroundColor: ACCENT.surface,
+    borderColor: WALLET_COLORS.border,
+    backgroundColor: WALLET_COLORS.surface,
     padding: 14,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
   },
   qrMock: {
-    width: 78,
-    height: 78,
-    borderRadius: 8,
-    borderWidth: 4,
-    borderColor: ACCENT.text,
-    backgroundColor: '#0A0E17',
+    width: 82,
+    height: 82,
+    borderRadius: 12,
+    backgroundColor: '#F2F5FA',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
-  qrCornerTL: {
+  qrCorner: {
     position: 'absolute',
-    top: 6,
-    left: 6,
-    width: 14,
-    height: 14,
-    borderWidth: 3,
-    borderColor: ACCENT.text,
+    top: 8,
+    left: 8,
+    width: 18,
+    height: 18,
+    borderTopWidth: 4,
+    borderLeftWidth: 4,
+    borderColor: '#0E1726',
   },
-  qrCornerTR: {
-    position: 'absolute',
-    top: 6,
-    right: 6,
-    width: 14,
-    height: 14,
-    borderWidth: 3,
-    borderColor: ACCENT.text,
-  },
-  qrCornerBL: {
-    position: 'absolute',
-    bottom: 6,
-    left: 6,
-    width: 14,
-    height: 14,
-    borderWidth: 3,
-    borderColor: ACCENT.text,
-  },
-  qrTextWrap: {
+  qrText: {
     flex: 1,
     gap: 4,
   },
   qrTitle: {
-    color: ACCENT.text,
+    color: WALLET_COLORS.text,
+    fontFamily: SANS_FONT_SEMIBOLD,
     fontSize: 14,
-    fontWeight: '700',
   },
-  qrSubtitle: {
-    color: ACCENT.textMuted,
-    fontSize: 11,
-    lineHeight: 16,
+  qrBody: {
+    color: WALLET_COLORS.textSoft,
+    fontFamily: SANS_FONT,
+    fontSize: 12,
+    lineHeight: 17,
   },
   detailCard: {
-    borderRadius: 14,
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: ACCENT.border,
-    backgroundColor: ACCENT.surface,
+    borderColor: WALLET_COLORS.border,
+    backgroundColor: WALLET_COLORS.surface,
     padding: 14,
     gap: 10,
   },
-  labelRow: {
+  detailLabelRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 10,
   },
-  labelText: {
-    color: ACCENT.textLow,
+  detailLabel: {
+    color: WALLET_COLORS.textLow,
+    fontFamily: MONO_FONT,
     fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 1,
     textTransform: 'uppercase',
   },
-  badgeText: {
-    color: ACCENT.textSecondary,
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
+  detailBadge: {
+    color: WALLET_COLORS.textMuted,
+    fontFamily: MONO_FONT,
+    fontSize: 10,
     borderWidth: 1,
-    borderColor: ACCENT.borderStrong,
-    borderRadius: 4,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    backgroundColor: ACCENT.surfaceAlt,
+    borderColor: WALLET_COLORS.borderStrong,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    backgroundColor: WALLET_COLORS.surfaceAlt,
   },
-  valueText: {
-    color: ACCENT.textSecondary,
+  detailValue: {
+    color: WALLET_COLORS.text,
+    fontFamily: MONO_FONT,
     fontSize: 12,
     lineHeight: 18,
   },
@@ -322,59 +240,51 @@ const styles = StyleSheet.create({
     gap: 6,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: ACCENT.border,
-    backgroundColor: ACCENT.surfaceAlt,
+    borderColor: WALLET_COLORS.border,
+    backgroundColor: WALLET_COLORS.surfaceAlt,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
   copyChipDisabled: {
-    opacity: 0.7,
+    opacity: 0.6,
   },
   copyChipText: {
-    color: ACCENT.signalBright,
+    color: WALLET_COLORS.signal,
+    fontFamily: SANS_FONT_SEMIBOLD,
     fontSize: 11,
-    fontWeight: '700',
   },
   copyChipTextDisabled: {
-    color: ACCENT.textLow,
+    color: WALLET_COLORS.textLow,
   },
-  networkBadge: {
+  networkPill: {
     alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: 'rgba(40, 151, 255, 0.28)',
-    backgroundColor: 'rgba(40, 151, 255, 0.08)',
+    borderColor: WALLET_COLORS.signalBorder,
+    backgroundColor: WALLET_COLORS.signalSoft,
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
-  networkBadgeText: {
-    color: ACCENT.signalBright,
+  networkPillText: {
+    color: WALLET_COLORS.signal,
+    fontFamily: MONO_FONT,
     fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
   },
-  primaryButton: {
-    borderRadius: 10,
+  doneButton: {
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: ACCENT.signalBright,
-    backgroundColor: ACCENT.signal,
+    borderColor: WALLET_COLORS.signalBorder,
+    backgroundColor: WALLET_COLORS.signal,
     paddingVertical: 14,
     alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: ACCENT.signalBright,
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.24,
-    shadowRadius: 18,
-    elevation: 4,
   },
-  primaryButtonText: {
+  doneButtonText: {
     color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
+    fontFamily: SANS_FONT_SEMIBOLD,
+    fontSize: 15,
   },
 });
 

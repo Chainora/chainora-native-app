@@ -15,7 +15,6 @@ import {
   DISPLAY_FONT,
   MONO_FONT,
   WALLET_COLORS,
-  WalletAuras,
   WalletPanel,
   WalletPill,
   WalletSectionLabel,
@@ -232,7 +231,6 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
         backgroundColor={WALLET_COLORS.background}
       />
       <SafeAreaView style={screenBase.safeArea} edges={['top', 'bottom']}>
-        <WalletAuras />
         <View style={screenBase.content}>
           <WalletTopBar
             title={t('headerSettingsTitle')}

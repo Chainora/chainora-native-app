@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   AppState,
+  Image,
   Pressable,
   ScrollView,
   StatusBar,
@@ -12,30 +13,52 @@ import {
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useIsFocused } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
-import { RecentActivitySection } from '../components/home/RecentActivitySection';
 import {
   DISPLAY_FONT,
+  DISPLAY_FONT_MEDIUM,
   MONO_FONT,
+  SANS_FONT,
+  SANS_FONT_SEMIBOLD,
   WALLET_COLORS,
-  WalletAuras,
-  WalletPanel,
   WalletPill,
   buildWalletScreenStyles,
 } from '../components/ui/walletDesign';
-import { getActiveNetwork } from '../config/network';
+import {
+  WALLET_HOME_NETWORK_KEYS,
+  type WalletHomeNetworkKey,
+} from '../config/network';
 import { useAuth } from '../features/auth';
 import { useSettings } from '../features/settings';
 import {
-  getRecentActivitiesByWallet,
+  buildDefaultWalletHomeVisibility,
+  getWalletHomeVisibility,
+  syncPortfolioDailySnapshot,
+} from '../features/wallet/walletHomePreferences';
+import {
+  buildPortfolioAssetSnapshot,
+  calculatePortfolioDayChange,
+  formatSignedPercentDelta,
+  formatSignedUsdDelta,
+  formatUsdValue,
+  getWalletHomeAssetConfigs,
+  mergePortfolioActivities,
+  sortPortfolioAssets,
+  sumPortfolioUsdValue,
+  type PortfolioAssetSnapshot,
+} from '../features/wallet/homePortfolio';
+import {
+  getRecentActivitiesByWalletAcrossNetworks,
   type RecentActivity,
 } from '../features/wallet/recentActivityStorage';
-import { useWalletBalance } from '../features/wallet/hooks/useWalletBalance';
+import type { LocaleKey } from '../locales';
 import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
 import { ROUTES } from '../navigation/routes/routes';
+import { getNetworkLogoSource } from '../config/networkLogos';
 import { syncWalletActivities } from '../services/activitySyncService';
+import { fetchWalletBalance } from '../services/balanceService';
 import { walletRelaySessionManager } from '../services/walletRelaySessionManager';
 
 type Props = NativeStackScreenProps<RootStackParamList, typeof ROUTES.Home>;
@@ -43,25 +66,38 @@ type TabKey = 'assets' | 'activity';
 
 const BALANCE_POLL_INTERVAL_MS = 15_000;
 const ACTIVITY_POLL_INTERVAL_MS = 30_000;
-const POST_SEND_BALANCE_REFETCH_DELAY_MS = 3_500;
-const POST_SEND_ACTIVITY_REFETCH_DELAY_MS = 3_500;
 const ACTIVITY_SYNC_DEBOUNCE_MS = 800;
 
-const STATIC_TOKENS = [
-  { sym: 'BTC', network: 'Bitcoin', name: 'Bitcoin', balance: '0.001439', value: '111.90', glyph: 'B' },
-  { sym: 'BNB', network: 'BNB Smart Chain', name: 'BNB Smart Chain', balance: '0.072958', value: '46.30', glyph: 'B' },
-  { sym: 'SOL', network: 'Solana', name: 'Solana', balance: '0.532024', value: '45.76', glyph: 'S' },
-];
-
 const screenBase = buildWalletScreenStyles();
+const walletHomeNetworks = getWalletHomeAssetConfigs();
+const usdFormatter = new Intl.NumberFormat('en-US', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+const timeFormatter = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+});
 
-const truncateAddress = (address: string) => `${address.slice(0, 6)}...${address.slice(-4)}`;
+const truncateAddress = (value: string) => `${value.slice(0, 6)}...${value.slice(-4)}`;
+const buildAssetSignature = (assets: PortfolioAssetSnapshot[]) =>
+  assets
+    .map(asset => `${asset.network.key}:${asset.balanceFormatted}:${asset.usdValue}:${asset.error ?? ''}`)
+    .join('|');
+const buildActivitySignature = (items: RecentActivity[]) => items.map(item => item.id).join('|');
 
-const coinColors: Record<string, string> = {
-  BTC: '#F7931A',
-  ETH: '#627EEA',
-  BNB: '#F3BA2F',
-  SOL: '#9945FF',
+const getActivityHeadline = (item: RecentActivity, t: (key: LocaleKey) => string) =>
+  item.kind === 'send' ? t('homeActivitySent') : t('homeActivityReceived');
+
+const getActivityCounterpartyLine = (
+  item: RecentActivity,
+  t: (key: LocaleKey) => string,
+) => {
+  const label = item.kind === 'send' ? t('homeActivityTo') : t('homeActivityFrom');
+  const address = item.kind === 'send' ? item.toAddress : item.fromAddress;
+  return `${label} ${truncateAddress(address)}`;
 };
 
 const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
@@ -69,38 +105,146 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
   const { initializeSession } = useAuth();
   const { resolvedTheme, t } = useSettings();
   const isFocused = useIsFocused();
-  const balanceState = useWalletBalance(ethAddress);
-  const refreshBalanceFn = balanceState.refresh;
-  const network = getActiveNetwork();
-
+  const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<TabKey>('assets');
   const [isAppActive, setIsAppActive] = useState(AppState.currentState === 'active');
+  const [assets, setAssets] = useState<PortfolioAssetSnapshot[]>([]);
+  const [assetsLoading, setAssetsLoading] = useState(false);
   const [activities, setActivities] = useState<RecentActivity[]>([]);
+  const [visibility, setVisibility] = useState(buildDefaultWalletHomeVisibility());
+  const [prefsReady, setPrefsReady] = useState(false);
+  const [dayChangeLabel, setDayChangeLabel] = useState({
+    text: `${formatSignedPercentDelta(0)} | ${formatSignedUsdDelta(0)}`,
+    direction: 'flat' as 'up' | 'down' | 'flat',
+  });
 
+  const mountedRef = useRef(true);
   const wasAppActiveRef = useRef(isAppActive);
-  const lastNetworkKeyRef = useRef(network.key);
+  const assetSignatureRef = useRef('');
+  const activitySignatureRef = useRef('');
   const activityInFlightRef = useRef(false);
   const activityQueuedRef = useRef(false);
   const activitySyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const activitySignatureRef = useRef('');
-  const postSendBalanceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const postSendActivityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const mountedRef = useRef(true);
 
-  useEffect(() => {
-    return () => {
-      mountedRef.current = false;
-      if (postSendBalanceTimeoutRef.current) {
-        clearTimeout(postSendBalanceTimeoutRef.current);
-      }
-      if (postSendActivityTimeoutRef.current) {
-        clearTimeout(postSendActivityTimeoutRef.current);
-      }
-      if (activitySyncTimerRef.current) {
-        clearTimeout(activitySyncTimerRef.current);
-      }
-    };
+  const setAssetsIfChanged = useCallback((next: PortfolioAssetSnapshot[]) => {
+    const signature = buildAssetSignature(next);
+    if (assetSignatureRef.current === signature) {
+      return;
+    }
+    assetSignatureRef.current = signature;
+    setAssets(next);
   }, []);
+
+  const setActivitiesIfChanged = useCallback((next: RecentActivity[]) => {
+    const signature = buildActivitySignature(next);
+    if (activitySignatureRef.current === signature) {
+      return;
+    }
+    activitySignatureRef.current = signature;
+    setActivities(next);
+  }, []);
+
+  const loadPreferences = useCallback(async () => {
+    try {
+      const nextVisibility = await getWalletHomeVisibility();
+      if (!mountedRef.current) {
+        return;
+      }
+      setVisibility(nextVisibility);
+      setPrefsReady(true);
+    } catch (error) {
+      console.warn('[Home] Failed to load wallet home preferences', error);
+      if (mountedRef.current) {
+        setPrefsReady(true);
+      }
+    }
+  }, []);
+
+  const refreshPortfolio = useCallback(async () => {
+    setAssetsLoading(true);
+    try {
+      const results = await Promise.allSettled(
+        walletHomeNetworks.map(async network => {
+          const balance = await fetchWalletBalance(ethAddress, network);
+          return buildPortfolioAssetSnapshot({
+            network,
+            balanceFormatted: balance.formatted,
+            balanceWei: balance.wei,
+          });
+        }),
+      );
+
+      const nextAssets = results.map((result, index) => {
+        const network = walletHomeNetworks[index];
+        if (result.status === 'fulfilled') {
+          return result.value;
+        }
+
+        const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
+        return buildPortfolioAssetSnapshot({
+          network,
+          balanceFormatted: '0.0000',
+          error: message,
+        });
+      });
+
+      if (mountedRef.current) {
+        setAssetsIfChanged(sortPortfolioAssets(nextAssets));
+      }
+    } catch (error) {
+      console.warn('[Home] Failed to refresh portfolio', error);
+    } finally {
+      if (mountedRef.current) {
+        setAssetsLoading(false);
+      }
+    }
+  }, [ethAddress, setAssetsIfChanged]);
+
+  const loadRecentActivity = useCallback(async () => {
+    if (activityInFlightRef.current) {
+      activityQueuedRef.current = true;
+      return;
+    }
+
+    activityInFlightRef.current = true;
+
+    try {
+      const cached = await getRecentActivitiesByWalletAcrossNetworks(ethAddress, [...WALLET_HOME_NETWORK_KEYS]);
+      if (mountedRef.current) {
+        setActivitiesIfChanged(mergePortfolioActivities(cached));
+      }
+
+      await Promise.allSettled(walletHomeNetworks.map(network => syncWalletActivities(ethAddress, network)));
+      const next = await getRecentActivitiesByWalletAcrossNetworks(ethAddress, [...WALLET_HOME_NETWORK_KEYS]);
+      if (mountedRef.current) {
+        setActivitiesIfChanged(mergePortfolioActivities(next));
+      }
+    } catch (error) {
+      console.warn('[Home] Failed to load recent activity', error);
+    } finally {
+      activityInFlightRef.current = false;
+      if (activityQueuedRef.current) {
+        activityQueuedRef.current = false;
+        setTimeout(() => {
+          loadRecentActivity().catch(nextError => {
+            console.warn('[Home] Queued activity sync failed', nextError);
+          });
+        }, 0);
+      }
+    }
+  }, [ethAddress, setActivitiesIfChanged]);
+
+  const scheduleActivitySync = useCallback(() => {
+    if (activitySyncTimerRef.current) {
+      clearTimeout(activitySyncTimerRef.current);
+    }
+
+    activitySyncTimerRef.current = setTimeout(() => {
+      loadRecentActivity().catch(error => {
+        console.warn('[Home] Scheduled activity sync failed', error);
+      });
+    }, ACTIVITY_SYNC_DEBOUNCE_MS);
+  }, [loadRecentActivity]);
 
   useEffect(() => {
     initializeSession(ethAddress).catch(error => {
@@ -122,63 +266,26 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
     };
   }, []);
 
-  const setActivitiesIfChanged = useCallback((next: RecentActivity[]) => {
-    const signature = next.map(item => item.id).join('|');
-    if (activitySignatureRef.current === signature) {
-      return;
-    }
-    activitySignatureRef.current = signature;
-    setActivities(next);
-  }, []);
+  useEffect(() => {
+    loadPreferences().catch(error => {
+      console.warn('[Home] Initial preferences load failed', error);
+    });
+    refreshPortfolio().catch(error => {
+      console.warn('[Home] Initial portfolio refresh failed', error);
+    });
+    loadRecentActivity().catch(error => {
+      console.warn('[Home] Initial activity refresh failed', error);
+    });
+  }, [loadPreferences, loadRecentActivity, refreshPortfolio]);
 
-  const loadRecentActivity = useCallback(async () => {
-    if (activityInFlightRef.current) {
-      activityQueuedRef.current = true;
-      return;
-    }
-
-    activityInFlightRef.current = true;
-
-    try {
-      const cached = await getRecentActivitiesByWallet(ethAddress);
-      if (mountedRef.current) {
-        setActivitiesIfChanged(cached);
-      }
-
-      await syncWalletActivities(ethAddress);
-      const next = await getRecentActivitiesByWallet(ethAddress);
-      if (mountedRef.current) {
-        setActivitiesIfChanged(next);
-      }
-    } catch (error) {
-      console.warn('[Home] Failed to load recent activity', error);
-    } finally {
-      activityInFlightRef.current = false;
-      if (activityQueuedRef.current) {
-        activityQueuedRef.current = false;
-        setTimeout(() => {
-          loadRecentActivity().catch(err => {
-            console.warn('[Home] Queued activity sync failed', err);
-          });
-        }, 0);
-      }
-    }
-  }, [ethAddress, setActivitiesIfChanged]);
-
-  const scheduleActivitySync = useCallback(
-    (reason: string) => {
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
       if (activitySyncTimerRef.current) {
         clearTimeout(activitySyncTimerRef.current);
       }
-
-      activitySyncTimerRef.current = setTimeout(() => {
-        loadRecentActivity().catch(error => {
-          console.warn('[Home] Scheduled activity sync failed', reason, error);
-        });
-      }, ACTIVITY_SYNC_DEBOUNCE_MS);
-    },
-    [loadRecentActivity],
-  );
+    };
+  }, []);
 
   useEffect(() => {
     if (!isFocused || !isAppActive) {
@@ -186,25 +293,20 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
     }
 
     const balanceIntervalId = setInterval(() => {
-      refreshBalanceFn();
+      refreshPortfolio().catch(error => {
+        console.warn('[Home] Interval portfolio refresh failed', error);
+      });
     }, BALANCE_POLL_INTERVAL_MS);
 
     const activityIntervalId = setInterval(() => {
-      scheduleActivitySync('interval');
+      scheduleActivitySync();
     }, ACTIVITY_POLL_INTERVAL_MS);
 
     return () => {
       clearInterval(balanceIntervalId);
       clearInterval(activityIntervalId);
     };
-  }, [isAppActive, isFocused, refreshBalanceFn, scheduleActivitySync]);
-
-  useEffect(() => {
-    if (!isFocused) {
-      return;
-    }
-    scheduleActivitySync('focus');
-  }, [isFocused, scheduleActivitySync]);
+  }, [isAppActive, isFocused, refreshPortfolio, scheduleActivitySync]);
 
   useEffect(() => {
     if (!isFocused) {
@@ -212,57 +314,69 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
       return;
     }
 
+    loadPreferences().catch(error => {
+      console.warn('[Home] Focus preferences refresh failed', error);
+    });
+
     const becameActive = !wasAppActiveRef.current && isAppActive;
     wasAppActiveRef.current = isAppActive;
     if (!becameActive) {
       return;
     }
 
-    refreshBalanceFn();
-    scheduleActivitySync('app-active');
-  }, [isAppActive, isFocused, refreshBalanceFn, scheduleActivitySync]);
-
-  useEffect(() => {
-    if (!isFocused || !isAppActive) {
-      return;
-    }
-
-    if (lastNetworkKeyRef.current === network.key) {
-      return;
-    }
-
-    lastNetworkKeyRef.current = network.key;
-    refreshBalanceFn();
-    scheduleActivitySync('network-change');
-  }, [isAppActive, isFocused, network.key, refreshBalanceFn, scheduleActivitySync]);
-
-  useEffect(() => {
-    if (!isFocused || !isAppActive || !balanceState.formatted) {
-      return;
-    }
-    scheduleActivitySync('balance-updated');
-  }, [balanceState.formatted, isAppActive, isFocused, scheduleActivitySync]);
-
-  const balanceValue = useMemo(() => balanceState.formatted || '0.0000', [balanceState.formatted]);
-
-  const openSendScreen = useCallback(() => {
-    navigation.navigate(ROUTES.SendTransaction, {
-      fromAddress: ethAddress,
-      availableAmount: balanceValue,
+    refreshPortfolio().catch(error => {
+      console.warn('[Home] App active portfolio refresh failed', error);
     });
-  }, [balanceValue, ethAddress, navigation]);
+    scheduleActivitySync();
+  }, [isAppActive, isFocused, loadPreferences, refreshPortfolio, scheduleActivitySync]);
 
-  const openWalletDetails = useCallback(() => {
-    navigation.navigate(ROUTES.WalletDetails, {
-      address: ethAddress,
+  const visibleAssets = useMemo(
+    () =>
+      sortPortfolioAssets(
+        assets.filter(asset => visibility[asset.network.key as WalletHomeNetworkKey]),
+      ),
+    [assets, visibility],
+  );
+  const totalUsdValue = useMemo(() => sumPortfolioUsdValue(visibleAssets), [visibleAssets]);
+  const totalUsdNumber = useMemo(() => usdFormatter.format(totalUsdValue), [totalUsdValue]);
+  const primaryWalletNetwork =
+    visibleAssets[0]?.network ?? walletHomeNetworks[0];
+
+  useEffect(() => {
+    if (!prefsReady) {
+      return;
+    }
+
+    syncPortfolioDailySnapshot(ethAddress, totalUsdValue)
+      .then(previousTotal => {
+        if (!mountedRef.current) {
+          return;
+        }
+
+        const nextDayChange = calculatePortfolioDayChange(totalUsdValue, previousTotal ?? totalUsdValue);
+        setDayChangeLabel({
+          text: `${formatSignedPercentDelta(nextDayChange.percent)} | ${formatSignedUsdDelta(nextDayChange.amountUsd)}`,
+          direction: nextDayChange.direction,
+        });
+      })
+      .catch(error => {
+        console.warn('[Home] Failed to sync portfolio snapshot', error);
+      });
+  }, [ethAddress, prefsReady, totalUsdValue]);
+
+  const openSendPick = useCallback(() => {
+    navigation.navigate(ROUTES.SendPick, {
+      walletAddress: ethAddress,
       publicKeyHex,
-      networkName: network.name,
     });
-  }, [ethAddress, navigation, network.name, publicKeyHex]);
+  }, [ethAddress, navigation, publicKeyHex]);
 
-  const openSettings = useCallback(() => {
-    navigation.navigate(ROUTES.Settings);
-  }, [navigation]);
+  const openReceive = useCallback((chainKey?: WalletHomeNetworkKey) => {
+    navigation.navigate(ROUTES.Receive, {
+      walletAddress: ethAddress,
+      chainKey: chainKey ?? (primaryWalletNetwork.key as WalletHomeNetworkKey),
+    });
+  }, [ethAddress, navigation, primaryWalletNetwork.key]);
 
   const copyAddress = useCallback(() => {
     Clipboard.setString(ethAddress);
@@ -273,15 +387,28 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
     navigation.navigate(ROUTES.QRScanner, { ethAddress });
   }, [ethAddress, navigation]);
 
-  const activitySummary = useMemo(() => {
-    if (balanceState.loading) {
-      return t('homeUpdating');
+  const openSettings = useCallback(() => {
+    navigation.navigate(ROUTES.Settings);
+  }, [navigation]);
+
+  const openManageTokens = useCallback(() => {
+    navigation.navigate(ROUTES.TokenManage, { walletAddress: ethAddress });
+  }, [ethAddress, navigation]);
+
+  const dayChangePillStyle = useMemo(() => {
+    if (dayChangeLabel.direction === 'up') {
+      return styles.balanceDeltaPositive;
     }
-    if (balanceState.error) {
-      return t('homeSyncDelayed');
+    if (dayChangeLabel.direction === 'down') {
+      return styles.balanceDeltaNegative;
     }
-    return network.name;
-  }, [balanceState.error, balanceState.loading, network.name, t]);
+    return styles.balanceDeltaNeutral;
+  }, [dayChangeLabel.direction]);
+
+  const listScrollContentStyle = useMemo(
+    () => [styles.listScrollContent, { paddingBottom: 126 + insets.bottom }],
+    [insets.bottom],
+  );
 
   return (
     <View style={screenBase.screen}>
@@ -290,18 +417,14 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
         backgroundColor={WALLET_COLORS.background}
       />
       <SafeAreaView style={screenBase.safeArea} edges={['top', 'bottom']}>
-        <WalletAuras />
-
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        <View style={styles.shell}>
           <View style={styles.header}>
             <Pressable style={styles.iconButton} onPress={openSettings}>
               <Ionicons name="settings-outline" size={18} color={WALLET_COLORS.text} />
             </Pressable>
-
-            <WalletPill style={styles.searchPill}>
-              <Ionicons name="search-outline" size={14} color={WALLET_COLORS.textSoft} />
-              <Text style={styles.searchText}>{t('homeSearchPlaceholder')}</Text>
-            </WalletPill>
+            <View style={styles.headerTitleWrap} pointerEvents="none">
+              <Text style={styles.headerTitle}>Home</Text>
+            </View>
 
             <Pressable style={styles.iconButton} onPress={handleScanQr}>
               <Ionicons name="scan-outline" size={18} color={WALLET_COLORS.text} />
@@ -309,38 +432,36 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
           </View>
 
           <View style={styles.walletBar}>
-            <WalletPill style={styles.walletPill}>
+            <Pressable style={styles.walletPill} onPress={copyAddress}>
               <View style={styles.walletDot} />
-              <Pressable style={styles.walletPillContent} onPress={copyAddress} onLongPress={openWalletDetails}>
-                <Text style={styles.walletName}>{t('homePrimaryWallet')}</Text>
-                <Text style={styles.walletAddress}>{truncateAddress(ethAddress)}</Text>
-              </Pressable>
-              <Pressable style={styles.walletCopy} onPress={openWalletDetails}>
+              <Text style={styles.walletName}>{t('homePrimaryWallet')}</Text>
+              <Text style={styles.walletAddress}>{truncateAddress(ethAddress)}</Text>
+              <View style={styles.walletCopy}>
                 <Ionicons name="copy-outline" size={11} color={WALLET_COLORS.textMuted} />
-              </Pressable>
-            </WalletPill>
+              </View>
+            </Pressable>
           </View>
 
           <View style={styles.balanceBlock}>
             <Text style={styles.balanceLabel}>{t('homeTotalBalance')}</Text>
             <View style={styles.balanceRow}>
-              <Text style={styles.balanceValue}>{balanceValue}</Text>
-              <Text style={styles.balanceUnit}>{network.currencySymbol}</Text>
+              <Text style={styles.balanceValue}>{totalUsdNumber}</Text>
+              <Text style={styles.balanceUnit}>$</Text>
             </View>
-            <WalletPill style={styles.balanceDelta}>
-              <Text style={styles.balanceDeltaText}>{activitySummary}</Text>
+            <WalletPill style={[styles.balanceDelta, dayChangePillStyle]}>
+              <Text style={styles.balanceDeltaText}>{dayChangeLabel.text}</Text>
             </WalletPill>
           </View>
 
           <View style={styles.quickActions}>
-            <Pressable style={[styles.quickAction, styles.quickActionPrimary]} onPress={() => navigation.navigate(ROUTES.SendPick)} onLongPress={openSendScreen}>
+            <Pressable style={[styles.quickAction, styles.quickActionPrimary]} onPress={openSendPick}>
               <View style={styles.quickIcon}>
                 <Ionicons name="arrow-up-outline" size={18} color={WALLET_COLORS.signal} />
               </View>
               <Text style={[styles.quickLabel, styles.quickLabelPrimary]}>{t('homeSendEth')}</Text>
             </Pressable>
 
-            <Pressable style={styles.quickAction} onPress={() => navigation.navigate(ROUTES.Receive)} onLongPress={openWalletDetails}>
+            <Pressable style={styles.quickAction} onPress={() => openReceive()}>
               <View style={styles.quickIcon}>
                 <Ionicons name="arrow-down-outline" size={18} color={WALLET_COLORS.signal} />
               </View>
@@ -354,120 +475,214 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
               <Text style={styles.quickLabel}>{t('homeScanQrTitle')}</Text>
             </Pressable>
 
-            <Pressable style={styles.quickAction} onPress={() => navigation.navigate(ROUTES.TokenManage)}>
+            <Pressable style={styles.quickAction} onPress={() => setActiveTab('activity')}>
               <View style={styles.quickIcon}>
-                <Ionicons name="options-outline" size={18} color={WALLET_COLORS.signal} />
+                <Ionicons name="time-outline" size={18} color={WALLET_COLORS.signal} />
               </View>
-              <Text style={styles.quickLabel}>Manage</Text>
+              <Text style={styles.quickLabel}>{t('homeHistory')}</Text>
             </Pressable>
           </View>
 
           <View style={styles.tabsRow}>
             <Pressable style={styles.tabItem} onPress={() => setActiveTab('assets')}>
-              <Text style={[styles.tabText, activeTab === 'assets' && styles.tabTextActive]}>{t('homeTabAssets')}</Text>
+              <Text style={[styles.tabText, activeTab === 'assets' && styles.tabTextActive]}>
+                {t('homeTabAssets')}
+              </Text>
               {activeTab === 'assets' ? <View style={styles.tabIndicator} /> : null}
             </Pressable>
             <Pressable style={styles.tabItem} onPress={() => setActiveTab('activity')}>
-              <Text style={[styles.tabText, activeTab === 'activity' && styles.tabTextActive]}>{t('homeTabActivity')}</Text>
+              <Text style={[styles.tabText, activeTab === 'activity' && styles.tabTextActive]}>
+                {t('homeTabActivity')}
+              </Text>
               {activeTab === 'activity' ? <View style={styles.tabIndicator} /> : null}
             </Pressable>
             <View style={styles.tabsSpacer} />
-            <Pressable style={styles.tabIconButton} onPress={refreshBalanceFn}>
+            <Pressable
+              style={[styles.tabIconButton, assetsLoading && styles.tabIconButtonBusy]}
+              disabled={assetsLoading}
+              onPress={() => refreshPortfolio().catch(() => undefined)}
+            >
               <Ionicons name="refresh-outline" size={15} color={WALLET_COLORS.textSoft} />
             </Pressable>
-            <Pressable style={styles.tabIconButton} onPress={() => navigation.navigate(ROUTES.TokenManage)}>
-              <Ionicons name="ellipsis-horizontal" size={15} color={WALLET_COLORS.textSoft} />
+            <Pressable style={styles.tabIconButton} onPress={openManageTokens}>
+              <Ionicons name="options-outline" size={15} color={WALLET_COLORS.textSoft} />
             </Pressable>
           </View>
 
-          {activeTab === 'assets' ? (
-            <WalletPanel style={styles.assetsCard}>
-              <View style={styles.assetRow}>
-                <View style={[styles.coinBadge, { backgroundColor: coinColors[network.currencySymbol.toUpperCase()] ?? '#254266' }]}>
-                  <Text style={styles.coinBadgeText}>{network.currencySymbol.slice(0, 1).toUpperCase()}</Text>
-                </View>
-                <Pressable style={styles.assetInfo} onPress={openWalletDetails}>
-                  <View style={styles.assetTopLine}>
-                    <Text style={styles.assetSymbol}>{network.currencySymbol.toUpperCase()}</Text>
-                    <Text style={styles.assetTag}>{network.name}</Text>
-                  </View>
-                  <Text style={styles.assetBottomLine}>{t('homeOnchainBalanceLive')}</Text>
-                </Pressable>
-                <View style={styles.assetRight}>
-                  <Text style={styles.assetBalance}>{balanceValue}</Text>
-                  <Text style={styles.assetQuote}>{network.currencySymbol}</Text>
-                </View>
-                <Pressable style={styles.assetIconButton} onPress={openSendScreen}>
-                  <Ionicons name="arrow-up-outline" size={16} color={WALLET_COLORS.text} />
-                </Pressable>
-              </View>
+          <View style={styles.listWrap}>
+            {activeTab === 'assets' ? (
+              <ScrollView
+                style={styles.listScroll}
+                contentContainerStyle={listScrollContentStyle}
+                showsVerticalScrollIndicator={false}
+              >
+                <View style={styles.listCard}>
+                  {visibleAssets.map((asset, index) => {
+                    const assetLogoSource = getNetworkLogoSource(asset.network.key);
+                    return (
+                      <View key={asset.network.key}>
+                        <View style={styles.assetRow}>
+                          <Pressable
+                            style={styles.assetTapArea}
+                            onPress={() => openReceive(asset.network.key as WalletHomeNetworkKey)}
+                          >
+                            <View
+                              style={[
+                                styles.coinBadge,
+                                {
+                                  backgroundColor: asset.network.iconBackground,
+                                  borderColor: asset.network.iconBorder,
+                                },
+                              ]}
+                            >
+                              {assetLogoSource ? (
+                                <Image source={assetLogoSource} style={styles.coinBadgeLogo} resizeMode="contain" />
+                              ) : (
+                                <Text style={styles.coinBadgeText}>{asset.network.glyph}</Text>
+                              )}
+                            </View>
+                            <View style={styles.assetInfo}>
+                              <View style={styles.assetTopLine}>
+                                <Text style={styles.assetSymbol}>{asset.network.currencySymbol}</Text>
+                                <Text style={styles.assetTag}>{asset.network.name}</Text>
+                              </View>
+                              <Text style={styles.assetBottomLine}>
+                                {asset.error
+                                  ? `${formatUsdValue(asset.usdPrice)} / ${asset.network.currencySymbol} | ${t('homeSyncDelayed')}`
+                                  : `${formatUsdValue(asset.usdPrice)} / ${asset.network.currencySymbol}`}
+                              </Text>
+                            </View>
+                            <View style={styles.assetRight}>
+                              <Text style={styles.assetBalance}>{asset.balanceFormatted}</Text>
+                              <Text style={styles.assetQuote}>{formatUsdValue(asset.usdValue)}</Text>
+                            </View>
+                          </Pressable>
+                          <Pressable
+                            style={styles.assetIconButton}
+                            onPress={() =>
+                              navigation.navigate(ROUTES.Send, {
+                                walletAddress: ethAddress,
+                                publicKeyHex,
+                                chainKey: asset.network.key as WalletHomeNetworkKey,
+                              })
+                            }
+                          >
+                            <Ionicons name="arrow-up-outline" size={16} color={WALLET_COLORS.text} />
+                          </Pressable>
+                        </View>
+                        {index < visibleAssets.length - 1 ? <View style={styles.assetDivider} /> : null}
+                      </View>
+                    );
+                  })}
 
-              <View style={styles.assetDivider} />
-
-              {STATIC_TOKENS.map(item => (
-                <View key={item.sym}>
-                  <View style={styles.assetRow}>
-                    <View style={[styles.coinBadge, { backgroundColor: coinColors[item.sym] ?? '#254266' }]}>
-                      <Text style={styles.coinBadgeText}>{item.glyph}</Text>
+                  <Pressable style={styles.manageRow} onPress={openManageTokens}>
+                    <View style={[styles.coinBadge, styles.coinBadgeSoft]}>
+                      <Ionicons name="grid-outline" size={18} color={WALLET_COLORS.text} />
                     </View>
                     <View style={styles.assetInfo}>
-                      <View style={styles.assetTopLine}>
-                        <Text style={styles.assetSymbol}>{item.sym}</Text>
-                        <Text style={styles.assetTag}>{item.network}</Text>
+                      <Text style={styles.assetSymbol}>{t('homeManageAssets')}</Text>
+                      <Text style={styles.assetBottomLine}>{t('homeManageAssetsBody')}</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={14} color={WALLET_COLORS.textSoft} />
+                  </Pressable>
+                </View>
+              </ScrollView>
+            ) : (
+              <ScrollView
+                style={styles.listScroll}
+                contentContainerStyle={listScrollContentStyle}
+                showsVerticalScrollIndicator={false}
+              >
+                <View style={styles.listCard}>
+                  {activities.length === 0 ? (
+                    <View style={styles.emptyState}>
+                      <View style={styles.emptyIconWrap}>
+                        <Ionicons name="time-outline" size={20} color={WALLET_COLORS.textSoft} />
                       </View>
-                      <Text style={styles.assetBottomLine}>{item.name}</Text>
+                      <Text style={styles.emptyTitle}>{t('homeNoTransactions')}</Text>
+                      <Text style={styles.emptyBody}>{t('homeNoTransactionsDesc')}</Text>
                     </View>
-                    <View style={styles.assetRight}>
-                      <Text style={styles.assetBalance}>{item.balance}</Text>
-                      <Text style={styles.assetQuote}>${item.value}</Text>
-                    </View>
-                  </View>
-                  <View style={styles.assetDivider} />
+                  ) : (
+                    activities.map((item, index) => (
+                      <View key={item.id}>
+                        <View style={styles.activityRow}>
+                          <View
+                            style={[
+                              styles.activityIconWrap,
+                              item.kind === 'send' ? styles.activityIconSend : styles.activityIconReceive,
+                            ]}
+                          >
+                            <Ionicons
+                              name={item.kind === 'send' ? 'arrow-up-outline' : 'arrow-down-outline'}
+                              size={16}
+                              color={item.kind === 'send' ? '#FFB7B7' : '#9CE8C5'}
+                            />
+                          </View>
+                          <View style={styles.activityInfo}>
+                            <View style={styles.assetTopLine}>
+                              <Text style={styles.activityTitle}>{getActivityHeadline(item, t)}</Text>
+                              <Text style={styles.assetTag}>{item.networkName}</Text>
+                            </View>
+                            <Text style={styles.activitySubtitle}>{getActivityCounterpartyLine(item, t)}</Text>
+                          </View>
+                          <View style={styles.activityRight}>
+                            <Text style={styles.activityAmount}>
+                              {item.kind === 'send' ? '-' : '+'}
+                              {item.amountDisplay} {item.currencySymbol}
+                            </Text>
+                            <Text style={styles.activityTime}>{timeFormatter.format(new Date(item.createdAt))}</Text>
+                          </View>
+                        </View>
+                        {index < activities.length - 1 ? <View style={styles.assetDivider} /> : null}
+                      </View>
+                    ))
+                  )}
                 </View>
-              ))}
+              </ScrollView>
+            )}
+          </View>
+        </View>
 
-              <Pressable style={styles.manageRow} onPress={() => navigation.navigate(ROUTES.TokenManage)}>
-                <View style={[styles.coinBadge, styles.coinBadgeSoft]}>
-                  <Ionicons name="grid-outline" size={18} color={WALLET_COLORS.text} />
-                </View>
-                <View style={styles.assetInfo}>
-                  <Text style={styles.assetSymbol}>Token list</Text>
-                  <Text style={styles.assetBottomLine}>Enable, disable, import assets</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={14} color={WALLET_COLORS.textSoft} />
-              </Pressable>
-            </WalletPanel>
-          ) : (
-            <RecentActivitySection activities={activities} />
-          )}
-        </ScrollView>
-
-        <View style={styles.bottomDock} pointerEvents="none">
+        <View style={styles.bottomDock}>
           <View style={styles.bottomDockInner}>
-            {[
-              { label: 'Wallet', icon: 'home-outline', active: true },
-              { label: 'Activity', icon: 'time-outline' },
-              { label: 'Scan', icon: 'scan-outline', center: true },
-              { label: 'Collect', icon: 'gift-outline' },
-              { label: 'Settings', icon: 'settings-outline' },
-            ].map(item => (
-              <View key={item.label} style={item.center ? styles.bottomCenter : styles.bottomItem}>
-                {item.center ? (
-                  <View style={styles.bottomCenterBubble}>
-                    <Ionicons name={item.icon as never} size={20} color="#F3F9FF" />
-                  </View>
-                ) : (
-                  <Ionicons
-                    name={item.icon as never}
-                    size={18}
-                    color={item.active ? WALLET_COLORS.text : WALLET_COLORS.textSoft}
-                  />
-                )}
-                <Text style={[styles.bottomLabel, item.active && styles.bottomLabelActive, item.center && styles.bottomCenterLabel]}>
-                  {item.label}
-                </Text>
+            <Pressable style={styles.bottomItem} onPress={() => setActiveTab('assets')}>
+              <Ionicons
+                name="home-outline"
+                size={18}
+                color={activeTab === 'assets' ? WALLET_COLORS.text : WALLET_COLORS.textSoft}
+              />
+              <Text style={[styles.bottomLabel, activeTab === 'assets' && styles.bottomLabelActive]}>
+                {t('homeBottomHome')}
+              </Text>
+            </Pressable>
+
+            <Pressable style={styles.bottomItem} onPress={() => setActiveTab('activity')}>
+              <Ionicons
+                name="time-outline"
+                size={18}
+                color={activeTab === 'activity' ? WALLET_COLORS.text : WALLET_COLORS.textSoft}
+              />
+              <Text style={[styles.bottomLabel, activeTab === 'activity' && styles.bottomLabelActive]}>
+                {t('homeBottomActivity')}
+              </Text>
+            </Pressable>
+
+            <Pressable style={styles.bottomCenter} onPress={handleScanQr}>
+              <View style={styles.bottomCenterBubble}>
+                <Ionicons name="scan-outline" size={20} color="#F3F9FF" />
               </View>
-            ))}
+              <Text style={[styles.bottomLabel, styles.bottomCenterLabel]}>{t('homeBottomScan')}</Text>
+            </Pressable>
+
+            <Pressable style={styles.bottomItem}>
+              <Ionicons name="gift-outline" size={18} color={WALLET_COLORS.textSoft} />
+              <Text style={styles.bottomLabel}>{t('homeBottomCollect')}</Text>
+            </Pressable>
+
+            <Pressable style={styles.bottomItem} onPress={openSettings}>
+              <Ionicons name="settings-outline" size={18} color={WALLET_COLORS.textSoft} />
+              <Text style={styles.bottomLabel}>{t('homeBottomSettings')}</Text>
+            </Pressable>
           </View>
         </View>
       </SafeAreaView>
@@ -476,15 +691,29 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  scrollContent: {
+  shell: {
+    flex: 1,
     paddingHorizontal: 12,
     paddingTop: 12,
-    paddingBottom: 160,
+    paddingBottom: 0,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    justifyContent: 'space-between',
+    position: 'relative',
+  },
+  headerTitleWrap: {
+    position: 'absolute',
+    left: 56,
+    right: 56,
+    alignItems: 'center',
+  },
+  headerTitle: {
+    color: WALLET_COLORS.text,
+    fontFamily: DISPLAY_FONT_MEDIUM,
+    fontSize: 17,
+    letterSpacing: -0.2,
   },
   iconButton: {
     width: 36,
@@ -496,26 +725,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  searchPill: {
-    flex: 1,
-    minHeight: 36,
-    paddingHorizontal: 12,
-    gap: 7,
-  },
-  searchText: {
-    color: WALLET_COLORS.textSoft,
-    fontSize: 13,
-  },
   walletBar: {
     alignItems: 'center',
     marginTop: 10,
   },
   walletPill: {
-    minHeight: 36,
+    minHeight: 34,
     paddingHorizontal: 12,
-    gap: 8,
-  },
-  walletPillContent: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: WALLET_COLORS.border,
+    backgroundColor: WALLET_COLORS.surfaceAlt,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -528,8 +748,8 @@ const styles = StyleSheet.create({
   },
   walletName: {
     color: WALLET_COLORS.text,
+    fontFamily: SANS_FONT_SEMIBOLD,
     fontSize: 13,
-    fontWeight: '600',
   },
   walletAddress: {
     color: WALLET_COLORS.textSoft,
@@ -547,7 +767,7 @@ const styles = StyleSheet.create({
   balanceBlock: {
     alignItems: 'center',
     marginTop: 16,
-    marginBottom: 12,
+    marginBottom: 14,
   },
   balanceLabel: {
     color: '#62BBFF',
@@ -564,29 +784,38 @@ const styles = StyleSheet.create({
   },
   balanceValue: {
     color: WALLET_COLORS.text,
-    fontSize: 48,
-    lineHeight: 52,
-    fontWeight: '800',
     fontFamily: DISPLAY_FONT,
-    letterSpacing: -1.2,
+    fontSize: 52,
+    lineHeight: 56,
+    letterSpacing: -2.4,
   },
   balanceUnit: {
     color: WALLET_COLORS.textSoft,
-    fontSize: 24,
-    fontWeight: '700',
-    marginBottom: 6,
+    fontFamily: DISPLAY_FONT_MEDIUM,
+    fontSize: 28,
+    marginBottom: 7,
   },
   balanceDelta: {
     minHeight: 30,
     marginTop: 10,
     paddingHorizontal: 12,
-    backgroundColor: WALLET_COLORS.signalSoft,
-    borderColor: WALLET_COLORS.signalBorder,
+  },
+  balanceDeltaNeutral: {
+    backgroundColor: WALLET_COLORS.surfaceSoft,
+    borderColor: WALLET_COLORS.borderStrong,
+  },
+  balanceDeltaPositive: {
+    backgroundColor: WALLET_COLORS.successSoft,
+    borderColor: 'rgba(52, 211, 153, 0.35)',
+  },
+  balanceDeltaNegative: {
+    backgroundColor: WALLET_COLORS.dangerSoft,
+    borderColor: 'rgba(255, 122, 122, 0.35)',
   },
   balanceDeltaText: {
-    color: '#8CD0FF',
+    color: WALLET_COLORS.text,
+    fontFamily: MONO_FONT,
     fontSize: 11,
-    fontWeight: '700',
   },
   quickActions: {
     flexDirection: 'row',
@@ -616,8 +845,8 @@ const styles = StyleSheet.create({
   },
   quickLabel: {
     color: WALLET_COLORS.textMuted,
+    fontFamily: SANS_FONT_SEMIBOLD,
     fontSize: 12,
-    fontWeight: '600',
   },
   quickLabelPrimary: {
     color: WALLET_COLORS.text,
@@ -636,8 +865,8 @@ const styles = StyleSheet.create({
   },
   tabText: {
     color: WALLET_COLORS.textSoft,
+    fontFamily: SANS_FONT_SEMIBOLD,
     fontSize: 14,
-    fontWeight: '700',
   },
   tabTextActive: {
     color: WALLET_COLORS.text,
@@ -657,7 +886,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  assetsCard: {
+  tabIconButtonBusy: {
+    opacity: 0.45,
+  },
+  listWrap: {
+    flex: 1,
+    minHeight: 0,
+  },
+  listScroll: {
+    flex: 1,
+  },
+  listScrollContent: {
+    paddingBottom: 0,
+  },
+  listCard: {
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: WALLET_COLORS.border,
+    backgroundColor: WALLET_COLORS.surface,
     overflow: 'hidden',
   },
   assetRow: {
@@ -665,23 +911,36 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingVertical: 13,
+  },
+  assetTapArea: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   coinBadge: {
     width: 42,
     height: 42,
     borderRadius: 21,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
   coinBadgeSoft: {
     backgroundColor: WALLET_COLORS.surfaceSoft,
+    borderColor: WALLET_COLORS.border,
   },
   coinBadgeText: {
     color: '#F8FBFF',
-    fontSize: 14,
-    fontWeight: '800',
     fontFamily: DISPLAY_FONT,
+    fontSize: 14,
+    letterSpacing: -0.4,
+  },
+  coinBadgeLogo: {
+    width: 26,
+    height: 26,
+    borderRadius: 999,
   },
   assetInfo: {
     flex: 1,
@@ -693,11 +952,12 @@ const styles = StyleSheet.create({
   },
   assetSymbol: {
     color: WALLET_COLORS.text,
+    fontFamily: SANS_FONT_SEMIBOLD,
     fontSize: 15,
-    fontWeight: '700',
   },
   assetTag: {
     color: WALLET_COLORS.textSoft,
+    fontFamily: MONO_FONT,
     fontSize: 10,
     backgroundColor: WALLET_COLORS.surfaceSoft,
     borderRadius: 6,
@@ -706,6 +966,7 @@ const styles = StyleSheet.create({
   },
   assetBottomLine: {
     color: WALLET_COLORS.textSoft,
+    fontFamily: SANS_FONT,
     fontSize: 12,
     marginTop: 4,
   },
@@ -715,11 +976,12 @@ const styles = StyleSheet.create({
   },
   assetBalance: {
     color: WALLET_COLORS.text,
+    fontFamily: SANS_FONT_SEMIBOLD,
     fontSize: 14,
-    fontWeight: '700',
   },
   assetQuote: {
     color: WALLET_COLORS.textSoft,
+    fontFamily: MONO_FONT,
     fontSize: 12,
   },
   assetIconButton: {
@@ -743,6 +1005,83 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 12,
     paddingVertical: 14,
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingHorizontal: 22,
+    paddingVertical: 28,
+  },
+  emptyIconWrap: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    borderWidth: 1,
+    borderColor: WALLET_COLORS.border,
+    backgroundColor: WALLET_COLORS.surfaceSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyTitle: {
+    color: WALLET_COLORS.text,
+    fontFamily: SANS_FONT_SEMIBOLD,
+    fontSize: 15,
+    marginTop: 14,
+  },
+  emptyBody: {
+    color: WALLET_COLORS.textSoft,
+    fontFamily: SANS_FONT,
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: 'center',
+    marginTop: 6,
+  },
+  activityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 13,
+  },
+  activityIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  activityIconSend: {
+    backgroundColor: WALLET_COLORS.dangerSoft,
+  },
+  activityIconReceive: {
+    backgroundColor: WALLET_COLORS.successSoft,
+  },
+  activityInfo: {
+    flex: 1,
+  },
+  activityTitle: {
+    color: WALLET_COLORS.text,
+    fontFamily: SANS_FONT_SEMIBOLD,
+    fontSize: 14,
+  },
+  activitySubtitle: {
+    color: WALLET_COLORS.textSoft,
+    fontFamily: SANS_FONT,
+    fontSize: 12,
+    marginTop: 4,
+  },
+  activityRight: {
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  activityAmount: {
+    color: WALLET_COLORS.text,
+    fontFamily: SANS_FONT_SEMIBOLD,
+    fontSize: 13,
+  },
+  activityTime: {
+    color: WALLET_COLORS.textSoft,
+    fontFamily: MONO_FONT,
+    fontSize: 10,
   },
   bottomDock: {
     position: 'absolute',
@@ -786,8 +1125,8 @@ const styles = StyleSheet.create({
   },
   bottomLabel: {
     color: WALLET_COLORS.textSoft,
+    fontFamily: SANS_FONT_SEMIBOLD,
     fontSize: 10,
-    fontWeight: '600',
   },
   bottomLabelActive: {
     color: WALLET_COLORS.text,

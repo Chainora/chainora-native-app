@@ -7,8 +7,6 @@ const RPC_RETRY_COUNT = 2;
 const RPC_RETRY_DELAY_MS = 450;
 const FALLBACK_RETRY_COUNT = 1;
 
-type NetworkRecord = typeof NETWORKS;
-
 const buildRpcCandidates = (rpcUrl: string): string[] => {
   const unique = new Set<string>([rpcUrl]);
 
@@ -52,14 +50,7 @@ const toChain = (network: NetworkConfig): Chain =>
     },
   });
 
-const chainByKey: Record<keyof NetworkRecord, Chain> = {
-  eth: toChain(NETWORKS.eth),
-  polygon: toChain(NETWORKS.polygon),
-  bnb: toChain(NETWORKS.bnb),
-  chainora: toChain(NETWORKS.chainora),
-};
-
-const chains = [chainByKey.eth, chainByKey.polygon, chainByKey.bnb, chainByKey.chainora] as const;
+const chains = Object.values(NETWORKS).map(toChain);
 
 const publicClientByChainId = new Map<number, PublicClient>();
 

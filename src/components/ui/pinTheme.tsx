@@ -12,7 +12,7 @@ import {
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
 export const PIN_COLORS = {
-  background: '#05070D',
+  background: '#08111B',
   backgroundAlt: '#0B111C',
   surface: '#101827',
   surfaceAlt: '#121D2D',
@@ -121,7 +121,13 @@ const toneBackgroundMap = {
   danger: PIN_COLORS.dangerSoft,
 } as const;
 
-export const PinAuras: React.FC = () => <View pointerEvents="none" style={styles.auraTop} />;
+export const PinAuras: React.FC = () => (
+  <>
+    <View pointerEvents="none" style={styles.auraHalo} />
+    <View pointerEvents="none" style={styles.auraMist} />
+    <View pointerEvents="none" style={styles.auraCore} />
+  </>
+);
 
 export const PinTopBar: React.FC<PinTopBarProps> = ({ title, onBack, right }) => (
   <View style={styles.topBar}>
@@ -195,18 +201,43 @@ export const PinNoteCard: React.FC<PinNoteCardProps> = ({
 );
 
 const styles = StyleSheet.create({
-  auraTop: {
+  auraHalo: {
     position: 'absolute',
-    top: -140,
-    left: '8%',
-    right: '8%',
-    height: 260,
-    borderRadius: 200,
-    backgroundColor: 'rgba(79, 180, 255, 0.14)',
+    top: -170,
+    left: -24,
+    right: -24,
+    height: 320,
+    borderRadius: 999,
+    backgroundColor: 'rgba(54, 132, 255, 0.12)',
+    shadowColor: '#4FB4FF',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.45,
+    shadowRadius: 90,
+    transform: [{ scaleX: 1.24 }],
+  },
+  auraMist: {
+    position: 'absolute',
+    top: -126,
+    left: 32,
+    right: 32,
+    height: 210,
+    borderRadius: 999,
+    backgroundColor: 'rgba(107, 188, 255, 0.08)',
+    transform: [{ scaleX: 1.16 }],
+  },
+  auraCore: {
+    position: 'absolute',
+    top: -52,
+    alignSelf: 'center',
+    width: 160,
+    height: 108,
+    borderRadius: 999,
+    backgroundColor: 'rgba(79, 180, 255, 0.18)',
     shadowColor: PIN_COLORS.signalBright,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.6,
-    shadowRadius: 80,
+    shadowRadius: 44,
+    transform: [{ scaleX: 1.3 }],
   },
   topBar: {
     flexDirection: 'row',
@@ -235,9 +266,10 @@ const styles = StyleSheet.create({
   },
   topBarTitle: {
     color: PIN_COLORS.text,
-    fontSize: 14,
-    lineHeight: 18,
-    fontFamily: PIN_SANS_FONT_SEMIBOLD,
+    fontFamily: PIN_DISPLAY_FONT_MEDIUM,
+    fontSize: 17,
+    lineHeight: 21,
+    letterSpacing: -0.2,
     textAlign: 'center',
   },
   progressRow: {

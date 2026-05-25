@@ -7,7 +7,7 @@ import { Ionicons } from '@react-native-vector-icons/ionicons';
 
 import { PinInput } from '../components/ui/PinInput';
 import { PinGhostButton } from '../components/ui/pinTheme';
-import { WALLET_COLORS } from '../components/ui/walletDesign';
+import { DISPLAY_FONT_MEDIUM, WALLET_COLORS } from '../components/ui/walletDesign';
 import { useSettings } from '../features/settings';
 import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
 import { ROUTES } from '../navigation/routes/routes';
@@ -431,10 +431,10 @@ const styles = StyleSheet.create({
   headerTitle: {
     flex: 1,
     color: ACCENT.text,
-    fontSize: 20,
-    fontWeight: '800',
+    fontFamily: DISPLAY_FONT_MEDIUM,
+    fontSize: 17,
     textAlign: 'center',
-    letterSpacing: -0.4,
+    letterSpacing: -0.2,
   },
   headerSpacer: {
     width: 30,

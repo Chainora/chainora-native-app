@@ -1,7 +1,7 @@
 import { keccak_256 } from '@noble/hashes/sha3.js';
 import { getAddress } from 'viem';
 
-import { getActiveNetwork } from '../config/network';
+import { getActiveNetwork, type NetworkConfig } from '../config/network';
 import { signTransactionHash } from './cardService';
 import { recoverSignature } from './transaction/signatureUtils';
 import { getPublicViemClient } from './web3Client';
@@ -23,6 +23,7 @@ export type SendEthParams = {
   to: string;
   valueWei: bigint;
   pin: string;
+  network?: NetworkConfig;
   signHash?: (hash: Uint8Array) => Promise<{
     ok: boolean;
     message: string;
@@ -195,8 +196,7 @@ const buildSignedLegacyTx = (params: {
   return encodeList(fields);
 };
 
-const fetchNonce = async (address: string): Promise<bigint> => {
-  const network = getActiveNetwork();
+const fetchNonce = async (address: string, network: NetworkConfig = getActiveNetwork()): Promise<bigint> => {
   const client = getPublicViemClient(network);
   const nonce = await withRpcRetry(() => client.getTransactionCount({
     address: getAddress(address),
@@ -205,8 +205,7 @@ const fetchNonce = async (address: string): Promise<bigint> => {
   return BigInt(nonce);
 };
 
-const fetchGasPrice = async (): Promise<bigint> => {
-  const network = getActiveNetwork();
+const fetchGasPrice = async (network: NetworkConfig = getActiveNetwork()): Promise<bigint> => {
   const client = getPublicViemClient(network);
   return withRpcRetry(() => client.getGasPrice());
 };
@@ -225,9 +224,10 @@ const estimateGasLimit = async (params: {
   to: string;
   valueWei: bigint;
   data: Uint8Array;
+  network?: NetworkConfig;
 }): Promise<bigint | null> => {
   try {
-    const network = getActiveNetwork();
+    const network = params.network ?? getActiveNetwork();
     const client = getPublicViemClient(network);
     const estimatePromise = client.estimateGas({
       account: getAddress(params.from),
@@ -295,6 +295,7 @@ const estimateGasLimitStrict = async (params: {
   valueWei: bigint;
   data: Uint8Array;
   estimateFailureMessage?: string;
+  network?: NetworkConfig;
 }): Promise<bigint> => {
   let lastError: Error | null = null;
 
@@ -305,6 +306,7 @@ const estimateGasLimitStrict = async (params: {
         to: params.to,
         valueWei: params.valueWei,
         data: params.data,
+        network: params.network,
       });
 
       if (estimate !== null) {
@@ -333,12 +335,16 @@ const estimateGasLimitStrict = async (params: {
   );
 };
 
-export const fetchSuggestedGasPriceWei = async (): Promise<bigint> => {
-  return fetchGasPrice();
+export const fetchSuggestedGasPriceWei = async (
+  network: NetworkConfig = getActiveNetwork(),
+): Promise<bigint> => {
+  return fetchGasPrice(network);
 };
 
-const sendRawTransaction = async (payloadHex: string): Promise<string> => {
-  const network = getActiveNetwork();
+const sendRawTransaction = async (
+  payloadHex: string,
+  network: NetworkConfig = getActiveNetwork(),
+): Promise<string> => {
   const client = getPublicViemClient(network);
   return withRpcRetry(() => client.sendRawTransaction({ serializedTransaction: payloadHex as `0x${string}` }));
 };
@@ -359,6 +365,7 @@ export const sendEthTransaction = async ({
   to,
   valueWei,
   pin,
+  network = getActiveNetwork(),
   signHash,
   nonce,
   gasPriceWei,
@@ -371,8 +378,8 @@ export const sendEthTransaction = async ({
   const toChecksum = sanitizeAddress(to);
 
   const [resolvedNonce, resolvedGasPrice] = await Promise.all([
-    nonce ?? fetchNonce(fromChecksum),
-    gasPriceWei ?? fetchGasPrice(),
+    nonce ?? fetchNonce(fromChecksum, network),
+    gasPriceWei ?? fetchGasPrice(network),
   ]);
   const data = ensureHexData(dataHex);
   const defaultGasLimit = data.length > 0 ? CONTRACT_CALL_FALLBACK_GAS_LIMIT : LEGACY_TRANSFER_GAS_LIMIT;
@@ -386,6 +393,7 @@ export const sendEthTransaction = async ({
       to: toChecksum,
       valueWei,
       data,
+      network,
     });
 
     resolvedGasLimit = estimatedGasLimit
@@ -402,7 +410,7 @@ export const sendEthTransaction = async ({
     to: toChecksum,
     value: valueWei,
     data,
-    chainId: BigInt(getActiveNetwork().chainId),
+    chainId: BigInt(network.chainId),
   });
 
   const messageHash = keccak_256(unsigned);
@@ -430,7 +438,7 @@ export const sendEthTransaction = async ({
     messageHash,
     signatureResult.signatureDer,
     signatureResult.publicKeyHex,
-    getActiveNetwork().chainId,
+    network.chainId,
   );
 
   const signedTx = buildSignedLegacyTx({
@@ -448,7 +456,7 @@ export const sendEthTransaction = async ({
   const rawTxHex = `0x${bytesToHex(signedTx)}`;
   const locallyComputedHash = `0x${bytesToHex(keccak_256(signedTx))}`;
   const transactionHash = broadcast
-    ? await sendRawTransaction(rawTxHex)
+    ? await sendRawTransaction(rawTxHex, network)
     : locallyComputedHash;
 
   return {
@@ -465,6 +473,7 @@ export const sendAbiTransactionStrict = async ({
   to,
   valueWei,
   pin,
+  network = getActiveNetwork(),
   signHash,
   nonce,
   gasPriceWei,
@@ -477,8 +486,8 @@ export const sendAbiTransactionStrict = async ({
   const data = ensureHexData(dataHex);
 
   const [resolvedNonce, resolvedGasPrice] = await Promise.all([
-    nonce ?? fetchNonce(fromChecksum),
-    gasPriceWei ?? fetchGasPrice(),
+    nonce ?? fetchNonce(fromChecksum, network),
+    gasPriceWei ?? fetchGasPrice(network),
   ]);
 
   const estimatedGasLimit = await estimateGasLimitStrict({
@@ -487,6 +496,7 @@ export const sendAbiTransactionStrict = async ({
     valueWei,
     data,
     estimateFailureMessage,
+    network,
   });
 
   return sendEthTransaction({
@@ -494,6 +504,7 @@ export const sendAbiTransactionStrict = async ({
     to: toChecksum,
     valueWei,
     pin,
+    network,
     signHash,
     nonce: resolvedNonce,
     gasPriceWei: resolvedGasPrice,

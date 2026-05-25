@@ -1,4 +1,5 @@
 import type { ScanMode } from '../../services/scanCardFlowRegistry';
+import type { WalletHomeNetworkKey } from '../../config/network';
 
 import { ROUTES } from './routes';
 
@@ -34,12 +35,40 @@ export type RootStackParamList = {
     address: string;
     publicKeyHex?: string;
     networkName: string;
+    networkKey?: WalletHomeNetworkKey;
   };
   [ROUTES.WalletRelayRequest]: undefined;
-  [ROUTES.SendPick]: undefined;
-  [ROUTES.SendBtc]: undefined;
-  [ROUTES.Receive]: undefined;
-  [ROUTES.TouchSign]: undefined;
-  [ROUTES.TokenManage]: undefined;
+  [ROUTES.SendPick]: {
+    walletAddress: string;
+    publicKeyHex?: string;
+  };
+  [ROUTES.Send]: {
+    walletAddress: string;
+    publicKeyHex?: string;
+    chainKey: WalletHomeNetworkKey;
+    result?: {
+      transactionHash: string;
+      amount: string;
+      gasLimit: string;
+      gasPriceGwei: string;
+    };
+  };
+  [ROUTES.Receive]: {
+    walletAddress: string;
+    chainKey?: WalletHomeNetworkKey;
+  };
+  [ROUTES.TouchSign]: {
+    walletAddress: string;
+    publicKeyHex?: string;
+    chainKey: WalletHomeNetworkKey;
+    recipient: string;
+    amount: string;
+    pin: string;
+    gasPriceGwei?: string;
+    gasLimit?: string;
+  };
+  [ROUTES.TokenManage]: {
+    walletAddress?: string;
+  };
   [ROUTES.AddToken]: undefined;
 };

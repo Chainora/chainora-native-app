@@ -24,7 +24,7 @@ import WalletRelayRequestScreen from '../screens/WalletRelayRequestScreen';
 import {
   AddTokenScreen,
   ReceiveScreen,
-  SendBtcScreen,
+  SendScreen,
   SendPickScreen,
   TokenManageScreen,
   TouchSignScreen,
@@ -39,6 +39,7 @@ import { ROUTES } from './routes/routes';
 enableScreens(true);
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
+const APP_SURFACE_BACKGROUND = '#08111B';
 
 export const AppNavigator: React.FC = () => {
   const { t, resolvedTheme, themeTokens } = useSettings();
@@ -72,8 +73,8 @@ export const AppNavigator: React.FC = () => {
     colors: {
       ...(resolvedTheme === 'dark' ? DarkTheme.colors : DefaultTheme.colors),
       primary: themeTokens.primary,
-      background: themeTokens.background,
-      card: themeTokens.background,
+      background: APP_SURFACE_BACKGROUND,
+      card: APP_SURFACE_BACKGROUND,
       text: themeTokens.foreground,
       border: themeTokens.border,
       notification: themeTokens.primary,
@@ -146,7 +147,7 @@ export const AppNavigator: React.FC = () => {
           <Stack.Screen
             name={ROUTES.WalletDetails}
             component={WalletDetailsScreen}
-            options={{ headerShown: false, animation: 'none' }}
+            options={{ headerShown: false, presentation: 'transparentModal', animation: 'fade' }}
           />
           <Stack.Screen
             name={ROUTES.WalletRelayRequest}
@@ -159,8 +160,8 @@ export const AppNavigator: React.FC = () => {
             options={{ headerShown: false }}
           />
           <Stack.Screen
-            name={ROUTES.SendBtc}
-            component={SendBtcScreen}
+            name={ROUTES.Send}
+            component={SendScreen}
             options={{ headerShown: false }}
           />
           <Stack.Screen
@@ -197,5 +198,6 @@ export const AppNavigator: React.FC = () => {
 const styles = StyleSheet.create({
   navigatorRoot: {
     flex: 1,
+    backgroundColor: APP_SURFACE_BACKGROUND,
   },
 });

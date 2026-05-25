@@ -337,7 +337,7 @@ const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
     <View style={styles.root}>
       <StatusBar
         barStyle={resolvedTheme === 'light' ? 'dark-content' : 'light-content'}
-        backgroundColor="#04060B"
+        backgroundColor="#08111B"
       />
 
       <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
@@ -501,7 +501,7 @@ const createStyles = () =>
   StyleSheet.create({
     root: {
       flex: 1,
-      backgroundColor: '#04060B',
+    backgroundColor: '#08111B',
     },
     cameraWrap: {
       ...StyleSheet.absoluteFillObject,

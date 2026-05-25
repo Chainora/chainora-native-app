@@ -17,7 +17,7 @@ import { Ionicons } from '@react-native-vector-icons/ionicons';
 
 import { PinInput } from '../components/ui/PinInput';
 import { PinGhostButton } from '../components/ui/pinTheme';
-import { WALLET_COLORS } from '../components/ui/walletDesign';
+import { DISPLAY_FONT_MEDIUM, WALLET_COLORS } from '../components/ui/walletDesign';
 import { useSettings } from '../features/settings';
 import type { ThemeTokens } from '../types/theme/colors';
 import { useNfcEnabled } from '../features/nfc/hooks/useNfcEnabled';
@@ -83,7 +83,7 @@ const SendTransactionScreen: React.FC<Props> = ({ navigation, route }) => {
   const pendingResultRef = useRef<SendEthResult | null>(null);
   const network = getActiveNetwork();
   const usdRateBySymbol = useMemo(
-    () => ({ ETH: 1960.86, MATIC: 0.82, BNB: 598.0 }),
+    () => ({ ETH: 1960.86, BASE: 1960.86, ARB: 1960.86, MATIC: 0.82, POL: 0.82, BNB: 598.0 }),
     [],
   );
 
@@ -657,9 +657,10 @@ const createStyles = (theme: ThemeTokens) =>
     headerTitle: {
       flex: 1,
       color: ACCENT.text,
-      fontSize: 18,
-      fontWeight: '800',
-      letterSpacing: -0.4,
+      fontFamily: DISPLAY_FONT_MEDIUM,
+      fontSize: 17,
+      letterSpacing: -0.2,
+      textAlign: 'center',
     },
     stepText: {
       color: ACCENT.textLow,

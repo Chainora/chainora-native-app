@@ -14,7 +14,7 @@ export const ROUTES = {
   WalletDetails: 'WalletDetails',
   WalletRelayRequest: 'WalletRelayRequest',
   SendPick: 'SendPick',
-  SendBtc: 'SendBtc',
+  Send: 'Send',
   Receive: 'Receive',
   TouchSign: 'TouchSign',
   TokenManage: 'TokenManage',

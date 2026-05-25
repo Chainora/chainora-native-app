@@ -12,7 +12,7 @@ import {
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
 export const WALLET_COLORS = {
-  background: '#05070D',
+  background: '#08111B',
   backgroundAlt: '#0A101A',
   surface: '#101827',
   surfaceAlt: '#121D2D',
@@ -37,14 +37,32 @@ export const WALLET_COLORS = {
 } as const;
 
 export const DISPLAY_FONT = Platform.select({
-  ios: 'System',
-  android: 'sans-serif-medium',
+  ios: 'Unbounded-Bold',
+  android: 'Unbounded-Bold',
+  default: 'System',
+});
+
+export const DISPLAY_FONT_MEDIUM = Platform.select({
+  ios: 'Unbounded-Medium',
+  android: 'Unbounded-Medium',
+  default: 'System',
+});
+
+export const SANS_FONT = Platform.select({
+  ios: 'Geist-Regular',
+  android: 'Geist-Regular',
+  default: 'System',
+});
+
+export const SANS_FONT_SEMIBOLD = Platform.select({
+  ios: 'Geist-SemiBold',
+  android: 'Geist-SemiBold',
   default: 'System',
 });
 
 export const MONO_FONT = Platform.select({
-  ios: 'Menlo',
-  android: 'monospace',
+  ios: 'GeistMono-Regular',
+  android: 'GeistMono-Regular',
   default: 'monospace',
 });
 
@@ -93,7 +111,13 @@ export const walletShadow = (color = WALLET_COLORS.signal): ViewStyle => ({
   elevation: 9,
 });
 
-export const WalletAuras: React.FC = () => <View style={styles.auraTop} pointerEvents="none" />;
+export const WalletAuras: React.FC = () => (
+  <>
+    <View style={styles.auraHalo} pointerEvents="none" />
+    <View style={styles.auraMist} pointerEvents="none" />
+    <View style={styles.auraCore} pointerEvents="none" />
+  </>
+);
 
 export const WalletTopBar: React.FC<TopBarProps> = ({ title, onBack, right, titleStyle }) => (
   <View style={styles.topBar}>
@@ -280,14 +304,45 @@ export const buildWalletScreenStyles = () =>
   });
 
 const styles = StyleSheet.create({
-  auraTop: {
+  auraHalo: {
     position: 'absolute',
+    top: -170,
+    left: -24,
+    right: -24,
+    height: 320,
+    borderRadius: 999,
+    backgroundColor: 'rgba(54, 132, 255, 0.12)',
+    shadowColor: '#4FB4FF',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.45,
+    shadowRadius: 90,
+    elevation: 1,
+    transform: [{ scaleX: 1.24 }],
+  },
+  auraMist: {
+    position: 'absolute',
+    top: -126,
     left: 32,
     right: 32,
-    top: -100,
-    height: 220,
+    height: 210,
     borderRadius: 999,
-    backgroundColor: 'rgba(40, 151, 255, 0.1)',
+    backgroundColor: 'rgba(107, 188, 255, 0.08)',
+    transform: [{ scaleX: 1.16 }],
+  },
+  auraCore: {
+    position: 'absolute',
+    top: -52,
+    alignSelf: 'center',
+    width: 160,
+    height: 108,
+    borderRadius: 999,
+    backgroundColor: 'rgba(79, 180, 255, 0.18)',
+    shadowColor: '#62BBFF',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 44,
+    elevation: 2,
+    transform: [{ scaleX: 1.3 }],
   },
   topBar: {
     flexDirection: 'row',
@@ -308,9 +363,8 @@ const styles = StyleSheet.create({
   },
   topBarTitle: {
     color: WALLET_COLORS.text,
-    fontFamily: DISPLAY_FONT,
-    fontSize: 16,
-    fontWeight: '700',
+    fontFamily: DISPLAY_FONT_MEDIUM,
+    fontSize: 17,
     letterSpacing: -0.2,
   },
   iconButton: {

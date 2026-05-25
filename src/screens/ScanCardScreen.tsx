@@ -10,12 +10,13 @@ import type { ToastType } from '../components/Toast';
 import {
   PinGhostButton,
   PIN_DISPLAY_FONT_BOLD,
+  PIN_DISPLAY_FONT_MEDIUM,
   PIN_MONO_FONT,
   PIN_SANS_FONT,
   PIN_SANS_FONT_SEMIBOLD,
 } from '../components/ui/pinTheme';
 import { useSettings } from '../features/settings';
-import { initialiseWallet, signInWallet, WalletActionResult, WalletActionCode } from '../services/cardService';
+import { initialiseWallet, signInWallet, WalletActionCode } from '../services/cardService';
 import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
 import { clearScanCardFlow, getScanCardFlow, type ScanCardFlowKind, type ScanMode } from '../services/scanCardFlowRegistry';
 
@@ -613,7 +614,7 @@ const ScanCardScreen: React.FC<Props> = ({ navigation, route }) => {
     <View style={styles.screenRoot}>
       <StatusBar
         barStyle={resolvedTheme === 'light' ? 'dark-content' : 'light-content'}
-        backgroundColor="#050811"
+        backgroundColor="#08111B"
       />
       <SafeAreaView style={styles.screenRoot} edges={['top', 'bottom']}>
         <Pressable
@@ -903,7 +904,7 @@ const ScanCardScreen: React.FC<Props> = ({ navigation, route }) => {
 const styles = StyleSheet.create({
   screenRoot: {
     flex: 1,
-    backgroundColor: '#050811',
+    backgroundColor: '#08111B',
   },
   backdrop: {
     flex: 1,
@@ -944,7 +945,7 @@ const styles = StyleSheet.create({
     minHeight: '96%',
     maxHeight: '96%',
     borderRadius: 34,
-    backgroundColor: '#050811',
+    backgroundColor: '#08111B',
     paddingHorizontal: 18,
     paddingTop: 20,
     paddingBottom: 18,
@@ -974,9 +975,9 @@ const styles = StyleSheet.create({
     flex: 1,
     color: COLORS.text,
     fontSize: 17,
-    lineHeight: 22,
-    fontWeight: '800',
-    letterSpacing: -0.48,
+    lineHeight: 21,
+    fontFamily: PIN_DISPLAY_FONT_MEDIUM,
+    letterSpacing: -0.2,
   },
   closeButton: {
     width: 30,

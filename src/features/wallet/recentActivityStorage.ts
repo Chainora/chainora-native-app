@@ -111,12 +111,27 @@ export const getRecentActivities = async (): Promise<RecentActivity[]> => {
   return parseStoredActivities(raw);
 };
 
-export const getRecentActivitiesByWallet = async (walletAddress: string): Promise<RecentActivity[]> => {
+export const getRecentActivitiesByWallet = async (
+  walletAddress: string,
+  networkKey: NetworkKey = getActiveNetwork().key,
+): Promise<RecentActivity[]> => {
   const all = await getRecentActivities();
   const normalized = walletAddress.toLowerCase();
-  const networkKey = getActiveNetwork().key;
   return all
     .filter(item => item.walletAddress === normalized && item.networkKey === networkKey)
+    .slice(0, MAX_ACTIVITIES);
+};
+
+export const getRecentActivitiesByWalletAcrossNetworks = async (
+  walletAddress: string,
+  networkKeys: NetworkKey[],
+): Promise<RecentActivity[]> => {
+  const all = await getRecentActivities();
+  const normalized = walletAddress.toLowerCase();
+  const allowedNetworks = new Set(networkKeys);
+  return all
+    .filter(item => item.walletAddress === normalized && allowedNetworks.has(item.networkKey))
+    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
     .slice(0, MAX_ACTIVITIES);
 };
 
