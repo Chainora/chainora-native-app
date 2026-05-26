@@ -5,7 +5,7 @@ import { addRecentActivity } from '@services/storage/recentActivityStorage';
 import {
   sendEthTransaction,
   type SendEthResult,
-} from '@services/transactionService';
+} from '@services/transaction/transactionService';
 import {
   buildTransferPayload,
   formatGweiFromWei,

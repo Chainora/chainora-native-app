@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import type { NetworkConfig } from '@config/network';
-import { fetchSuggestedGasPriceWei } from '@services/transactionService';
+import { fetchSuggestedGasPriceWei } from '@services/transaction/transactionService';
 import { formatGweiFromWei } from '@utils/sendFlowUtils';
 
 export const useSuggestedGasPriceGwei = (network: NetworkConfig): string => {

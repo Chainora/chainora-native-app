@@ -1,15 +1,21 @@
 # Screens Agent Guide
 
 ## Scope
+
 Screen-level UI and flow orchestration.
 
 ## Prompt Update Rule
+
 After screen changes, update this file with affected screens, user flows, and side effects.
 
 ## Fast Navigation
+
 - Screen components render and coordinate hooks/dialogs. They must not import `@services/*`, native SDKs, direct storage, or deep parent chains.
+- Every top-level screen lives in a PascalCase folder: `src/screens/<Screen>/index.tsx` owns rendering and orchestration; `src/screens/<Screen>/<Screen>.styles.ts` owns all `StyleSheet` objects and style-only constants.
 
 ## Latest Update
+
+- Split every screen folder to exactly `index.tsx` plus `<Screen>.styles.ts`; removed the shared wallet-flow style file by copying used styles into SendPick, Send, Receive, TouchSign, TokenManage, and AddToken.
 - Legacy lowercase auth/relay/wallet groups were flattened into top-level PascalCase screen folders.
 - Auth, relay, and wallet screens route service/native side effects through global hooks. Auth support code lives in `src/components/auth`, `src/hooks`, and `src/utils`.
 - Home and ChangePin also use hook facades for storage/relay/card scan flows.
@@ -19,5 +25,6 @@ After screen changes, update this file with affected screens, user flows, and si
 - Reset/progress logic now guards optional `sessionId` to avoid invalid auth-progress calls for non-auth QR features.
 
 ## Verify
+
 - yarn -s tsc --noEmit
 - Manually test the changed user paths on device/emulator.

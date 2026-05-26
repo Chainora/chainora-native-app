@@ -4,9 +4,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
-import {
-  useWalletColors,
-} from '@components/ui/walletDesign';
+import { useWalletColors } from '@components/ui/walletDesign';
 import { useAuth } from '@hooks/useAuth';
 import { useSettings } from '@hooks/useSettings';
 import { useSettingsActions } from '@hooks/useSettingsActions';
@@ -40,11 +38,12 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
   const { session } = useAuth();
   const { settings, resolvedTheme, setTheme, t } = useSettings();
   const colors = useWalletColors();
-  const styles = useMemo(() => createSettingsStyles(colors), [colors]);
+  const screenStyles = useMemo(() => createSettingsStyles(colors), [colors]);
   const biometricEnabled = false;
   const { handleDeleteCache, handleLogout } = useSettingsActions(navigation);
 
-  const languageLabel = settings.language === 'vi' ? t('languageVietnamese') : t('languageEnglish');
+  const languageLabel =
+    settings.language === 'vi' ? t('languageVietnamese') : t('languageEnglish');
   const currencyCode = settings.currency.toUpperCase();
   const isDarkTheme = resolvedTheme === 'dark';
 
@@ -63,8 +62,6 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
   const handleBackup = useCallback(() => {
     navigation.navigate(ROUTES.EcdhBackup);
   }, [navigation]);
-
-
 
   const handleThemeToggle = useCallback(() => {
     setTheme(isDarkTheme ? 'light' : 'dark');
@@ -130,7 +127,14 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
         onPress: handleCurrency,
       },
     ],
-    [currencyCode, handleCurrency, handleLanguage, languageLabel, settings.language, t],
+    [
+      currencyCode,
+      handleCurrency,
+      handleLanguage,
+      languageLabel,
+      settings.language,
+      t,
+    ],
   );
 
   const socialRows = useMemo<RowItem[]>(
@@ -183,7 +187,7 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
   );
 
   const renderRows = (rows: RowItem[], displayOnly = false) => (
-    <View style={styles.groupCard}>
+    <View style={screenStyles.groupCard}>
       {rows.map((row, index) => {
         const hardDanger = row.danger === 'hard';
         const softDanger = row.danger === 'soft';
@@ -193,12 +197,12 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
           <>
             <View
               style={[
-                styles.rowIcon,
-                softDanger && styles.rowIconSoftDanger,
-                hardDanger && styles.rowIconHardDanger,
-                row.social === 'x' && styles.rowIconX,
-                row.social === 'facebook' && styles.rowIconFacebook,
-                row.social === 'youtube' && styles.rowIconYoutube,
+                screenStyles.rowIcon,
+                softDanger && screenStyles.rowIconSoftDanger,
+                hardDanger && screenStyles.rowIconHardDanger,
+                row.social === 'x' && screenStyles.rowIconX,
+                row.social === 'facebook' && screenStyles.rowIconFacebook,
+                row.social === 'youtube' && screenStyles.rowIconYoutube,
               ]}
             >
               <Ionicons
@@ -208,40 +212,73 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
                   hardDanger
                     ? '#FF8A8A'
                     : softDanger
-                      ? '#FFB38E'
-                      : row.social === 'facebook'
-                        ? '#5EA0FF'
-                        : row.social === 'youtube'
-                          ? '#FF6B6B'
-                          : '#A7D4FF'
+                    ? '#FFB38E'
+                    : row.social === 'facebook'
+                    ? '#5EA0FF'
+                    : row.social === 'youtube'
+                    ? '#FF6B6B'
+                    : '#A7D4FF'
                 }
               />
             </View>
 
-            <View style={styles.rowTextCol}>
-              <Text style={[styles.rowTitle, hardDanger && styles.rowTitleDanger]}>{row.title}</Text>
-              <Text style={styles.rowSubtitle}>{row.subtitle}</Text>
+            <View style={screenStyles.rowTextCol}>
+              <Text
+                style={[
+                  screenStyles.rowTitle,
+                  hardDanger && screenStyles.rowTitleDanger,
+                ]}
+              >
+                {row.title}
+              </Text>
+              <Text style={screenStyles.rowSubtitle}>{row.subtitle}</Text>
             </View>
 
             {typeof row.toggle === 'boolean' ? (
-              <View style={[styles.toggle, row.toggle && styles.toggleOn]}>
-                <View style={[styles.toggleKnob, row.toggle && styles.toggleKnobOn]} />
+              <View
+                style={[
+                  screenStyles.toggle,
+                  row.toggle && screenStyles.toggleOn,
+                ]}
+              >
+                <View
+                  style={[
+                    screenStyles.toggleKnob,
+                    row.toggle && screenStyles.toggleKnobOn,
+                  ]}
+                />
               </View>
             ) : row.social ? (
-              <View style={styles.socialCta}>
-                <Text style={styles.socialCtaText}>{t('settingsSocialOpen')}</Text>
-                <Ionicons name="arrow-up-outline" size={10} color={colors.textMuted} />
+              <View style={screenStyles.socialCta}>
+                <Text style={screenStyles.socialCtaText}>
+                  {t('settingsSocialOpen')}
+                </Text>
+                <Ionicons
+                  name="arrow-up-outline"
+                  size={10}
+                  color={colors.textMuted}
+                />
               </View>
             ) : row.meta ? (
-              <View style={styles.metaWrap}>
-                <Text style={styles.metaText}>{row.meta}</Text>
-                <Ionicons name="chevron-forward" size={12} color={colors.textSoft} />
+              <View style={screenStyles.metaWrap}>
+                <Text style={screenStyles.metaText}>{row.meta}</Text>
+                <Ionicons
+                  name="chevron-forward"
+                  size={12}
+                  color={colors.textSoft}
+                />
               </View>
             ) : (
-              <Ionicons name="chevron-forward" size={14} color={colors.textSoft} />
+              <Ionicons
+                name="chevron-forward"
+                size={14}
+                color={colors.textSoft}
+              />
             )}
 
-            {index < rows.length - 1 ? <View style={styles.rowSeparator} /> : null}
+            {index < rows.length - 1 ? (
+              <View style={screenStyles.rowSeparator} />
+            ) : null}
           </>
         );
 
@@ -249,7 +286,10 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
           return (
             <Pressable
               key={row.id}
-              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+              style={({ pressed }) => [
+                screenStyles.row,
+                pressed && screenStyles.rowPressed,
+              ]}
               onPress={row.onPress}
             >
               {content}
@@ -258,7 +298,7 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
         }
 
         return (
-          <View key={row.id} style={styles.row}>
+          <View key={row.id} style={screenStyles.row}>
             {content}
           </View>
         );
@@ -267,68 +307,92 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
   );
 
   return (
-    <View style={styles.root}>
+    <View style={screenStyles.root}>
       <StatusBar
         barStyle={resolvedTheme === 'light' ? 'dark-content' : 'light-content'}
         backgroundColor={colors.background}
       />
 
-      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
-        <View style={styles.topBar}>
-          <Pressable style={styles.backButton} onPress={() => navigation.goBack()}>
+      <SafeAreaView style={screenStyles.safeArea} edges={['top', 'bottom']}>
+        <View style={screenStyles.topBar}>
+          <Pressable
+            style={screenStyles.backButton}
+            onPress={() => navigation.goBack()}
+          >
             <Ionicons name="chevron-back" size={14} color={colors.textMuted} />
           </Pressable>
-          <Text style={styles.topTitle}>{t('headerSettingsTitle')}</Text>
-          <View style={styles.backButtonGhost} />
+          <Text style={screenStyles.topTitle}>{t('headerSettingsTitle')}</Text>
+          <View style={screenStyles.backButtonGhost} />
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-          <View style={styles.profileCard}>
-            <View style={styles.profileAvatar}>
-              <View style={styles.profileAvatarGradient} />
-              <View style={styles.profileAvatarCore} />
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={screenStyles.scrollContent}
+        >
+          <View style={screenStyles.profileCard}>
+            <View style={screenStyles.profileAvatar}>
+              <View style={screenStyles.profileAvatarGradient} />
+              <View style={screenStyles.profileAvatarCore} />
             </View>
 
-            <View style={styles.profileText}>
-              <Text style={styles.profileName}>{t('settingsProfilePrimaryLabel')}</Text>
-              <Text style={styles.profileAddress}>{truncateAddress(session?.address ?? '')}</Text>
+            <View style={screenStyles.profileText}>
+              <Text style={screenStyles.profileName}>
+                {t('settingsProfilePrimaryLabel')}
+              </Text>
+              <Text style={screenStyles.profileAddress}>
+                {truncateAddress(session?.address ?? '')}
+              </Text>
             </View>
 
-            <View style={styles.profileStatus}>
-              <View style={styles.profileStatusDot} />
-              <Text style={styles.profileStatusText}>{t('settingsStatusOnline')}</Text>
+            <View style={screenStyles.profileStatus}>
+              <View style={screenStyles.profileStatusDot} />
+              <Text style={screenStyles.profileStatusText}>
+                {t('settingsStatusOnline')}
+              </Text>
             </View>
           </View>
 
-          <View style={styles.groupWrap}>
-            <Text style={styles.groupLabel}>{t('settingsGroupOptions')}</Text>
+          <View style={screenStyles.groupWrap}>
+            <Text style={screenStyles.groupLabel}>
+              {t('settingsGroupOptions')}
+            </Text>
             {renderRows(optionRows)}
           </View>
 
-          <View style={styles.groupWrap}>
-            <Text style={styles.groupLabel}>{t('settingsGroupSecurity')}</Text>
+          <View style={screenStyles.groupWrap}>
+            <Text style={screenStyles.groupLabel}>
+              {t('settingsGroupSecurity')}
+            </Text>
             {renderRows(securityRows)}
           </View>
 
-          <View style={styles.groupWrap}>
-            <Text style={styles.groupLabel}>{t('settingsGroupDisplay')}</Text>
+          <View style={screenStyles.groupWrap}>
+            <Text style={screenStyles.groupLabel}>
+              {t('settingsGroupDisplay')}
+            </Text>
             {renderRows(displayRows)}
           </View>
 
-          <View style={styles.groupWrap}>
-            <Text style={styles.groupLabel}>{t('settingsGroupFollowChainora')}</Text>
+          <View style={screenStyles.groupWrap}>
+            <Text style={screenStyles.groupLabel}>
+              {t('settingsGroupFollowChainora')}
+            </Text>
             {renderRows(socialRows, true)}
           </View>
 
-          <View style={styles.groupWrap}>
-            <Text style={styles.groupLabel}>{t('settingsGroupSystem')}</Text>
+          <View style={screenStyles.groupWrap}>
+            <Text style={screenStyles.groupLabel}>
+              {t('settingsGroupSystem')}
+            </Text>
             {renderRows(systemRows)}
           </View>
 
-          <Text style={styles.versionText}>
+          <Text style={screenStyles.versionText}>
             {t('settingsVersionLine')}
             {'\n'}
-            <Text style={styles.versionSub}>{t('settingsVersionSubtext')}</Text>
+            <Text style={screenStyles.versionSub}>
+              {t('settingsVersionSubtext')}
+            </Text>
           </Text>
         </ScrollView>
       </SafeAreaView>
@@ -337,5 +401,3 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
 };
 
 export default SettingsScreen;
-
-

@@ -30,7 +30,7 @@ import WalletDetailsScreen from '@screens/WalletDetails';
 import WalletRelayRequestScreen from '@screens/WalletRelayRequest';
 import Header from '@components/layout/header';
 import { useSettings } from '@hooks/useSettings';
-import { walletRelaySessionManager } from '@services/walletRelaySessionManager';
+import { walletRelaySessionManager } from '@services/walletRelay/sessionManager';
 import type { RootStackParamList } from '@navigation/routes/rootStackParamList';
 import { navigationRef } from '@navigation/navigationRef';
 import { ROUTES } from '@navigation/routes/routes';

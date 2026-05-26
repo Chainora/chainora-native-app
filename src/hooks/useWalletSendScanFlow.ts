@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 
-import type { SendEthResult } from '@services/transactionService';
+import type { SendEthResult } from '@services/transaction/transactionService';
 import { registerScanCardFlow } from '@services/scanCardFlowRegistry';
 
 type UseWalletSendScanFlowArgs = {

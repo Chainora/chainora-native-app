@@ -1,16 +1,16 @@
 import { encodeFunctionData, erc20Abi, getAddress, isAddress } from 'viem';
 
-import { withVerifiedWalletSession } from './cardService';
-import { sendEthTransaction } from './transactionService';
-import { derToCompactSignatureHex } from './transaction/signatureUtils';
-import { buildEip191HashFromPersonalSignInput, decodePersonalSignInput } from './walletRelayCrypto';
-import { getActiveNetwork } from '../config/network';
-import { getPublicViemClient } from './web3Client';
+import { withVerifiedWalletSession } from '../cardService';
+import { sendEthTransaction } from '../transaction/transactionService';
+import { derToCompactSignatureHex } from '../transaction/signatureUtils';
+import { buildEip191HashFromPersonalSignInput, decodePersonalSignInput } from './crypto';
+import { getActiveNetwork } from '../../config/network';
+import { getPublicViemClient } from '../web3Client';
 import type {
   WalletRelayMessage,
   WalletRelayPairingPayload,
-} from './walletRelayProtocol';
-import { WALLET_RELAY_MESSAGE_TYPES } from './walletRelayProtocol';
+} from './protocol';
+import { WALLET_RELAY_MESSAGE_TYPES } from './protocol';
 import type {
   WalletRelayPendingRequest,
   WalletRelaySnapshot,

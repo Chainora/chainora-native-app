@@ -1,11 +1,11 @@
 import { keccak_256 } from '@noble/hashes/sha3.js';
 import { getAddress } from 'viem';
 
-import { getActiveNetwork, type NetworkConfig } from '../config/network';
-import { signTransactionHash } from './cardService';
-import { recoverSignature } from './transaction/signatureUtils';
-import { getPublicViemClient } from './web3Client';
-import { bytesToHex, hexToBytes } from '../utils/encoding';
+import { getActiveNetwork, type NetworkConfig } from '../../config/network';
+import { signTransactionHash } from '../cardService';
+import { recoverSignature } from './signatureUtils';
+import { getPublicViemClient } from '../web3Client';
+import { bytesToHex, hexToBytes } from '../../utils/encoding';
 
 const LEGACY_TRANSFER_GAS_LIMIT = 21_000n;
 const CONTRACT_CALL_FALLBACK_GAS_LIMIT = 1_500_000n;

@@ -1,10 +1,10 @@
 import React, { useCallback, useState } from 'react';
-import { StatusBar, StyleSheet, Text, View } from 'react-native';
+import { StatusBar, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { PinInput } from '@components/ui/PinInput';
-import { PIN_COLORS, PinTopBar } from '@components/ui/pinTheme';
+import { PinTopBar } from '@components/ui/pinTheme';
 import type { ScanCardFlowSuccess } from '@app-types/wallet';
 import { useAuth } from '@hooks/useAuth';
 import { useAuthPinScanFlow } from '@hooks/useAuthPinScanFlow';
@@ -13,11 +13,10 @@ import { useSettings } from '@hooks/useSettings';
 import { useToast } from '@hooks/useToast';
 import { ROUTES } from '@navigation/routes/routes';
 import type { RootStackParamList } from '@navigation/routes/rootStackParamList';
+import { AUTH_SCREEN_BACKGROUND, styles } from './ActivatePin.styles';
 
 const PIN_LENGTH = 4;
 const TOTAL_STEPS = 2;
-const AUTH_SCREEN_BACKGROUND = '#08111B';
-
 type Step = 'create' | 'confirm';
 type Props = NativeStackScreenProps<
   RootStackParamList,
@@ -124,7 +123,10 @@ export const ActivatePinScreen: React.FC<Props> = ({ navigation }) => {
     t,
   ]);
 
-  const title = step === 'create' ? t('activateChoosePinTitle') : t('activateConfirmPinTitle');
+  const title =
+    step === 'create'
+      ? t('activateChoosePinTitle')
+      : t('activateConfirmPinTitle');
   const bodyText =
     step === 'create'
       ? t('activateChoosePinBody')
@@ -141,11 +143,13 @@ export const ActivatePinScreen: React.FC<Props> = ({ navigation }) => {
         <View style={styles.content}>
           <PinTopBar
             onBack={() => navigation.goBack()}
-            right={(
+            right={
               <Text style={styles.stepText}>
-                {`${t('commonStep').toUpperCase()} ${currentStepNumber}/${TOTAL_STEPS}`}
+                {`${t(
+                  'commonStep',
+                ).toUpperCase()} ${currentStepNumber}/${TOTAL_STEPS}`}
               </Text>
-            )}
+            }
           />
 
           <PinInput
@@ -157,42 +161,27 @@ export const ActivatePinScreen: React.FC<Props> = ({ navigation }) => {
             submitDisabled={!canSubmit || submitting}
             title={title}
             subtitle={bodyText}
-            ctaLabel={step === 'create' ? t('activatePrimaryContinue') : t('activatePrimaryAction')}
-            heroIconName={step === 'create' ? 'shield-checkmark-outline' : 'checkmark-done-outline'}
+            ctaLabel={
+              step === 'create'
+                ? t('activatePrimaryContinue')
+                : t('activatePrimaryAction')
+            }
+            heroIconName={
+              step === 'create'
+                ? 'shield-checkmark-outline'
+                : 'checkmark-done-outline'
+            }
             progressCurrent={currentStepNumber}
             progressTotal={TOTAL_STEPS}
-            progressLabel={`${t('commonStep')} ${currentStepNumber}/${TOTAL_STEPS}`}
+            progressLabel={`${t(
+              'commonStep',
+            )} ${currentStepNumber}/${TOTAL_STEPS}`}
             errorMessage={errorMessage || null}
           />
         </View>
-
       </SafeAreaView>
     </View>
   );
 };
-
-const createStyles = () => StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: AUTH_SCREEN_BACKGROUND,
-  },
-  safeArea: {
-    flex: 1,
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 18,
-    paddingTop: 6,
-    paddingBottom: 14,
-  },
-  stepText: {
-    color: PIN_COLORS.textSoft,
-    fontSize: 10,
-    letterSpacing: 1.5,
-    fontWeight: '600',
-  },
-});
-
-const styles = createStyles();
 
 export default ActivatePinScreen;

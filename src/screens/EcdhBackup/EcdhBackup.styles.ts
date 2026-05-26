@@ -1,0 +1,334 @@
+import { StyleSheet } from 'react-native';
+
+import {
+  DISPLAY_FONT,
+  WALLET_COLORS,
+  buildWalletScreenStyles,
+} from '@components/ui/walletDesign';
+
+export const screenBase = buildWalletScreenStyles();
+
+export const styles = StyleSheet.create({
+  stageRoot: {
+    flex: 1,
+    paddingTop: 12,
+  },
+  introStage: {
+    flex: 1,
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  introBody: {
+    gap: 10,
+  },
+  kicker: {
+    color: '#62BBFF',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+  },
+  introTitle: {
+    color: WALLET_COLORS.text,
+    fontSize: 28,
+    lineHeight: 32,
+    fontWeight: '800',
+    fontFamily: DISPLAY_FONT,
+    letterSpacing: -0.7,
+  },
+  introSubtitle: {
+    color: WALLET_COLORS.textMuted,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  deviceCard: {
+    padding: 12,
+    gap: 6,
+  },
+  deviceCardTitle: {
+    color: WALLET_COLORS.text,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  deviceCardBody: {
+    color: WALLET_COLORS.textSoft,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  timelineCard: {
+    padding: 12,
+    gap: 8,
+  },
+  timelineRow: {
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'center',
+  },
+  timelineBullet: {
+    width: 24,
+    height: 24,
+    borderRadius: 7,
+    backgroundColor: WALLET_COLORS.surfaceSoft,
+    borderWidth: 1,
+    borderColor: WALLET_COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  timelineBulletText: {
+    color: WALLET_COLORS.text,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  timelineBody: {
+    flex: 1,
+    gap: 2,
+  },
+  timelineTitle: {
+    color: WALLET_COLORS.text,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  timelineSubtitle: {
+    color: WALLET_COLORS.textSoft,
+    fontSize: 11,
+  },
+  noteCard: {
+    padding: 10,
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'flex-start',
+  },
+  noteText: {
+    flex: 1,
+    color: WALLET_COLORS.textMuted,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  actions: {
+    gap: 8,
+  },
+  pinStageInput: {
+    flex: 1,
+    paddingTop: 10,
+    paddingBottom: 4,
+  },
+  progressRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  progressSegment: {
+    flex: 1,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#1B2536',
+  },
+  progressSegmentDone: {
+    backgroundColor: WALLET_COLORS.signal,
+  },
+  progressSegmentActive: {
+    shadowColor: WALLET_COLORS.signal,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.4,
+    shadowRadius: 9,
+  },
+  tapStage: {
+    flex: 1,
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  tapDetails: {
+    gap: 10,
+  },
+  tapHero: {
+    alignItems: 'center',
+    gap: 8,
+  },
+  tapIcon: {
+    width: 74,
+    height: 74,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: WALLET_COLORS.border,
+    backgroundColor: WALLET_COLORS.surfaceAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tapTitle: {
+    color: WALLET_COLORS.text,
+    fontSize: 24,
+    lineHeight: 28,
+    fontWeight: '800',
+    fontFamily: DISPLAY_FONT,
+    letterSpacing: -0.5,
+    textAlign: 'center',
+  },
+  tapSubtitle: {
+    color: WALLET_COLORS.textMuted,
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center',
+    paddingHorizontal: 8,
+  },
+  scanCard: {
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    gap: 8,
+  },
+  scanCore: {
+    width: 56,
+    height: 56,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: WALLET_COLORS.border,
+    backgroundColor: WALLET_COLORS.surfaceAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scanTitle: {
+    color: WALLET_COLORS.text,
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  scanSubtitle: {
+    color: WALLET_COLORS.textMuted,
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: 'center',
+  },
+  trailCard: {
+    padding: 10,
+    gap: 7,
+  },
+  trailItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  trailDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 1,
+    backgroundColor: WALLET_COLORS.signal,
+  },
+  trailText: {
+    color: WALLET_COLORS.textMuted,
+    fontSize: 11,
+  },
+  pinHintCard: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    marginTop: 8,
+  },
+  pinHintText: {
+    color: WALLET_COLORS.textSoft,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  roleChipWrap: {
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  roleChip: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: WALLET_COLORS.border,
+    backgroundColor: WALLET_COLORS.surfaceAlt,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  roleChipText: {
+    color: WALLET_COLORS.textMuted,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  statusText: {
+    color: WALLET_COLORS.textSoft,
+    fontSize: 12,
+    textAlign: 'center',
+    minHeight: 16,
+  },
+  errorText: {
+    color: WALLET_COLORS.danger,
+    fontSize: 12,
+    textAlign: 'center',
+    minHeight: 18,
+  },
+  successWrap: {
+    flex: 1,
+    justifyContent: 'space-between',
+    gap: 10,
+    paddingBottom: 8,
+  },
+  successSummary: {
+    gap: 10,
+  },
+  successMark: {
+    width: 90,
+    height: 90,
+    borderRadius: 18,
+    alignSelf: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(52, 211, 153, 0.32)',
+    backgroundColor: 'rgba(52, 211, 153, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  successTitle: {
+    color: WALLET_COLORS.text,
+    fontSize: 24,
+    lineHeight: 28,
+    fontWeight: '800',
+    fontFamily: DISPLAY_FONT,
+    textAlign: 'center',
+    letterSpacing: -0.6,
+  },
+  successBody: {
+    color: WALLET_COLORS.textMuted,
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center',
+  },
+  pairCard: {
+    padding: 12,
+  },
+  pairRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 8,
+  },
+  pairSwatch: {
+    width: 30,
+    height: 30,
+    borderRadius: 9,
+    backgroundColor: WALLET_COLORS.surfaceSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pairSwatchText: {
+    color: WALLET_COLORS.text,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  pairText: {
+    flex: 1,
+    gap: 2,
+  },
+  pairTitle: {
+    color: WALLET_COLORS.text,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  pairSubtitle: {
+    color: WALLET_COLORS.textSoft,
+    fontSize: 11,
+  },
+  pairDivider: {
+    height: 1,
+    backgroundColor: '#203149',
+  },
+});

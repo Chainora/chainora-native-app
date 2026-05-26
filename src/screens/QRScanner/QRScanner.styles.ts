@@ -1,0 +1,193 @@
+import { StyleSheet } from 'react-native';
+
+import { DISPLAY_FONT_MEDIUM, MONO_FONT } from '@components/ui/walletDesign';
+
+export const QR_SCANNER_BACKGROUND = '#000000';
+
+const FRAME_SIZE = 220;
+
+export const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: QR_SCANNER_BACKGROUND,
+  },
+  cameraWrap: {
+    flex: 1,
+  },
+  camera: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  cameraDim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.16)',
+  },
+  topBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    paddingBottom: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  iconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rightGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  topTitleWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 16,
+    alignItems: 'center',
+  },
+  topTitle: {
+    color: '#EAF0FB',
+    fontFamily: DISPLAY_FONT_MEDIUM,
+    fontSize: 17,
+    letterSpacing: -0.4,
+  },
+  frameLayer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scanFrame: {
+    width: FRAME_SIZE,
+    height: FRAME_SIZE,
+    position: 'relative',
+  },
+  corner: {
+    position: 'absolute',
+    width: 56,
+    height: 56,
+    borderWidth: 6,
+    borderColor: '#EAF0FB',
+    borderRadius: 14,
+  },
+  topLeft: {
+    top: 0,
+    left: 0,
+    borderRightWidth: 0,
+    borderBottomWidth: 0,
+    borderTopRightRadius: 0,
+    borderBottomLeftRadius: 0,
+  },
+  topRight: {
+    top: 0,
+    right: 0,
+    borderLeftWidth: 0,
+    borderBottomWidth: 0,
+    borderTopLeftRadius: 0,
+    borderBottomRightRadius: 0,
+  },
+  bottomLeft: {
+    bottom: 0,
+    left: 0,
+    borderRightWidth: 0,
+    borderTopWidth: 0,
+    borderTopLeftRadius: 0,
+    borderBottomRightRadius: 0,
+  },
+  bottomRight: {
+    bottom: 0,
+    right: 0,
+    borderLeftWidth: 0,
+    borderTopWidth: 0,
+    borderTopRightRadius: 0,
+    borderBottomLeftRadius: 0,
+  },
+  hintRow: {
+    position: 'absolute',
+    bottom: 130,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  hintDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#2897FF',
+    shadowColor: '#2897FF',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  hintText: {
+    color: '#A7B6CD',
+    fontFamily: MONO_FONT,
+    fontSize: 11,
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+  },
+  flashButton: {
+    position: 'absolute',
+    right: 18,
+    bottom: 60,
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fallbackWrap: {
+    flex: 1,
+    paddingHorizontal: 22,
+    justifyContent: 'center',
+    gap: 12,
+  },
+  fallbackTitle: {
+    color: '#EAF0FB',
+    fontSize: 26,
+    fontWeight: '800',
+    letterSpacing: -0.6,
+  },
+  fallbackSub: {
+    color: '#A7B6CD',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  fallbackNote: {
+    color: '#A7B6CD',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  fallbackButton: {
+    height: 46,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#2F4667',
+    backgroundColor: '#1B2B42',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fallbackGhost: {
+    backgroundColor: '#121A28',
+    borderColor: '#233145',
+  },
+  fallbackButtonText: {
+    color: '#EAF4FF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+});

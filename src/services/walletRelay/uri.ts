@@ -1,4 +1,4 @@
-import type { WalletRelayPairingPayload } from './walletRelayProtocol';
+import type { WalletRelayPairingPayload } from './protocol';
 
 const PAIRING_SCHEME = 'chainora-wallet:';
 const LOG_PREFIX = '[wallet-relay][uri]';

@@ -12,7 +12,6 @@ import {
   WalletPanel,
   WalletPill,
   WalletTopBar,
-  buildWalletScreenStyles,
 } from '@components/ui/walletDesign';
 import { getNetworkConfig } from '@config/network';
 import { useNfcEnabled } from '@hooks/useNfcEnabled';
@@ -21,30 +20,45 @@ import { useTouchSignTransactionFlow } from '@hooks/useTouchSignTransactionFlow'
 import type { RootStackParamList } from '@navigation/routes/rootStackParamList';
 import { ROUTES } from '@navigation/routes/routes';
 import { getAssetSymbol, truncateAddress } from '@utils/sendFlowUtils';
-import { walletFlowStyles as styles } from '@screens/WalletFlow.styles';
+import { createTouchSignScreenBase, styles } from './TouchSign.styles';
 
-type TouchSignProps = NativeStackScreenProps<RootStackParamList, typeof ROUTES.TouchSign>;
+type TouchSignProps = NativeStackScreenProps<
+  RootStackParamList,
+  typeof ROUTES.TouchSign
+>;
 
 const TouchSignScreen: React.FC<TouchSignProps> = ({ navigation, route }) => {
-  const { walletAddress, publicKeyHex, chainKey, recipient, amount, pin, gasPriceGwei, gasLimit } = route.params;
+  const {
+    walletAddress,
+    publicKeyHex,
+    chainKey,
+    recipient,
+    amount,
+    pin,
+    gasPriceGwei,
+    gasLimit,
+  } = route.params;
   const { t } = useSettings();
   const colors = useWalletColors();
-  const screenBase = useMemo(() => buildWalletScreenStyles(colors), [colors]);
+  const screenBase = useMemo(() => createTouchSignScreenBase(colors), [colors]);
   const { isEnabled } = useNfcEnabled();
   const network = getNetworkConfig(chainKey);
-  const handleFlowSuccess = useCallback((sendResult: {
-    transactionHash: string;
-    amount: string;
-    gasLimit: string;
-    gasPriceGwei: string;
-  }) => {
-    navigation.replace(ROUTES.Send, {
-      walletAddress,
-      publicKeyHex,
-      chainKey,
-      result: sendResult,
-    });
-  }, [chainKey, navigation, publicKeyHex, walletAddress]);
+  const handleFlowSuccess = useCallback(
+    (sendResult: {
+      transactionHash: string;
+      amount: string;
+      gasLimit: string;
+      gasPriceGwei: string;
+    }) => {
+      navigation.replace(ROUTES.Send, {
+        walletAddress,
+        publicKeyHex,
+        chainKey,
+        result: sendResult,
+      });
+    },
+    [chainKey, navigation, publicKeyHex, walletAddress],
+  );
 
   const { submitting, startSendScanFlow } = useTouchSignTransactionFlow({
     amount,
@@ -73,7 +87,10 @@ const TouchSignScreen: React.FC<TouchSignProps> = ({ navigation, route }) => {
       <SafeAreaView style={screenBase.safeArea} edges={['top', 'bottom']}>
         <WalletAuras />
         <View style={screenBase.content}>
-          <WalletTopBar title={t('touchSignTitle')} onBack={() => navigation.goBack()} />
+          <WalletTopBar
+            title={t('touchSignTitle')}
+            onBack={() => navigation.goBack()}
+          />
 
           <View style={styles.touchBody}>
             <WalletPill style={styles.scanFlag}>
@@ -86,7 +103,11 @@ const TouchSignScreen: React.FC<TouchSignProps> = ({ navigation, route }) => {
               <View style={styles.touchRingTwo} />
               <View style={styles.touchRingThree} />
               <View style={styles.touchCore}>
-                <Ionicons name="phone-portrait-outline" size={30} color={WALLET_COLORS.signal} />
+                <Ionicons
+                  name="phone-portrait-outline"
+                  size={30}
+                  color={WALLET_COLORS.signal}
+                />
               </View>
             </View>
 
@@ -97,7 +118,8 @@ const TouchSignScreen: React.FC<TouchSignProps> = ({ navigation, route }) => {
               <Text style={styles.resultLabel}>{t('sendNetworkLabel')}</Text>
               <Text style={styles.resultHash}>{network.name}</Text>
               <Text style={styles.resultMeta}>
-                {amount} {getAssetSymbol(network)} | {truncateAddress(recipient)}
+                {amount} {getAssetSymbol(network)} |{' '}
+                {truncateAddress(recipient)}
               </Text>
             </WalletPanel>
           </View>
@@ -108,14 +130,17 @@ const TouchSignScreen: React.FC<TouchSignProps> = ({ navigation, route }) => {
               disabled={submitting}
               onPress={startTouchSign}
             />
-            <WalletButton label={t('commonCancel')} variant="secondary" onPress={() => navigation.goBack()} />
+            <WalletButton
+              label={t('commonCancel')}
+              variant="secondary"
+              onPress={() => navigation.goBack()}
+            />
           </View>
         </View>
       </SafeAreaView>
     </View>
   );
 };
-
 
 export { TouchSignScreen };
 export default TouchSignScreen;

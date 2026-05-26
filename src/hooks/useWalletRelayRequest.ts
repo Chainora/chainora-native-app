@@ -3,7 +3,7 @@ import NfcManager from 'react-native-nfc-manager';
 
 import type { ScanCardFlowConfig, WalletRelaySnapshot } from '@app-types/wallet';
 import { registerScanCardFlow } from '@services/scanCardFlowRegistry';
-import { walletRelaySessionManager } from '@services/walletRelaySessionManager';
+import { walletRelaySessionManager } from '@services/walletRelay/sessionManager';
 
 const LOG_PREFIX = '[wallet-relay][request-screen]';
 

@@ -13,7 +13,6 @@ import {
   WalletSectionLabel,
   WalletTextField,
   WalletTopBar,
-  buildWalletScreenStyles,
 } from '@components/ui/walletDesign';
 import { getNetworkConfig } from '@config/network';
 import { useSettings } from '@hooks/useSettings';
@@ -31,7 +30,7 @@ import {
   truncateAddress,
 } from '@utils/sendFlowUtils';
 import WalletNetworkCoin from '@components/wallet/WalletNetworkCoin';
-import { walletFlowStyles as styles } from '@screens/WalletFlow.styles';
+import { createSendScreenBase, styles } from './Send.styles';
 
 type SendProps = NativeStackScreenProps<RootStackParamList, typeof ROUTES.Send>;
 
@@ -39,7 +38,7 @@ const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
   const { walletAddress, publicKeyHex, chainKey, result } = route.params;
   const { t } = useSettings();
   const colors = useWalletColors();
-  const screenBase = useMemo(() => buildWalletScreenStyles(colors), [colors]);
+  const screenBase = useMemo(() => createSendScreenBase(colors), [colors]);
   const network = getNetworkConfig(chainKey);
   const balanceState = useWalletBalance(walletAddress, network);
   const [recipient, setRecipient] = useState('');
@@ -51,7 +50,10 @@ const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
   const gasPriceGwei = useSuggestedGasPriceGwei(network);
 
   const feeNative = useMemo(
-    () => (network.portfolioTokenAddress ? null : formatFeeNative(gasLimit, gasPriceGwei)),
+    () =>
+      network.portfolioTokenAddress
+        ? null
+        : formatFeeNative(gasLimit, gasPriceGwei),
     [gasLimit, gasPriceGwei, network.portfolioTokenAddress],
   );
 
@@ -87,9 +89,15 @@ const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
     <View style={screenBase.screen}>
       <SafeAreaView style={screenBase.safeArea} edges={['top', 'bottom']}>
         <View style={screenBase.content}>
-          <WalletTopBar title={t('sendTitle')} onBack={() => navigation.goBack()} />
+          <WalletTopBar
+            title={t('sendTitle')}
+            onBack={() => navigation.goBack()}
+          />
 
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.formScroll}>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.formScroll}
+          >
             <View style={styles.networkHero}>
               <WalletNetworkCoin network={network} size={52} />
               <View style={styles.networkHeroText}>
@@ -99,7 +107,9 @@ const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
                 </Text>
               </View>
               <WalletPill style={styles.networkBadge}>
-                <Text style={styles.networkBadgeText}>Chain {network.chainId}</Text>
+                <Text style={styles.networkBadgeText}>
+                  Chain {network.chainId}
+                </Text>
               </WalletPill>
             </View>
 
@@ -108,11 +118,27 @@ const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
               <WalletTextField
                 right={
                   <View style={styles.fieldActions}>
-                    <Pressable onPress={async () => setRecipient((await Clipboard.getString()).trim())}>
-                      <Text style={styles.fieldActionText}>{t('commonPaste')}</Text>
+                    <Pressable
+                      onPress={async () =>
+                        setRecipient((await Clipboard.getString()).trim())
+                      }
+                    >
+                      <Text style={styles.fieldActionText}>
+                        {t('commonPaste')}
+                      </Text>
                     </Pressable>
-                    <Pressable onPress={() => navigation.navigate(ROUTES.QRScanner, { ethAddress: walletAddress })}>
-                      <Ionicons name="scan-outline" size={18} color={WALLET_COLORS.text} />
+                    <Pressable
+                      onPress={() =>
+                        navigation.navigate(ROUTES.QRScanner, {
+                          ethAddress: walletAddress,
+                        })
+                      }
+                    >
+                      <Ionicons
+                        name="scan-outline"
+                        size={18}
+                        color={WALLET_COLORS.text}
+                      />
                     </Pressable>
                   </View>
                 }
@@ -135,10 +161,18 @@ const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
                 right={
                   <View style={styles.fieldActions}>
                     <WalletPill style={styles.amountTag}>
-                      <Text style={styles.amountTagText}>{getAssetSymbol(network)}</Text>
+                      <Text style={styles.amountTagText}>
+                        {getAssetSymbol(network)}
+                      </Text>
                     </WalletPill>
-                    <Pressable onPress={() => setAmount(balanceState.formatted ?? '0.0000')}>
-                      <Text style={styles.fieldActionText}>{t('commonMax')}</Text>
+                    <Pressable
+                      onPress={() =>
+                        setAmount(balanceState.formatted ?? '0.0000')
+                      }
+                    >
+                      <Text style={styles.fieldActionText}>
+                        {t('commonMax')}
+                      </Text>
                     </Pressable>
                   </View>
                 }
@@ -154,7 +188,8 @@ const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
               </WalletTextField>
               {feeNative ? (
                 <Text style={styles.approxText}>
-                  {t('sendNetworkFeeLabel')}: {feeNative} {network.currencySymbol}
+                  {t('sendNetworkFeeLabel')}: {feeNative}{' '}
+                  {network.currencySymbol}
                 </Text>
               ) : null}
             </View>
@@ -167,12 +202,22 @@ const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
 
         {showReview ? (
           <View style={styles.sheetHost}>
-            <Pressable style={styles.sheetScrim} onPress={() => setShowReview(false)} />
+            <Pressable
+              style={styles.sheetScrim}
+              onPress={() => setShowReview(false)}
+            />
             <View style={styles.sheetCard}>
               <View style={styles.sheetGrab} />
               <View style={styles.sheetHeader}>
-                <Pressable style={styles.sheetIcon} onPress={() => setShowReview(false)}>
-                  <Ionicons name="chevron-back" size={14} color={WALLET_COLORS.textMuted} />
+                <Pressable
+                  style={styles.sheetIcon}
+                  onPress={() => setShowReview(false)}
+                >
+                  <Ionicons
+                    name="chevron-back"
+                    size={14}
+                    color={WALLET_COLORS.textMuted}
+                  />
                 </Pressable>
                 <Text style={styles.sheetTitle}>{t('sendReviewTitle')}</Text>
                 <Text style={styles.sheetStep}>2/3</Text>
@@ -180,7 +225,10 @@ const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
 
               <View style={styles.reviewAmountWrap}>
                 <Text style={styles.reviewAmount}>
-                  {amount || '0'} <Text style={styles.reviewAmountUnit}>{getAssetSymbol(network)}</Text>
+                  {amount || '0'}{' '}
+                  <Text style={styles.reviewAmountUnit}>
+                    {getAssetSymbol(network)}
+                  </Text>
                 </Text>
                 <Text style={styles.reviewUsd}>{network.name}</Text>
               </View>
@@ -188,20 +236,30 @@ const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
               <View style={styles.reviewCard}>
                 <View style={styles.reviewRow}>
                   <Text style={styles.reviewLabel}>{t('sendFromLabel')}</Text>
-                  <Text style={styles.reviewValue}>{truncateAddress(walletAddress)}</Text>
+                  <Text style={styles.reviewValue}>
+                    {truncateAddress(walletAddress)}
+                  </Text>
                 </View>
                 <View style={styles.reviewRow}>
                   <Text style={styles.reviewLabel}>{t('sendToLabel')}</Text>
-                  <Text style={styles.reviewValue}>{truncateAddress(recipient)}</Text>
+                  <Text style={styles.reviewValue}>
+                    {truncateAddress(recipient)}
+                  </Text>
                 </View>
                 <View style={styles.reviewRow}>
-                  <Text style={styles.reviewLabel}>{t('sendNetworkLabel')}</Text>
+                  <Text style={styles.reviewLabel}>
+                    {t('sendNetworkLabel')}
+                  </Text>
                   <Text style={styles.reviewValue}>{network.name}</Text>
                 </View>
                 <View style={[styles.reviewRow, styles.reviewRowLast]}>
-                  <Text style={styles.reviewLabel}>{t('sendNetworkFeeLabel')}</Text>
+                  <Text style={styles.reviewLabel}>
+                    {t('sendNetworkFeeLabel')}
+                  </Text>
                   <Text style={styles.reviewValue}>
-                    {feeNative ? `${feeNative} ${network.currencySymbol}` : t('sendFeeEstimatePending')}
+                    {feeNative
+                      ? `${feeNative} ${network.currencySymbol}`
+                      : t('sendFeeEstimatePending')}
                   </Text>
                 </View>
               </View>
@@ -250,7 +308,11 @@ const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
                     });
                   }}
                 />
-                <WalletButton label={t('commonCancel')} variant="secondary" onPress={() => setShowReview(false)} />
+                <WalletButton
+                  label={t('commonCancel')}
+                  variant="secondary"
+                  onPress={() => setShowReview(false)}
+                />
               </View>
             </View>
           </View>
@@ -262,7 +324,11 @@ const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
             <View style={styles.sheetCard}>
               <View style={styles.sheetGrab} />
               <View style={styles.resultIcon}>
-                <Ionicons name="checkmark" size={30} color={WALLET_COLORS.success} />
+                <Ionicons
+                  name="checkmark"
+                  size={30}
+                  color={WALLET_COLORS.success}
+                />
               </View>
               <Text style={styles.resultTitle}>{t('sendTransactionSent')}</Text>
               <Text style={styles.resultBody}>{t('sendStatusSuccess')}</Text>
@@ -270,10 +336,14 @@ const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
                 <Text style={styles.resultLabel}>{t('sendTxHash')}</Text>
                 <Text style={styles.resultHash}>{result.transactionHash}</Text>
                 <Text style={styles.resultMeta}>
-                  {amount || result.amount} {getAssetSymbol(network)} | {result.gasLimit} gas
+                  {amount || result.amount} {getAssetSymbol(network)} |{' '}
+                  {result.gasLimit} gas
                 </Text>
               </View>
-              <WalletButton label={t('commonDone')} onPress={() => navigation.goBack()} />
+              <WalletButton
+                label={t('commonDone')}
+                onPress={() => navigation.goBack()}
+              />
             </View>
           </View>
         ) : null}
@@ -281,7 +351,6 @@ const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
     </View>
   );
 };
-
 
 export { SendScreen };
 export default SendScreen;

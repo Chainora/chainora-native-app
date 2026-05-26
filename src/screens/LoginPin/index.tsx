@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useState } from 'react';
-import { StatusBar, StyleSheet, View } from 'react-native';
+import { StatusBar, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -13,10 +13,9 @@ import { useSettings } from '@hooks/useSettings';
 import { useToast } from '@hooks/useToast';
 import { ROUTES } from '@navigation/routes/routes';
 import type { RootStackParamList } from '@navigation/routes/rootStackParamList';
+import { AUTH_SCREEN_BACKGROUND, styles } from './LoginPin.styles';
 
 const PIN_LENGTH = 4;
-const AUTH_SCREEN_BACKGROUND = '#08111B';
-
 type Props = NativeStackScreenProps<RootStackParamList, typeof ROUTES.LoginPin>;
 
 export const LoginPinScreen: React.FC<Props> = ({ navigation }) => {
@@ -32,19 +31,16 @@ export const LoginPinScreen: React.FC<Props> = ({ navigation }) => {
   const [submitting, setSubmitting] = useState(false);
   const pinValueRef = useRef('');
 
-  const handleDigit = useCallback(
-    (digit: string) => {
-      setPinValue(prev => {
-        if (prev.length >= PIN_LENGTH) {
-          return prev;
-        }
-        const next = `${prev}${digit}`;
-        pinValueRef.current = next;
-        return next;
-      });
-    },
-    [],
-  );
+  const handleDigit = useCallback((digit: string) => {
+    setPinValue(prev => {
+      if (prev.length >= PIN_LENGTH) {
+        return prev;
+      }
+      const next = `${prev}${digit}`;
+      pinValueRef.current = next;
+      return next;
+    });
+  }, []);
 
   const handleBackspace = useCallback(() => {
     setPinValue(prev => {
@@ -92,7 +88,14 @@ export const LoginPinScreen: React.FC<Props> = ({ navigation }) => {
       },
     });
     navigation.navigate(ROUTES.ScanCard, { flowId });
-  }, [completeSession, initializeSession, navigation, registerAuthPinScanFlow, showToast, t]);
+  }, [
+    completeSession,
+    initializeSession,
+    navigation,
+    registerAuthPinScanFlow,
+    showToast,
+    t,
+  ]);
 
   const canSubmit = pinValue.length === PIN_LENGTH && !submitting;
 
@@ -120,28 +123,9 @@ export const LoginPinScreen: React.FC<Props> = ({ navigation }) => {
             animateHero
           />
         </View>
-
       </SafeAreaView>
     </View>
   );
 };
-
-const createStyles = () => StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: AUTH_SCREEN_BACKGROUND,
-  },
-  safeArea: {
-    flex: 1,
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 18,
-    paddingTop: 6,
-    paddingBottom: 14,
-  },
-});
-
-const styles = createStyles();
 
 export default LoginPinScreen;

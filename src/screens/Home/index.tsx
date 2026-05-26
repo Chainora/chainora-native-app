@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   Alert,
   AppState,
@@ -12,14 +18,13 @@ import {
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useIsFocused } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
-import {
-  WalletPill,
-  buildWalletScreenStyles,
-  useWalletColors,
-} from '@components/ui/walletDesign';
+import { WalletPill, useWalletColors } from '@components/ui/walletDesign';
 import { type WalletHomeNetworkKey } from '@config/network';
 import { getNetworkLogoSource } from '@config/networkLogos';
 import { useAuth } from '@hooks/useAuth';
@@ -45,7 +50,7 @@ import {
 import { useWalletRelayActiveAccount } from '@hooks/useWalletRelayRequest';
 import { truncateAddress } from '@utils/sendFlowUtils';
 
-import { createHomeStyles } from './Home.styles';
+import { createHomeScreenBase, createHomeStyles } from './Home.styles';
 type Props = NativeStackScreenProps<RootStackParamList, typeof ROUTES.Home>;
 type TabKey = 'assets' | 'activity';
 
@@ -60,17 +65,22 @@ const timeFormatter = new Intl.DateTimeFormat('en-US', {
   minute: '2-digit',
 });
 
-const getAssetSymbol = (currencySymbol: string, portfolioTokenSymbol?: string): string =>
-  portfolioTokenSymbol ?? currencySymbol;
+const getAssetSymbol = (
+  currencySymbol: string,
+  portfolioTokenSymbol?: string,
+): string => portfolioTokenSymbol ?? currencySymbol;
 
-const getActivityHeadline = (item: RecentActivity, t: (key: LocaleKey) => string) =>
-  item.kind === 'send' ? t('homeActivitySent') : t('homeActivityReceived');
+const getActivityHeadline = (
+  item: RecentActivity,
+  t: (key: LocaleKey) => string,
+) => (item.kind === 'send' ? t('homeActivitySent') : t('homeActivityReceived'));
 
 const getActivityCounterpartyLine = (
   item: RecentActivity,
   t: (key: LocaleKey) => string,
 ) => {
-  const label = item.kind === 'send' ? t('homeActivityTo') : t('homeActivityFrom');
+  const label =
+    item.kind === 'send' ? t('homeActivityTo') : t('homeActivityFrom');
   const address = item.kind === 'send' ? item.toAddress : item.fromAddress;
   return `${label} ${truncateAddress(address)}`;
 };
@@ -80,46 +90,44 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
   const { initializeSession } = useAuth();
   const { settings, resolvedTheme, t } = useSettings();
   const colors = useWalletColors();
-  const styles = useMemo(() => createHomeStyles(colors), [colors]);
-  const screenBase = useMemo(() => buildWalletScreenStyles(colors), [colors]);
+  const screenStyles = useMemo(() => createHomeStyles(colors), [colors]);
+  const screenBase = useMemo(() => createHomeScreenBase(colors), [colors]);
   const walletHomeNetworks = useWalletHomeNetworks();
   const walletHomeNetworkKeys = useMemo(
-    () => walletHomeNetworks.map(network => network.key as WalletHomeNetworkKey),
+    () =>
+      walletHomeNetworks.map(network => network.key as WalletHomeNetworkKey),
     [walletHomeNetworks],
   );
   const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<TabKey>('assets');
-  const [isAppActive, setIsAppActive] = useState(AppState.currentState === 'active');
+  const [isAppActive, setIsAppActive] = useState(
+    AppState.currentState === 'active',
+  );
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
 
   const mountedRef = useRef(true);
   const wasAppActiveRef = useRef(isAppActive);
-  const { visibility, prefsReady, loadPreferences } = useWalletHomePreferences(walletHomeNetworkKeys);
-  const {
-    assets,
-    assetsLoading,
-    refreshPortfolio,
-  } = useHomePortfolioPolling({
+  const { visibility, prefsReady, loadPreferences } = useWalletHomePreferences(
+    walletHomeNetworkKeys,
+  );
+  const { assets, assetsLoading, refreshPortfolio } = useHomePortfolioPolling({
     ethAddress,
     isAppActive,
     isFocused,
     networks: walletHomeNetworks,
     pollIntervalMs: BALANCE_POLL_INTERVAL_MS,
   });
-  const {
-    activities,
-    loadRecentActivity,
-    scheduleActivitySync,
-  } = useHomeActivityPolling({
-    ethAddress,
-    isAppActive,
-    isFocused,
-    networkKeys: walletHomeNetworkKeys,
-    networks: walletHomeNetworks,
-    pollIntervalMs: ACTIVITY_POLL_INTERVAL_MS,
-    syncDebounceMs: ACTIVITY_SYNC_DEBOUNCE_MS,
-  });
+  const { activities, loadRecentActivity, scheduleActivitySync } =
+    useHomeActivityPolling({
+      ethAddress,
+      isAppActive,
+      isFocused,
+      networkKeys: walletHomeNetworkKeys,
+      networks: walletHomeNetworks,
+      pollIntervalMs: ACTIVITY_POLL_INTERVAL_MS,
+      syncDebounceMs: ACTIVITY_SYNC_DEBOUNCE_MS,
+    });
 
   useEffect(() => {
     initializeSession(ethAddress).catch(error => {
@@ -167,7 +175,13 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
       console.warn('[Home] App active portfolio refresh failed', error);
     });
     scheduleActivitySync();
-  }, [isAppActive, isFocused, loadPreferences, refreshPortfolio, scheduleActivitySync]);
+  }, [
+    isAppActive,
+    isFocused,
+    loadPreferences,
+    refreshPortfolio,
+    scheduleActivitySync,
+  ]);
 
   const visibleAssets = useMemo(
     () =>
@@ -176,13 +190,17 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
       ),
     [assets, visibility],
   );
-  const totalUsdValue = useMemo(() => sumPortfolioUsdValue(visibleAssets), [visibleAssets]);
+  const totalUsdValue = useMemo(
+    () => sumPortfolioUsdValue(visibleAssets),
+    [visibleAssets],
+  );
   const totalBalanceAmount = useMemo(
     () => formatFiatAmount(totalUsdValue, settings.currency),
     [settings.currency, totalUsdValue],
   );
   const totalBalanceUnit = getFiatUnit(settings.currency);
-  const primaryWalletNetwork = visibleAssets[0]?.network ?? walletHomeNetworks[0] ?? null;
+  const primaryWalletNetwork =
+    visibleAssets[0]?.network ?? walletHomeNetworks[0] ?? null;
   const dayChangeLabel = useHomePortfolioDayChange({
     currency: settings.currency,
     ethAddress,
@@ -197,12 +215,17 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
     });
   }, [ethAddress, navigation, publicKeyHex]);
 
-  const openReceive = useCallback((chainKey?: WalletHomeNetworkKey) => {
-    navigation.navigate(ROUTES.Receive, {
-      walletAddress: ethAddress,
-      chainKey: chainKey ?? (primaryWalletNetwork?.key as WalletHomeNetworkKey | undefined),
-    });
-  }, [ethAddress, navigation, primaryWalletNetwork]);
+  const openReceive = useCallback(
+    (chainKey?: WalletHomeNetworkKey) => {
+      navigation.navigate(ROUTES.Receive, {
+        walletAddress: ethAddress,
+        chainKey:
+          chainKey ??
+          (primaryWalletNetwork?.key as WalletHomeNetworkKey | undefined),
+      });
+    },
+    [ethAddress, navigation, primaryWalletNetwork],
+  );
 
   const copyAddress = useCallback(() => {
     Clipboard.setString(ethAddress);
@@ -227,10 +250,7 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
     }
 
     setIsManualRefreshing(true);
-    Promise.all([
-      refreshPortfolio(),
-      loadRecentActivity(),
-    ])
+    Promise.all([refreshPortfolio(), loadRecentActivity()])
       .catch(error => {
         console.warn('[Home] Manual refresh failed', error);
       })
@@ -243,17 +263,25 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const dayChangePillStyle = useMemo(() => {
     if (dayChangeLabel.direction === 'up') {
-      return styles.balanceDeltaPositive;
+      return screenStyles.balanceDeltaPositive;
     }
     if (dayChangeLabel.direction === 'down') {
-      return styles.balanceDeltaNegative;
+      return screenStyles.balanceDeltaNegative;
     }
-    return styles.balanceDeltaNeutral;
-  }, [dayChangeLabel.direction, styles.balanceDeltaNegative, styles.balanceDeltaNeutral, styles.balanceDeltaPositive]);
+    return screenStyles.balanceDeltaNeutral;
+  }, [
+    dayChangeLabel.direction,
+    screenStyles.balanceDeltaNegative,
+    screenStyles.balanceDeltaNeutral,
+    screenStyles.balanceDeltaPositive,
+  ]);
 
   const listScrollContentStyle = useMemo(
-    () => [styles.listScrollContent, { paddingBottom: 126 + insets.bottom }],
-    [insets.bottom, styles.listScrollContent],
+    () => [
+      screenStyles.listScrollContent,
+      { paddingBottom: 126 + insets.bottom },
+    ],
+    [insets.bottom, screenStyles.listScrollContent],
   );
 
   const refreshBusy = assetsLoading || isManualRefreshing;
@@ -265,112 +293,201 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
         backgroundColor={colors.background}
       />
       <SafeAreaView style={screenBase.safeArea} edges={['top', 'bottom']}>
-        <View style={styles.shell}>
-          <View style={styles.header}>
-            <Pressable style={styles.iconButton} onPress={openSettings}>
+        <View style={screenStyles.shell}>
+          <View style={screenStyles.header}>
+            <Pressable style={screenStyles.iconButton} onPress={openSettings}>
               <Ionicons name="settings-outline" size={18} color={colors.text} />
             </Pressable>
-            <View style={styles.headerTitleWrap} pointerEvents="none">
-              <Text style={styles.headerTitle}>{t('homeBottomHome')}</Text>
+            <View style={screenStyles.headerTitleWrap} pointerEvents="none">
+              <Text style={screenStyles.headerTitle}>
+                {t('homeBottomHome')}
+              </Text>
             </View>
 
-            <Pressable style={styles.iconButton} onPress={handleScanQr}>
+            <Pressable style={screenStyles.iconButton} onPress={handleScanQr}>
               <Ionicons name="scan-outline" size={18} color={colors.text} />
             </Pressable>
           </View>
 
-          <View style={styles.walletBar}>
-            <Pressable style={styles.walletPill} onPress={copyAddress}>
-              <View style={styles.walletDot} />
-              <Text style={styles.walletName} numberOfLines={1}>{t('homePrimaryWallet')}</Text>
-              <Text style={styles.walletAddress} numberOfLines={1} ellipsizeMode="middle">
+          <View style={screenStyles.walletBar}>
+            <Pressable style={screenStyles.walletPill} onPress={copyAddress}>
+              <View style={screenStyles.walletDot} />
+              <Text style={screenStyles.walletName} numberOfLines={1}>
+                {t('homePrimaryWallet')}
+              </Text>
+              <Text
+                style={screenStyles.walletAddress}
+                numberOfLines={1}
+                ellipsizeMode="middle"
+              >
                 {truncateAddress(ethAddress)}
               </Text>
-              <View style={styles.walletCopy}>
-                <Ionicons name="copy-outline" size={11} color={colors.textMuted} />
+              <View style={screenStyles.walletCopy}>
+                <Ionicons
+                  name="copy-outline"
+                  size={11}
+                  color={colors.textMuted}
+                />
               </View>
             </Pressable>
           </View>
 
-          <View style={styles.balanceBlock}>
-            <Text style={styles.balanceLabel}>{t('homeTotalBalance')}</Text>
-            <View style={styles.balanceRow}>
-              <Text style={styles.balanceValue}>{totalBalanceAmount}</Text>
-              <Text style={styles.balanceUnit}>{totalBalanceUnit}</Text>
+          <View style={screenStyles.balanceBlock}>
+            <Text style={screenStyles.balanceLabel}>
+              {t('homeTotalBalance')}
+            </Text>
+            <View style={screenStyles.balanceRow}>
+              <Text style={screenStyles.balanceValue}>
+                {totalBalanceAmount}
+              </Text>
+              <Text style={screenStyles.balanceUnit}>{totalBalanceUnit}</Text>
             </View>
-            <WalletPill style={[styles.balanceDelta, dayChangePillStyle]}>
-              <Text style={styles.balanceDeltaText}>{dayChangeLabel.text}</Text>
+            <WalletPill style={[screenStyles.balanceDelta, dayChangePillStyle]}>
+              <Text style={screenStyles.balanceDeltaText}>
+                {dayChangeLabel.text}
+              </Text>
             </WalletPill>
           </View>
 
-          <View style={styles.quickActions}>
-            <Pressable style={[styles.quickAction, styles.quickActionPrimary]} onPress={openSendPick}>
-              <View style={styles.quickIcon}>
-                <Ionicons name="arrow-up-outline" size={18} color={colors.signal} />
+          <View style={screenStyles.quickActions}>
+            <Pressable
+              style={[
+                screenStyles.quickAction,
+                screenStyles.quickActionPrimary,
+              ]}
+              onPress={openSendPick}
+            >
+              <View style={screenStyles.quickIcon}>
+                <Ionicons
+                  name="arrow-up-outline"
+                  size={18}
+                  color={colors.signal}
+                />
               </View>
-              <Text style={[styles.quickLabel, styles.quickLabelPrimary]}>{t('homeSendEth')}</Text>
+              <Text
+                style={[
+                  screenStyles.quickLabel,
+                  screenStyles.quickLabelPrimary,
+                ]}
+              >
+                {t('homeSendEth')}
+              </Text>
             </Pressable>
 
-            <Pressable style={styles.quickAction} onPress={() => openReceive()}>
-              <View style={styles.quickIcon}>
-                <Ionicons name="arrow-down-outline" size={18} color={colors.signal} />
+            <Pressable
+              style={screenStyles.quickAction}
+              onPress={() => openReceive()}
+            >
+              <View style={screenStyles.quickIcon}>
+                <Ionicons
+                  name="arrow-down-outline"
+                  size={18}
+                  color={colors.signal}
+                />
               </View>
-              <Text style={styles.quickLabel}>{t('homeReceive')}</Text>
+              <Text style={screenStyles.quickLabel}>{t('homeReceive')}</Text>
             </Pressable>
 
-            <Pressable style={styles.quickAction} onPress={handleScanQr}>
-              <View style={styles.quickIcon}>
+            <Pressable style={screenStyles.quickAction} onPress={handleScanQr}>
+              <View style={screenStyles.quickIcon}>
                 <Ionicons name="scan-outline" size={18} color={colors.signal} />
               </View>
-              <Text style={styles.quickLabel}>{t('homeScanQrTitle')}</Text>
+              <Text style={screenStyles.quickLabel}>
+                {t('homeScanQrTitle')}
+              </Text>
             </Pressable>
 
-            <Pressable style={styles.quickAction} onPress={() => setActiveTab('activity')}>
-              <View style={styles.quickIcon}>
+            <Pressable
+              style={screenStyles.quickAction}
+              onPress={() => setActiveTab('activity')}
+            >
+              <View style={screenStyles.quickIcon}>
                 <Ionicons name="time-outline" size={18} color={colors.signal} />
               </View>
-              <Text style={styles.quickLabel}>{t('homeHistory')}</Text>
+              <Text style={screenStyles.quickLabel}>{t('homeHistory')}</Text>
             </Pressable>
           </View>
 
-          <View style={styles.tabsRow}>
-            <Pressable style={styles.tabItem} onPress={() => setActiveTab('assets')}>
-              <Text style={[styles.tabText, activeTab === 'assets' && styles.tabTextActive]}>
+          <View style={screenStyles.tabsRow}>
+            <Pressable
+              style={screenStyles.tabItem}
+              onPress={() => setActiveTab('assets')}
+            >
+              <Text
+                style={[
+                  screenStyles.tabText,
+                  activeTab === 'assets' && screenStyles.tabTextActive,
+                ]}
+              >
                 {t('homeTabAssets')}
               </Text>
-              {activeTab === 'assets' ? <View style={styles.tabIndicator} /> : null}
+              {activeTab === 'assets' ? (
+                <View style={screenStyles.tabIndicator} />
+              ) : null}
             </Pressable>
-            <Pressable style={styles.tabItem} onPress={() => setActiveTab('activity')}>
-              <Text style={[styles.tabText, activeTab === 'activity' && styles.tabTextActive]}>
+            <Pressable
+              style={screenStyles.tabItem}
+              onPress={() => setActiveTab('activity')}
+            >
+              <Text
+                style={[
+                  screenStyles.tabText,
+                  activeTab === 'activity' && screenStyles.tabTextActive,
+                ]}
+              >
                 {t('homeTabActivity')}
               </Text>
-              {activeTab === 'activity' ? <View style={styles.tabIndicator} /> : null}
+              {activeTab === 'activity' ? (
+                <View style={screenStyles.tabIndicator} />
+              ) : null}
             </Pressable>
-            <View style={styles.tabsSpacer} />
+            <View style={screenStyles.tabsSpacer} />
             <Pressable
-              style={[styles.tabIconButton, refreshBusy && styles.tabIconButtonBusy]}
+              style={[
+                screenStyles.tabIconButton,
+                refreshBusy && screenStyles.tabIconButtonBusy,
+              ]}
               disabled={refreshBusy}
               onPress={handleManualRefresh}
             >
-              <Ionicons name="refresh-outline" size={15} color={colors.textSoft} />
+              <Ionicons
+                name="refresh-outline"
+                size={15}
+                color={colors.textSoft}
+              />
             </Pressable>
-            <Pressable style={styles.tabIconButton} onPress={openManageTokens}>
-              <Ionicons name="options-outline" size={15} color={colors.textSoft} />
+            <Pressable
+              style={screenStyles.tabIconButton}
+              onPress={openManageTokens}
+            >
+              <Ionicons
+                name="options-outline"
+                size={15}
+                color={colors.textSoft}
+              />
             </Pressable>
           </View>
 
-          <View style={styles.listWrap}>
+          <View style={screenStyles.listWrap}>
             {activeTab === 'assets' ? (
               <ScrollView
-                style={styles.listScroll}
+                style={screenStyles.listScroll}
                 contentContainerStyle={listScrollContentStyle}
                 showsVerticalScrollIndicator={false}
               >
-                <View style={styles.listCard}>
+                <View style={screenStyles.listCard}>
                   {visibleAssets.map((asset, index) => {
-                    const assetLogoSource = getNetworkLogoSource(asset.network.key);
-                    const assetSymbol = getAssetSymbol(asset.network.currencySymbol, asset.network.portfolioTokenSymbol);
-                    const priceLine = `${formatFiatValue(asset.usdPrice, settings.currency)} / ${assetSymbol}`;
+                    const assetLogoSource = getNetworkLogoSource(
+                      asset.network.key,
+                    );
+                    const assetSymbol = getAssetSymbol(
+                      asset.network.currencySymbol,
+                      asset.network.portfolioTokenSymbol,
+                    );
+                    const priceLine = `${formatFiatValue(
+                      asset.usdPrice,
+                      settings.currency,
+                    )} / ${assetSymbol}`;
                     const statusParts = [priceLine];
                     if (asset.error) {
                       statusParts.push(t('homeSyncDelayed'));
@@ -381,14 +498,18 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
 
                     return (
                       <View key={asset.network.key}>
-                        <View style={styles.assetRow}>
+                        <View style={screenStyles.assetRow}>
                           <Pressable
-                            style={styles.assetTapArea}
-                            onPress={() => openReceive(asset.network.key as WalletHomeNetworkKey)}
+                            style={screenStyles.assetTapArea}
+                            onPress={() =>
+                              openReceive(
+                                asset.network.key as WalletHomeNetworkKey,
+                              )
+                            }
                           >
                             <View
                               style={[
-                                styles.coinBadge,
+                                screenStyles.coinBadge,
                                 {
                                   backgroundColor: asset.network.iconBackground,
                                   borderColor: asset.network.iconBorder,
@@ -396,100 +517,172 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
                               ]}
                             >
                               {assetLogoSource ? (
-                                <Image source={assetLogoSource} style={styles.coinBadgeLogo} resizeMode="contain" />
+                                <Image
+                                  source={assetLogoSource}
+                                  style={screenStyles.coinBadgeLogo}
+                                  resizeMode="contain"
+                                />
                               ) : (
-                                <Text style={styles.coinBadgeText}>{asset.network.glyph}</Text>
+                                <Text style={screenStyles.coinBadgeText}>
+                                  {asset.network.glyph}
+                                </Text>
                               )}
                             </View>
-                            <View style={styles.assetInfo}>
-                              <View style={styles.assetTopLine}>
-                                <Text style={styles.assetSymbol}>{assetSymbol}</Text>
-                                <Text style={styles.assetTag}>{asset.network.name}</Text>
+                            <View style={screenStyles.assetInfo}>
+                              <View style={screenStyles.assetTopLine}>
+                                <Text style={screenStyles.assetSymbol}>
+                                  {assetSymbol}
+                                </Text>
+                                <Text style={screenStyles.assetTag}>
+                                  {asset.network.name}
+                                </Text>
                               </View>
-                              <Text style={styles.assetBottomLine}>{statusParts.join(' | ')}</Text>
+                              <Text style={screenStyles.assetBottomLine}>
+                                {statusParts.join(' | ')}
+                              </Text>
                             </View>
-                            <View style={styles.assetRight}>
-                              <Text style={styles.assetBalance}>{asset.balanceFormatted}</Text>
-                              <Text style={styles.assetQuote}>{formatFiatValue(asset.usdValue, settings.currency)}</Text>
+                            <View style={screenStyles.assetRight}>
+                              <Text style={screenStyles.assetBalance}>
+                                {asset.balanceFormatted}
+                              </Text>
+                              <Text style={screenStyles.assetQuote}>
+                                {formatFiatValue(
+                                  asset.usdValue,
+                                  settings.currency,
+                                )}
+                              </Text>
                             </View>
                           </Pressable>
                           <Pressable
-                            style={styles.assetIconButton}
+                            style={screenStyles.assetIconButton}
                             onPress={() =>
                               navigation.navigate(ROUTES.Send, {
                                 walletAddress: ethAddress,
                                 publicKeyHex,
-                                chainKey: asset.network.key as WalletHomeNetworkKey,
+                                chainKey: asset.network
+                                  .key as WalletHomeNetworkKey,
                               })
                             }
                           >
-                            <Ionicons name="arrow-up-outline" size={16} color={colors.text} />
+                            <Ionicons
+                              name="arrow-up-outline"
+                              size={16}
+                              color={colors.text}
+                            />
                           </Pressable>
                         </View>
-                        {index < visibleAssets.length - 1 ? <View style={styles.assetDivider} /> : null}
+                        {index < visibleAssets.length - 1 ? (
+                          <View style={screenStyles.assetDivider} />
+                        ) : null}
                       </View>
                     );
                   })}
 
-                  <Pressable style={styles.manageRow} onPress={openManageTokens}>
-                    <View style={[styles.coinBadge, styles.coinBadgeSoft]}>
-                      <Ionicons name="grid-outline" size={18} color={colors.text} />
+                  <Pressable
+                    style={screenStyles.manageRow}
+                    onPress={openManageTokens}
+                  >
+                    <View
+                      style={[
+                        screenStyles.coinBadge,
+                        screenStyles.coinBadgeSoft,
+                      ]}
+                    >
+                      <Ionicons
+                        name="grid-outline"
+                        size={18}
+                        color={colors.text}
+                      />
                     </View>
-                    <View style={styles.assetInfo}>
-                      <Text style={styles.assetSymbol}>{t('homeManageAssets')}</Text>
-                      <Text style={styles.assetBottomLine}>{t('homeManageAssetsBody')}</Text>
+                    <View style={screenStyles.assetInfo}>
+                      <Text style={screenStyles.assetSymbol}>
+                        {t('homeManageAssets')}
+                      </Text>
+                      <Text style={screenStyles.assetBottomLine}>
+                        {t('homeManageAssetsBody')}
+                      </Text>
                     </View>
-                    <Ionicons name="chevron-forward" size={14} color={colors.textSoft} />
+                    <Ionicons
+                      name="chevron-forward"
+                      size={14}
+                      color={colors.textSoft}
+                    />
                   </Pressable>
                 </View>
               </ScrollView>
             ) : (
               <ScrollView
-                style={styles.listScroll}
+                style={screenStyles.listScroll}
                 contentContainerStyle={listScrollContentStyle}
                 showsVerticalScrollIndicator={false}
               >
-                <View style={styles.listCard}>
+                <View style={screenStyles.listCard}>
                   {activities.length === 0 ? (
-                    <View style={styles.emptyState}>
-                      <View style={styles.emptyIconWrap}>
-                        <Ionicons name="time-outline" size={20} color={colors.textSoft} />
+                    <View style={screenStyles.emptyState}>
+                      <View style={screenStyles.emptyIconWrap}>
+                        <Ionicons
+                          name="time-outline"
+                          size={20}
+                          color={colors.textSoft}
+                        />
                       </View>
-                      <Text style={styles.emptyTitle}>{t('homeNoTransactions')}</Text>
-                      <Text style={styles.emptyBody}>{t('homeNoTransactionsDesc')}</Text>
+                      <Text style={screenStyles.emptyTitle}>
+                        {t('homeNoTransactions')}
+                      </Text>
+                      <Text style={screenStyles.emptyBody}>
+                        {t('homeNoTransactionsDesc')}
+                      </Text>
                     </View>
                   ) : (
                     activities.map((item, index) => (
                       <View key={item.id}>
-                        <View style={styles.activityRow}>
+                        <View style={screenStyles.activityRow}>
                           <View
                             style={[
-                              styles.activityIconWrap,
-                              item.kind === 'send' ? styles.activityIconSend : styles.activityIconReceive,
+                              screenStyles.activityIconWrap,
+                              item.kind === 'send'
+                                ? screenStyles.activityIconSend
+                                : screenStyles.activityIconReceive,
                             ]}
                           >
                             <Ionicons
-                              name={item.kind === 'send' ? 'arrow-up-outline' : 'arrow-down-outline'}
+                              name={
+                                item.kind === 'send'
+                                  ? 'arrow-up-outline'
+                                  : 'arrow-down-outline'
+                              }
                               size={16}
-                              color={item.kind === 'send' ? '#FFB7B7' : '#9CE8C5'}
+                              color={
+                                item.kind === 'send' ? '#FFB7B7' : '#9CE8C5'
+                              }
                             />
                           </View>
-                          <View style={styles.activityInfo}>
-                            <View style={styles.assetTopLine}>
-                              <Text style={styles.activityTitle}>{getActivityHeadline(item, t)}</Text>
-                              <Text style={styles.assetTag}>{item.networkName}</Text>
+                          <View style={screenStyles.activityInfo}>
+                            <View style={screenStyles.assetTopLine}>
+                              <Text style={screenStyles.activityTitle}>
+                                {getActivityHeadline(item, t)}
+                              </Text>
+                              <Text style={screenStyles.assetTag}>
+                                {item.networkName}
+                              </Text>
                             </View>
-                            <Text style={styles.activitySubtitle}>{getActivityCounterpartyLine(item, t)}</Text>
+                            <Text style={screenStyles.activitySubtitle}>
+                              {getActivityCounterpartyLine(item, t)}
+                            </Text>
                           </View>
-                          <View style={styles.activityRight}>
-                            <Text style={styles.activityAmount}>
+                          <View style={screenStyles.activityRight}>
+                            <Text style={screenStyles.activityAmount}>
                               {item.kind === 'send' ? '-' : '+'}
                               {item.amountDisplay} {item.currencySymbol}
                             </Text>
-                            <Text style={styles.activityTime}>{timeFormatter.format(new Date(item.createdAt))}</Text>
+                            <Text style={screenStyles.activityTime}>
+                              {timeFormatter.format(new Date(item.createdAt))}
+                            </Text>
                           </View>
                         </View>
-                        {index < activities.length - 1 ? <View style={styles.assetDivider} /> : null}
+                        {index < activities.length - 1 ? (
+                          <View style={screenStyles.assetDivider} />
+                        ) : null}
                       </View>
                     ))
                   )}
@@ -499,45 +692,76 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
           </View>
         </View>
 
-        <View style={styles.bottomDock}>
-          <View style={styles.bottomDockInner}>
-            <Pressable style={styles.bottomItem} onPress={() => setActiveTab('assets')}>
+        <View style={screenStyles.bottomDock}>
+          <View style={screenStyles.bottomDockInner}>
+            <Pressable
+              style={screenStyles.bottomItem}
+              onPress={() => setActiveTab('assets')}
+            >
               <Ionicons
                 name="home-outline"
                 size={18}
                 color={activeTab === 'assets' ? colors.text : colors.textSoft}
               />
-              <Text style={[styles.bottomLabel, activeTab === 'assets' && styles.bottomLabelActive]}>
+              <Text
+                style={[
+                  screenStyles.bottomLabel,
+                  activeTab === 'assets' && screenStyles.bottomLabelActive,
+                ]}
+              >
                 {t('homeBottomHome')}
               </Text>
             </Pressable>
 
-            <Pressable style={styles.bottomItem} onPress={() => setActiveTab('activity')}>
+            <Pressable
+              style={screenStyles.bottomItem}
+              onPress={() => setActiveTab('activity')}
+            >
               <Ionicons
                 name="time-outline"
                 size={18}
                 color={activeTab === 'activity' ? colors.text : colors.textSoft}
               />
-              <Text style={[styles.bottomLabel, activeTab === 'activity' && styles.bottomLabelActive]}>
+              <Text
+                style={[
+                  screenStyles.bottomLabel,
+                  activeTab === 'activity' && screenStyles.bottomLabelActive,
+                ]}
+              >
                 {t('homeBottomActivity')}
               </Text>
             </Pressable>
 
-            <Pressable style={styles.bottomCenter} onPress={handleScanQr}>
-              <View style={styles.bottomCenterBubble}>
+            <Pressable style={screenStyles.bottomCenter} onPress={handleScanQr}>
+              <View style={screenStyles.bottomCenterBubble}>
                 <Ionicons name="scan-outline" size={20} color="#F3F9FF" />
               </View>
-              <Text style={[styles.bottomLabel, styles.bottomCenterLabel]}>{t('homeBottomScan')}</Text>
+              <Text
+                style={[
+                  screenStyles.bottomLabel,
+                  screenStyles.bottomCenterLabel,
+                ]}
+              >
+                {t('homeBottomScan')}
+              </Text>
             </Pressable>
 
-            <Pressable style={styles.bottomItem}>
+            <Pressable style={screenStyles.bottomItem}>
               <Ionicons name="gift-outline" size={18} color={colors.textSoft} />
-              <Text style={styles.bottomLabel}>{t('homeBottomCollect')}</Text>
+              <Text style={screenStyles.bottomLabel}>
+                {t('homeBottomCollect')}
+              </Text>
             </Pressable>
 
-            <Pressable style={styles.bottomItem} onPress={openSettings}>
-              <Ionicons name="settings-outline" size={18} color={colors.textSoft} />
-              <Text style={styles.bottomLabel}>{t('homeBottomSettings')}</Text>
+            <Pressable style={screenStyles.bottomItem} onPress={openSettings}>
+              <Ionicons
+                name="settings-outline"
+                size={18}
+                color={colors.textSoft}
+              />
+              <Text style={screenStyles.bottomLabel}>
+                {t('homeBottomSettings')}
+              </Text>
             </Pressable>
           </View>
         </View>

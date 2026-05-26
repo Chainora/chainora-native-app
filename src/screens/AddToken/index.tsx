@@ -1,5 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
@@ -11,7 +18,6 @@ import {
   WalletSectionLabel,
   WalletTextField,
   WalletTopBar,
-  buildWalletScreenStyles,
 } from '@components/ui/walletDesign';
 import { getNetworkConfig, type WalletHomeNetworkKey } from '@config/network';
 import { useImportedNetworkSaver } from '@hooks/useImportedNetworkSaver';
@@ -20,20 +26,24 @@ import { useWalletHomeNetworks } from '@hooks/useWalletHomeNetworks';
 import type { RootStackParamList } from '@navigation/routes/rootStackParamList';
 import { ROUTES } from '@navigation/routes/routes';
 import WalletNetworkCoin from '@components/wallet/WalletNetworkCoin';
-import { walletFlowStyles as styles } from '@screens/WalletFlow.styles';
+import { createAddTokenScreenBase, styles } from './AddToken.styles';
 
-type AddTokenProps = NativeStackScreenProps<RootStackParamList, typeof ROUTES.AddToken>;
+type AddTokenProps = NativeStackScreenProps<
+  RootStackParamList,
+  typeof ROUTES.AddToken
+>;
 
 const AddTokenScreen: React.FC<AddTokenProps> = ({ navigation }) => {
   const { t } = useSettings();
   const colors = useWalletColors();
-  const screenBase = useMemo(() => buildWalletScreenStyles(colors), [colors]);
+  const screenBase = useMemo(() => createAddTokenScreenBase(colors), [colors]);
   const walletHomeNetworks = useWalletHomeNetworks();
   const saveImportedNetwork = useImportedNetworkSaver();
   const [tab, setTab] = useState<'token' | 'network'>('token');
-  const [selectedTokenNetworkKey, setSelectedTokenNetworkKey] = useState<WalletHomeNetworkKey | null>(
-    walletHomeNetworks[0]?.key as WalletHomeNetworkKey,
-  );
+  const [selectedTokenNetworkKey, setSelectedTokenNetworkKey] =
+    useState<WalletHomeNetworkKey | null>(
+      walletHomeNetworks[0]?.key as WalletHomeNetworkKey,
+    );
   const [address, setAddress] = useState('');
   const [name, setName] = useState('');
   const [symbol, setSymbol] = useState('');
@@ -43,17 +53,25 @@ const AddTokenScreen: React.FC<AddTokenProps> = ({ navigation }) => {
   const [rpcUrl, setRpcUrl] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const canSave = tab === 'token'
-    ? Boolean(address && name && symbol && decimals)
-    : Boolean(networkName && rpcUrl && networkSymbol && !saving);
+  const canSave =
+    tab === 'token'
+      ? Boolean(address && name && symbol && decimals)
+      : Boolean(networkName && rpcUrl && networkSymbol && !saving);
 
   useEffect(() => {
     if (walletHomeNetworks.length === 0) {
       return;
     }
 
-    if (!selectedTokenNetworkKey || !walletHomeNetworks.some(network => network.key === selectedTokenNetworkKey)) {
-      setSelectedTokenNetworkKey(walletHomeNetworks[0].key as WalletHomeNetworkKey);
+    if (
+      !selectedTokenNetworkKey ||
+      !walletHomeNetworks.some(
+        network => network.key === selectedTokenNetworkKey,
+      )
+    ) {
+      setSelectedTokenNetworkKey(
+        walletHomeNetworks[0].key as WalletHomeNetworkKey,
+      );
     }
   }, [selectedTokenNetworkKey, walletHomeNetworks]);
 
@@ -63,7 +81,10 @@ const AddTokenScreen: React.FC<AddTokenProps> = ({ navigation }) => {
     }
 
     if (tab === 'token') {
-      Alert.alert(t('walletImportTokenSavedTitle'), t('walletImportTokenSavedBody'));
+      Alert.alert(
+        t('walletImportTokenSavedTitle'),
+        t('walletImportTokenSavedBody'),
+      );
       return;
     }
 
@@ -74,7 +95,10 @@ const AddTokenScreen: React.FC<AddTokenProps> = ({ navigation }) => {
       currencySymbol: networkSymbol,
     })
       .then(() => {
-        Alert.alert(t('walletImportNetworkSavedTitle'), t('walletImportNetworkSavedBody'));
+        Alert.alert(
+          t('walletImportNetworkSavedTitle'),
+          t('walletImportNetworkSavedBody'),
+        );
         navigation.goBack();
       })
       .catch(error => {
@@ -84,31 +108,65 @@ const AddTokenScreen: React.FC<AddTokenProps> = ({ navigation }) => {
       .finally(() => {
         setSaving(false);
       });
-  }, [canSave, navigation, networkName, networkSymbol, rpcUrl, saveImportedNetwork, t, tab]);
+  }, [
+    canSave,
+    navigation,
+    networkName,
+    networkSymbol,
+    rpcUrl,
+    saveImportedNetwork,
+    t,
+    tab,
+  ]);
 
   return (
     <View style={screenBase.screen}>
       <SafeAreaView style={screenBase.safeArea} edges={['top', 'bottom']}>
         <View style={screenBase.content}>
-          <WalletTopBar title={t('walletImportTitle')} onBack={() => navigation.goBack()} />
+          <WalletTopBar
+            title={t('walletImportTitle')}
+            onBack={() => navigation.goBack()}
+          />
 
           <View style={styles.tabSwitch}>
             {(['token', 'network'] as const).map(option => (
-              <Pressable key={option} style={styles.tabSwitchItem} onPress={() => setTab(option)}>
-                <Text style={[styles.tabSwitchText, tab === option && styles.tabSwitchTextOn]}>
-                  {option === 'token' ? t('walletImportTabToken') : t('walletImportTabNetwork')}
+              <Pressable
+                key={option}
+                style={styles.tabSwitchItem}
+                onPress={() => setTab(option)}
+              >
+                <Text
+                  style={[
+                    styles.tabSwitchText,
+                    tab === option && styles.tabSwitchTextOn,
+                  ]}
+                >
+                  {option === 'token'
+                    ? t('walletImportTabToken')
+                    : t('walletImportTabNetwork')}
                 </Text>
-                {tab === option ? <View style={styles.tabSwitchIndicator} /> : null}
+                {tab === option ? (
+                  <View style={styles.tabSwitchIndicator} />
+                ) : null}
               </Pressable>
             ))}
           </View>
 
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.formScroll}>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.formScroll}
+          >
             <WalletPanel style={styles.warningCard}>
               <View style={[styles.warningIcon, styles.warningIconAmber]}>
-                <Ionicons name="warning-outline" size={14} color={colors.warning} />
+                <Ionicons
+                  name="warning-outline"
+                  size={14}
+                  color={colors.warning}
+                />
               </View>
-              <Text style={styles.warningText}>{t('walletImportWarningBody')}</Text>
+              <Text style={styles.warningText}>
+                {t('walletImportWarningBody')}
+              </Text>
             </WalletPanel>
 
             {tab === 'token' ? (
@@ -116,18 +174,39 @@ const AddTokenScreen: React.FC<AddTokenProps> = ({ navigation }) => {
                 <View style={styles.fieldGroup}>
                   <WalletSectionLabel label={t('walletImportNetworkLabel')} />
                   <WalletTextField
-                    left={selectedTokenNetworkKey ? <WalletNetworkCoin network={getNetworkConfig(selectedTokenNetworkKey)} size={20} /> : null}
+                    left={
+                      selectedTokenNetworkKey ? (
+                        <WalletNetworkCoin
+                          network={getNetworkConfig(selectedTokenNetworkKey)}
+                          size={20}
+                        />
+                      ) : null
+                    }
                   >
                     <Text style={styles.networkPillText}>
-                      {selectedTokenNetworkKey ? getNetworkConfig(selectedTokenNetworkKey).name : '-'}
+                      {selectedTokenNetworkKey
+                        ? getNetworkConfig(selectedTokenNetworkKey).name
+                        : '-'}
                     </Text>
                   </WalletTextField>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRowCompact}>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.chipRowCompact}
+                  >
                     {walletHomeNetworks.map(network => (
                       <Pressable
                         key={network.key}
-                        style={[styles.filterChip, selectedTokenNetworkKey === network.key && styles.filterChipOn]}
-                        onPress={() => setSelectedTokenNetworkKey(network.key as WalletHomeNetworkKey)}
+                        style={[
+                          styles.filterChip,
+                          selectedTokenNetworkKey === network.key &&
+                            styles.filterChipOn,
+                        ]}
+                        onPress={() =>
+                          setSelectedTokenNetworkKey(
+                            network.key as WalletHomeNetworkKey,
+                          )
+                        }
                       >
                         <WalletNetworkCoin network={network} size={28} />
                       </Pressable>
@@ -136,7 +215,9 @@ const AddTokenScreen: React.FC<AddTokenProps> = ({ navigation }) => {
                 </View>
 
                 <View style={styles.fieldGroup}>
-                  <WalletSectionLabel label={t('walletImportContractAddressLabel')} />
+                  <WalletSectionLabel
+                    label={t('walletImportContractAddressLabel')}
+                  />
                   <WalletTextField>
                     <TextInput
                       placeholder="0x..."
@@ -182,7 +263,9 @@ const AddTokenScreen: React.FC<AddTokenProps> = ({ navigation }) => {
                       placeholder="18"
                       placeholderTextColor={colors.textLow}
                       value={decimals}
-                      onChangeText={text => setDecimals(text.replace(/[^\d]/g, '').slice(0, 2))}
+                      onChangeText={text =>
+                        setDecimals(text.replace(/[^\d]/g, '').slice(0, 2))
+                      }
                       keyboardType="number-pad"
                       style={styles.fieldInput}
                     />
@@ -192,7 +275,9 @@ const AddTokenScreen: React.FC<AddTokenProps> = ({ navigation }) => {
             ) : (
               <>
                 <View style={styles.fieldGroup}>
-                  <WalletSectionLabel label={t('walletImportNetworkNameLabel')} />
+                  <WalletSectionLabel
+                    label={t('walletImportNetworkNameLabel')}
+                  />
                   <WalletTextField>
                     <TextInput
                       placeholder={t('walletImportNetworkNamePlaceholder')}
@@ -204,13 +289,17 @@ const AddTokenScreen: React.FC<AddTokenProps> = ({ navigation }) => {
                   </WalletTextField>
                 </View>
                 <View style={styles.fieldGroup}>
-                  <WalletSectionLabel label={t('walletImportNetworkSymbolLabel')} />
+                  <WalletSectionLabel
+                    label={t('walletImportNetworkSymbolLabel')}
+                  />
                   <WalletTextField>
                     <TextInput
                       placeholder={t('walletImportNetworkSymbolPlaceholder')}
                       placeholderTextColor={colors.textLow}
                       value={networkSymbol}
-                      onChangeText={text => setNetworkSymbol(text.toUpperCase())}
+                      onChangeText={text =>
+                        setNetworkSymbol(text.toUpperCase())
+                      }
                       style={styles.fieldInput}
                     />
                   </WalletTextField>
@@ -242,7 +331,6 @@ const AddTokenScreen: React.FC<AddTokenProps> = ({ navigation }) => {
     </View>
   );
 };
-
 
 export { AddTokenScreen };
 export default AddTokenScreen;
