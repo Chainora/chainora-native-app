@@ -1,17 +1,24 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Linking, Pressable, StatusBar, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import {
   Camera,
+  useCodeScanner,
   useCameraDevice,
   useCameraPermission,
 } from 'react-native-vision-camera';
 
+import {
+  getNetworkConfig,
+  getNetworkConfigByChainId,
+  type WalletHomeNetworkKey,
+} from '@config/network';
 import { useSettings } from '@hooks/useSettings';
 import type { RootStackParamList } from '@navigation/routes/rootStackParamList';
 import { ROUTES } from '@navigation/routes/routes';
+import { parseReceiveQrPayload } from '@utils/evmQr';
 import { QR_SCANNER_BACKGROUND, styles } from './QRScanner.styles';
 
 type Props = NativeStackScreenProps<
@@ -19,11 +26,13 @@ type Props = NativeStackScreenProps<
   typeof ROUTES.QRScanner
 >;
 
-const QRScannerScreen: React.FC<Props> = ({ navigation }) => {
+const QRScannerScreen: React.FC<Props> = ({ navigation, route }) => {
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice('back');
   const { t } = useSettings();
   const [permissionBlocked, setPermissionBlocked] = useState(false);
+  const scanHandledRef = useRef(false);
+  const { walletAddress, publicKeyHex, fallbackChainKey } = route.params ?? {};
 
   useEffect(() => {
     const status = Camera.getCameraPermissionStatus();
@@ -51,6 +60,69 @@ const QRScannerScreen: React.FC<Props> = ({ navigation }) => {
     ]);
   };
 
+  const getFallbackChainKey = useCallback((): WalletHomeNetworkKey | null => {
+    if (!fallbackChainKey) {
+      return null;
+    }
+
+    try {
+      return getNetworkConfig(fallbackChainKey).key as WalletHomeNetworkKey;
+    } catch {
+      return null;
+    }
+  }, [fallbackChainKey]);
+
+  const handleScannedPayload = useCallback(
+    (payload: string) => {
+      if (scanHandledRef.current || !walletAddress) {
+        return;
+      }
+
+      const parsed = parseReceiveQrPayload(payload);
+      if (!parsed) {
+        return;
+      }
+
+      const network = parsed.chainId
+        ? getNetworkConfigByChainId(parsed.chainId)
+        : null;
+      const chainKey =
+        network?.key ?? (parsed.chainId ? null : getFallbackChainKey());
+
+      if (!chainKey) {
+        scanHandledRef.current = true;
+        Alert.alert(t('qrErrorTitle'), t('qrErrorUnsupportedReceiveNetwork'), [
+          {
+            text: t('commonDone'),
+            onPress: () => {
+              scanHandledRef.current = false;
+            },
+          },
+        ]);
+        return;
+      }
+
+      scanHandledRef.current = true;
+      navigation.replace(ROUTES.Send, {
+        walletAddress,
+        publicKeyHex,
+        chainKey: chainKey as WalletHomeNetworkKey,
+        initialRecipient: parsed.address,
+      });
+    },
+    [getFallbackChainKey, navigation, publicKeyHex, t, walletAddress],
+  );
+
+  const codeScanner = useCodeScanner({
+    codeTypes: ['qr'],
+    onCodeScanned: codes => {
+      const value = codes.find(code => code.value)?.value;
+      if (value) {
+        handleScannedPayload(value);
+      }
+    },
+  });
+
   return (
     <View style={styles.root}>
       <StatusBar
@@ -61,7 +133,12 @@ const QRScannerScreen: React.FC<Props> = ({ navigation }) => {
       <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
         {hasPermission && device ? (
           <View style={styles.cameraWrap}>
-            <Camera style={styles.camera} device={device} isActive />
+            <Camera
+              style={styles.camera}
+              device={device}
+              isActive
+              codeScanner={codeScanner}
+            />
             <View style={styles.cameraDim} />
 
             <View style={styles.topBar}>

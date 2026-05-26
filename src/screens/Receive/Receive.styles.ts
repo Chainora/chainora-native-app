@@ -106,6 +106,7 @@ export const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   qrCornerTL: {
+    display: 'none',
     position: 'absolute',
     top: 16,
     left: 16,
@@ -117,6 +118,7 @@ export const styles = StyleSheet.create({
     borderTopLeftRadius: 16,
   },
   qrCornerTR: {
+    display: 'none',
     position: 'absolute',
     top: 16,
     right: 16,
@@ -128,6 +130,7 @@ export const styles = StyleSheet.create({
     borderTopRightRadius: 16,
   },
   qrCornerBL: {
+    display: 'none',
     position: 'absolute',
     bottom: 16,
     left: 16,
@@ -139,6 +142,7 @@ export const styles = StyleSheet.create({
     borderBottomLeftRadius: 16,
   },
   qrBrand: {
+    display: 'none',
     width: 70,
     height: 70,
     borderRadius: 35,

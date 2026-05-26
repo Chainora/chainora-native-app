@@ -488,6 +488,6 @@ Object.assign(vi, {
   qrTopImageAction: 'M\u1edf th\u01b0 vi\u1ec7n',
   qrTopEditAction: 'Ch\u1ec9nh s\u1eeda',
   qrFlashAction: '\u0110\u00e8n flash',
+  qrErrorUnsupportedReceiveNetwork: 'M\u00e3 QR nh\u1eadn n\u00e0y s\u1eed d\u1ee5ng m\u1ea1ng ch\u01b0a \u0111\u01b0\u1ee3c th\u00eam v\u00e0o v\u00ed.',
 });
-
 

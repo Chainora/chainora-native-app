@@ -27,6 +27,7 @@ With Metro running, open a new terminal window/pane from the root of your React 
 ```sh
 # Using npm
 npm run android
+npm run android -- --tasks assembleDebug --active-arch-only --no-packager
 
 # OR using Yarn
 yarn android

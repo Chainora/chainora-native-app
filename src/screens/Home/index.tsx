@@ -233,8 +233,12 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
   }, [ethAddress, t]);
 
   const handleScanQr = useCallback(() => {
-    navigation.navigate(ROUTES.QRScanner, { ethAddress });
-  }, [ethAddress, navigation]);
+    navigation.navigate(ROUTES.QRScanner, {
+      walletAddress: ethAddress,
+      publicKeyHex,
+      fallbackChainKey: primaryWalletNetwork?.key,
+    });
+  }, [ethAddress, navigation, primaryWalletNetwork, publicKeyHex]);
 
   const openSettings = useCallback(() => {
     navigation.navigate(ROUTES.Settings);

@@ -439,6 +439,7 @@ export const en = {
   qrErrorTitle: 'Error',
   qrErrorOpenSettings: 'Unable to open settings.',
   qrErrorPairingMissing: 'Pairing session is missing. Please scan QR again.',
+  qrErrorUnsupportedReceiveNetwork: 'This receive QR uses a network that is not added to this wallet.',
   qrStatusVerifyingCardPin: 'Verifying card PIN...',
   qrStatusConnectingRelaySession: 'Connecting relay session...',
   qrStatusPairedAndLoginApproved: 'Wallet paired and login approved.',
@@ -487,4 +488,3 @@ export const en = {
   themeLight: 'Light',
   themeSystem: 'System',
 } as const;
-

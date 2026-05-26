@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import {
   getWalletHomeNetworkKeys,
@@ -8,8 +8,8 @@ import {
   type WalletHomeNetworkKey,
 } from '@config/network';
 
-export const useWalletHomeNetworks = (): NetworkConfig[] => {
-  const [, setVersion] = useState(0);
+const useNetworkRegistryVersion = (): number => {
+  const [version, setVersion] = useState(0);
 
   useEffect(() => {
     return subscribeNetworkRegistry(() => {
@@ -17,17 +17,23 @@ export const useWalletHomeNetworks = (): NetworkConfig[] => {
     });
   }, []);
 
-  return getWalletHomeNetworks();
+  return version;
+};
+
+const readWalletHomeNetworks = (_version: number): NetworkConfig[] =>
+  getWalletHomeNetworks();
+
+const readWalletHomeNetworkKeys = (_version: number): WalletHomeNetworkKey[] =>
+  getWalletHomeNetworkKeys();
+
+export const useWalletHomeNetworks = (): NetworkConfig[] => {
+  const version = useNetworkRegistryVersion();
+
+  return useMemo(() => readWalletHomeNetworks(version), [version]);
 };
 
 export const useWalletHomeNetworkKeys = (): WalletHomeNetworkKey[] => {
-  const [, setVersion] = useState(0);
+  const version = useNetworkRegistryVersion();
 
-  useEffect(() => {
-    return subscribeNetworkRegistry(() => {
-      setVersion(prev => prev + 1);
-    });
-  }, []);
-
-  return getWalletHomeNetworkKeys();
+  return useMemo(() => readWalletHomeNetworkKeys(version), [version]);
 };

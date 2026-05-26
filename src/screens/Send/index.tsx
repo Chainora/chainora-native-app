@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -35,19 +35,26 @@ import { createSendScreenBase, styles } from './Send.styles';
 type SendProps = NativeStackScreenProps<RootStackParamList, typeof ROUTES.Send>;
 
 const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
-  const { walletAddress, publicKeyHex, chainKey, result } = route.params;
+  const { walletAddress, publicKeyHex, chainKey, result, initialRecipient } =
+    route.params;
   const { t } = useSettings();
   const colors = useWalletColors();
   const screenBase = useMemo(() => createSendScreenBase(colors), [colors]);
   const network = getNetworkConfig(chainKey);
   const balanceState = useWalletBalance(walletAddress, network);
-  const [recipient, setRecipient] = useState('');
+  const [recipient, setRecipient] = useState(initialRecipient ?? '');
   const [amount, setAmount] = useState('');
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [showReview, setShowReview] = useState(false);
   const [gasLimit, _setGasLimit] = useState(DEFAULT_GAS_LIMIT);
   const gasPriceGwei = useSuggestedGasPriceGwei(network);
+
+  useEffect(() => {
+    if (initialRecipient) {
+      setRecipient(initialRecipient);
+    }
+  }, [initialRecipient]);
 
   const feeNative = useMemo(
     () =>
@@ -130,7 +137,9 @@ const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
                     <Pressable
                       onPress={() =>
                         navigation.navigate(ROUTES.QRScanner, {
-                          ethAddress: walletAddress,
+                          walletAddress,
+                          publicKeyHex,
+                          fallbackChainKey: chainKey,
                         })
                       }
                     >

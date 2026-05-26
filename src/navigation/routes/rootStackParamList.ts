@@ -22,7 +22,9 @@ export type RootStackParamList = {
     mode: ScanMode;
   };
   [ROUTES.QRScanner]: {
-    ethAddress?: string;
+    walletAddress?: string;
+    publicKeyHex?: string;
+    fallbackChainKey?: WalletHomeNetworkKey;
   };
   [ROUTES.ActivateSuccess]: {
     ethAddress: string;
@@ -44,6 +46,7 @@ export type RootStackParamList = {
     walletAddress: string;
     publicKeyHex?: string;
     chainKey: WalletHomeNetworkKey;
+    initialRecipient?: string;
     result?: {
       transactionHash: string;
       amount: string;

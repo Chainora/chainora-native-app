@@ -296,6 +296,14 @@ export const getNetworkConfig = (key: NetworkKey): NetworkConfig => {
   return network;
 };
 
+export const getNetworkConfigByChainId = (chainId: number): NetworkConfig | null => {
+  if (!Number.isSafeInteger(chainId) || chainId <= 0) {
+    return null;
+  }
+
+  return getNetworkList().find(network => network.chainId === chainId) ?? null;
+};
+
 export const getActiveNetwork = (): NetworkConfig => getNetworkConfig(activeNetworkKey);
 
 export const setActiveNetwork = (key: NetworkKey): NetworkConfig => {

@@ -4,6 +4,7 @@ import Clipboard from '@react-native-clipboard/clipboard';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
+import QRCode from 'react-native-qrcode-svg';
 
 import {
   useWalletColors,
@@ -16,6 +17,7 @@ import { useSettings } from '@hooks/useSettings';
 import { useWalletHomeNetworks } from '@hooks/useWalletHomeNetworks';
 import type { RootStackParamList } from '@navigation/routes/rootStackParamList';
 import { ROUTES } from '@navigation/routes/routes';
+import { buildReceiveQrUri } from '@utils/evmQr';
 import { getAssetSymbol } from '@utils/sendFlowUtils';
 import WalletNetworkCoin from '@components/wallet/WalletNetworkCoin';
 import { createReceiveScreenBase, styles } from './Receive.styles';
@@ -50,6 +52,7 @@ const ReceiveScreen: React.FC<ReceiveProps> = ({ navigation, route }) => {
   }
 
   const network = getNetworkConfig(selectedChainKey);
+  const receiveQrUri = buildReceiveQrUri(walletAddress, network.chainId);
 
   return (
     <View style={screenBase.screen}>
@@ -121,6 +124,14 @@ const ReceiveScreen: React.FC<ReceiveProps> = ({ navigation, route }) => {
 
             <WalletPanel style={styles.qrCard}>
               <View style={styles.qrMock}>
+                <QRCode
+                  value={receiveQrUri}
+                  size={218}
+                  color={'#0E1726'}
+                  backgroundColor={'#F2F5FA'}
+                  quietZone={10}
+                  ecl={'M'}
+                />
                 <View style={styles.qrCornerTL} />
                 <View style={styles.qrCornerTR} />
                 <View style={styles.qrCornerBL} />

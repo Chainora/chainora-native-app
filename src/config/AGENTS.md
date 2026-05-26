@@ -8,6 +8,7 @@ After config changes, update this file with changed keys/defaults and migration 
 
 ## Fast Navigation
 - Network list/default and chain parameters are defined here.
+- Use `getNetworkConfigByChainId` to resolve built-in or imported networks from EVM QR payloads.
 
 ## Verify
 - yarn -s tsc --noEmit

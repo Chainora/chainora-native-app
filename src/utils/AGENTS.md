@@ -11,6 +11,7 @@ After utils changes, update this file with touched helpers and downstream usage 
 ## Fast Navigation
 
 - Prefer pure, testable helpers with clear input/output behavior.
+- `evmQr.ts` builds/parses EIP-681 receive QR payloads and normalizes EVM addresses.
 
 ## Verify
 
