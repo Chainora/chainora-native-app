@@ -215,6 +215,7 @@ export const en = {
   sendFromLabel: 'From',
   sendNetworkLabel: 'Network',
   sendNetworkFeeLabel: 'Network Fee',
+  sendTotalLabel: 'Total',
   sendReviewTitle: 'Review',
   sendEditGasFee: 'Edit Gas Fee',
   sendHideGasEditor: 'Hide Gas Settings',

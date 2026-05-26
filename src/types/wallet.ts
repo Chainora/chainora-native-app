@@ -34,10 +34,11 @@ export type WalletSignatureResult = WalletActionResult & {
   deviceCertificate?: Uint8Array;
 };
 
-export type WalletSignAndAttestResult<TMeta = unknown> = WalletSignatureResult & {
-  attestationProof?: Uint8Array;
-  challengeMeta?: TMeta;
-};
+export type WalletSignAndAttestResult<TMeta = unknown> =
+  WalletSignatureResult & {
+    attestationProof?: Uint8Array;
+    challengeMeta?: TMeta;
+  };
 
 export type CardCertificateResult = WalletActionResult & {
   deviceCertificate?: Uint8Array;
@@ -66,7 +67,11 @@ export type ScanCardFlowConfig = {
   onScanningChange?: (isScanning: boolean) => void;
   onShowToast?: (message: string, type: ToastType) => void;
   onSuccess?: (details: ScanCardFlowSuccess) => void | Promise<void>;
-  onFlowScan?: (setStageStatus: (status: string) => void) => Promise<WalletActionResult>;
+  onFailure?: (message: string) => void | Promise<void>;
+  closeOnFailure?: boolean;
+  onFlowScan?: (
+    setStageStatus: (status: string) => void,
+  ) => Promise<WalletActionResult>;
 };
 
 export type WalletRelayRequestType = 'signMessage' | 'signTransaction';

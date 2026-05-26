@@ -11,3 +11,6 @@ After type changes, update this file with renamed/added/removed types and impact
 
 ## Verify
 - yarn -s tsc --noEmit
+
+## Recent Type Changes
+- `ScanCardFlowConfig` includes optional `onFailure(message)` and `closeOnFailure` for flow screens that need to surface scan/sign failures outside `ScanCard`.

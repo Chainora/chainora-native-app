@@ -77,6 +77,8 @@ const ScanCardScreen: React.FC<Props> = ({ navigation, route }) => {
   const onScanningChange = flowConfig?.onScanningChange;
   const onShowToast = flowConfig?.onShowToast;
   const onSuccess = flowConfig?.onSuccess;
+  const onFailure = flowConfig?.onFailure;
+  const closeOnFailure = flowConfig?.closeOnFailure ?? false;
   const initialMode = flowConfig?.initialMode;
   const prefilledPin = flowConfig?.prefilledPin;
   const types: ScanCardFlowKind = flowConfig?.flowType ?? 'auth';
@@ -99,6 +101,25 @@ const ScanCardScreen: React.FC<Props> = ({ navigation, route }) => {
         }
       });
   }, [flowConfig, navigation]);
+
+  const handleFlowFailure = useCallback(
+    async (message: string): Promise<boolean> => {
+      if (types !== 'flow') {
+        return false;
+      }
+
+      const failureMessage = message.trim() || t('scanErrorGeneric');
+      await Promise.resolve(onFailure?.(failureMessage)).catch(() => undefined);
+
+      if (closeOnFailure) {
+        handleClose();
+        return true;
+      }
+
+      return false;
+    },
+    [closeOnFailure, handleClose, onFailure, t, types],
+  );
 
   const modeInstructions = useMemo(
     () => ({
@@ -356,6 +377,9 @@ const ScanCardScreen: React.FC<Props> = ({ navigation, route }) => {
             onSuccessError instanceof Error
               ? onSuccessError.message
               : String(onSuccessError);
+          if (await handleFlowFailure(rawMessage)) {
+            return;
+          }
           const fallbackMessage = toFriendlyMessage(
             rawMessage,
             t('scanErrorGeneric'),
@@ -379,6 +403,11 @@ const ScanCardScreen: React.FC<Props> = ({ navigation, route }) => {
         onStatusChange?.(successMessage);
         showToast(t('scanToastSuccess'), 'success');
       } else {
+        const rawFailureMessage =
+          String(result.message ?? '').trim() || t('scanErrorGeneric');
+        if (await handleFlowFailure(rawFailureMessage)) {
+          return;
+        }
         const failureMessage = resolveScanResultMessage(mode, result, t);
         setPhase('error');
         setStatusMessage(failureMessage);
@@ -390,6 +419,9 @@ const ScanCardScreen: React.FC<Props> = ({ navigation, route }) => {
     } catch (error) {
       if (operationTokenRef.current !== token) return;
       const message = error instanceof Error ? error.message : String(error);
+      if (await handleFlowFailure(message)) {
+        return;
+      }
       const fallbackMessage = toFriendlyMessage(message, t('scanErrorGeneric'));
       setPhase('error');
       setStatusMessage(fallbackMessage);
@@ -401,6 +433,7 @@ const ScanCardScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [
     ensureNfcReady,
     executeAuthScan,
+    handleFlowFailure,
     mode,
     operationTokenRef,
     onFlowScan,

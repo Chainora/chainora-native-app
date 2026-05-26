@@ -17,3 +17,7 @@ After utils changes, update this file with touched helpers and downstream usage 
 
 - yarn -s tsc --noEmit
 - Validate all call sites impacted by changed utility behavior.
+
+## Recent Helper Changes
+
+- `sendFlowUtils.ts` exposes wei-based fee/total format helpers (`estimateFeeWei`, `formatNativeWei`, `formatNativeWeiExact`) for asset-aware send review totals.

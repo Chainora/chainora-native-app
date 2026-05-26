@@ -1,5 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -22,7 +30,9 @@ import type { RootStackParamList } from '@navigation/routes/rootStackParamList';
 import { ROUTES } from '@navigation/routes/routes';
 import {
   DEFAULT_GAS_LIMIT,
+  estimateFeeWei,
   formatFeeNative,
+  formatNativeWeiExact,
   getAssetSymbol,
   isValidEvmAddress,
   parseTransferAmount,
@@ -49,6 +59,8 @@ const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
   const [showReview, setShowReview] = useState(false);
   const [gasLimit, _setGasLimit] = useState(DEFAULT_GAS_LIMIT);
   const gasPriceGwei = useSuggestedGasPriceGwei(network);
+  const assetSymbol = getAssetSymbol(network);
+  const isTokenTransfer = Boolean(network.portfolioTokenAddress);
 
   useEffect(() => {
     if (initialRecipient) {
@@ -56,13 +68,36 @@ const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
     }
   }, [initialRecipient]);
 
+  useEffect(() => {
+    if (!result) {
+      return;
+    }
+
+    setPin('');
+    setShowReview(false);
+  }, [result]);
+
   const feeNative = useMemo(
-    () =>
-      network.portfolioTokenAddress
-        ? null
-        : formatFeeNative(gasLimit, gasPriceGwei),
-    [gasLimit, gasPriceGwei, network.portfolioTokenAddress],
+    () => (isTokenTransfer ? null : formatFeeNative(gasLimit, gasPriceGwei)),
+    [gasLimit, gasPriceGwei, isTokenTransfer],
   );
+  const feeWei = useMemo(
+    () => (isTokenTransfer ? null : estimateFeeWei(gasLimit, gasPriceGwei)),
+    [gasLimit, gasPriceGwei, isTokenTransfer],
+  );
+  const totalNative = useMemo(() => {
+    if (isTokenTransfer || feeWei === null) {
+      return null;
+    }
+
+    try {
+      return formatNativeWeiExact(
+        parseTransferAmount(network, amount) + feeWei,
+      );
+    } catch {
+      return null;
+    }
+  }, [amount, feeWei, isTokenTransfer, network]);
 
   const openReview = useCallback(() => {
     const trimmedRecipient = recipient.trim();
@@ -110,7 +145,7 @@ const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
               <View style={styles.networkHeroText}>
                 <Text style={styles.networkHeroTitle}>{network.name}</Text>
                 <Text style={styles.networkHeroSub}>
-                  {balanceState.formatted ?? '0.0000'} {getAssetSymbol(network)}
+                  {balanceState.formatted ?? '0.0000'} {assetSymbol}
                 </Text>
               </View>
               <WalletPill style={styles.networkBadge}>
@@ -170,9 +205,7 @@ const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
                 right={
                   <View style={styles.fieldActions}>
                     <WalletPill style={styles.amountTag}>
-                      <Text style={styles.amountTagText}>
-                        {getAssetSymbol(network)}
-                      </Text>
+                      <Text style={styles.amountTagText}>{assetSymbol}</Text>
                     </WalletPill>
                     <Pressable
                       onPress={() =>
@@ -215,115 +248,149 @@ const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
               style={styles.sheetScrim}
               onPress={() => setShowReview(false)}
             />
-            <View style={styles.sheetCard}>
-              <View style={styles.sheetGrab} />
-              <View style={styles.sheetHeader}>
-                <Pressable
-                  style={styles.sheetIcon}
-                  onPress={() => setShowReview(false)}
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+              keyboardVerticalOffset={Platform.OS === 'ios' ? 16 : 0}
+              pointerEvents="box-none"
+              style={styles.sheetKeyboardAvoider}
+            >
+              <View style={styles.sheetCard}>
+                <View style={styles.sheetGrab} />
+                <View style={styles.sheetHeader}>
+                  <Pressable
+                    style={styles.sheetIcon}
+                    onPress={() => setShowReview(false)}
+                  >
+                    <Ionicons
+                      name="chevron-back"
+                      size={14}
+                      color={WALLET_COLORS.textMuted}
+                    />
+                  </Pressable>
+                  <Text style={styles.sheetTitle}>{t('sendReviewTitle')}</Text>
+                  <View style={styles.sheetHeaderSpacer} />
+                </View>
+
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                  contentContainerStyle={styles.sheetScrollContent}
                 >
-                  <Ionicons
-                    name="chevron-back"
-                    size={14}
-                    color={WALLET_COLORS.textMuted}
-                  />
-                </Pressable>
-                <Text style={styles.sheetTitle}>{t('sendReviewTitle')}</Text>
-                <Text style={styles.sheetStep}>2/3</Text>
-              </View>
+                  <View style={styles.reviewAmountWrap}>
+                    <Text style={styles.reviewAmount}>
+                      {amount || '0'}{' '}
+                      <Text style={styles.reviewAmountUnit}>{assetSymbol}</Text>
+                    </Text>
+                    <Text style={styles.reviewUsd}>{network.name}</Text>
+                  </View>
 
-              <View style={styles.reviewAmountWrap}>
-                <Text style={styles.reviewAmount}>
-                  {amount || '0'}{' '}
-                  <Text style={styles.reviewAmountUnit}>
-                    {getAssetSymbol(network)}
-                  </Text>
-                </Text>
-                <Text style={styles.reviewUsd}>{network.name}</Text>
-              </View>
+                  <View style={styles.reviewCard}>
+                    <View style={styles.reviewRow}>
+                      <Text style={styles.reviewLabel}>
+                        {t('sendFromLabel')}
+                      </Text>
+                      <Text style={styles.reviewValue}>
+                        {truncateAddress(walletAddress)}
+                      </Text>
+                    </View>
+                    <View style={styles.reviewRow}>
+                      <Text style={styles.reviewLabel}>{t('sendToLabel')}</Text>
+                      <Text style={styles.reviewValue}>
+                        {truncateAddress(recipient)}
+                      </Text>
+                    </View>
+                    <View style={styles.reviewRow}>
+                      <Text style={styles.reviewLabel}>
+                        {t('sendNetworkLabel')}
+                      </Text>
+                      <Text style={styles.reviewValue}>{network.name}</Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.reviewRow,
+                        !totalNative && styles.reviewRowLast,
+                      ]}
+                    >
+                      <Text style={styles.reviewLabel}>
+                        {t('sendNetworkFeeLabel')}
+                      </Text>
+                      <Text style={styles.reviewValue}>
+                        {feeNative
+                          ? `${feeNative} ${network.currencySymbol}`
+                          : `${t('sendFeeEstimatePending')} ${
+                              network.currencySymbol
+                            }`}
+                      </Text>
+                    </View>
+                    {totalNative ? (
+                      <View style={[styles.reviewRow, styles.reviewRowLast]}>
+                        <Text style={styles.reviewLabel}>
+                          {t('sendTotalLabel')}
+                        </Text>
+                        <Text style={styles.reviewValue}>
+                          {totalNative} {network.currencySymbol}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
 
-              <View style={styles.reviewCard}>
-                <View style={styles.reviewRow}>
-                  <Text style={styles.reviewLabel}>{t('sendFromLabel')}</Text>
-                  <Text style={styles.reviewValue}>
-                    {truncateAddress(walletAddress)}
-                  </Text>
-                </View>
-                <View style={styles.reviewRow}>
-                  <Text style={styles.reviewLabel}>{t('sendToLabel')}</Text>
-                  <Text style={styles.reviewValue}>
-                    {truncateAddress(recipient)}
-                  </Text>
-                </View>
-                <View style={styles.reviewRow}>
-                  <Text style={styles.reviewLabel}>
-                    {t('sendNetworkLabel')}
-                  </Text>
-                  <Text style={styles.reviewValue}>{network.name}</Text>
-                </View>
-                <View style={[styles.reviewRow, styles.reviewRowLast]}>
-                  <Text style={styles.reviewLabel}>
-                    {t('sendNetworkFeeLabel')}
-                  </Text>
-                  <Text style={styles.reviewValue}>
-                    {feeNative
-                      ? `${feeNative} ${network.currencySymbol}`
-                      : t('sendFeeEstimatePending')}
-                  </Text>
-                </View>
-              </View>
+                  <View style={styles.fieldGroup}>
+                    <WalletSectionLabel label={t('sendPinTitle')} />
+                    <WalletTextField>
+                      <TextInput
+                        value={pin}
+                        onChangeText={text => {
+                          setPin(
+                            text.replace(/[^\d]/g, '').slice(0, PIN_LENGTH),
+                          );
+                          if (error) {
+                            setError(null);
+                          }
+                        }}
+                        placeholder="0000"
+                        placeholderTextColor={WALLET_COLORS.textLow}
+                        keyboardType="number-pad"
+                        secureTextEntry
+                        style={[styles.fieldInput, styles.fieldInputLarge]}
+                      />
+                    </WalletTextField>
+                  </View>
 
-              <View style={styles.fieldGroup}>
-                <WalletSectionLabel label={t('sendPinTitle')} />
-                <WalletTextField>
-                  <TextInput
-                    value={pin}
-                    onChangeText={text => {
-                      setPin(text.replace(/[^\d]/g, '').slice(0, PIN_LENGTH));
-                      if (error) {
-                        setError(null);
+                  {error ? <Text style={styles.errorText}>{error}</Text> : null}
+                </ScrollView>
+
+                <View style={styles.sheetActions}>
+                  <WalletButton
+                    label={t('sendConfirm')}
+                    onPress={() => {
+                      if (pin.length !== PIN_LENGTH) {
+                        setError(t('sendErrorPinLength'));
+                        return;
                       }
+
+                      const capturedPin = pin;
+                      setPin('');
+                      setError(null);
+                      navigation.navigate(ROUTES.TouchSign, {
+                        walletAddress,
+                        publicKeyHex,
+                        chainKey,
+                        recipient,
+                        amount,
+                        pin: capturedPin,
+                        gasPriceGwei,
+                        gasLimit,
+                      });
                     }}
-                    placeholder="0000"
-                    placeholderTextColor={WALLET_COLORS.textLow}
-                    keyboardType="number-pad"
-                    secureTextEntry
-                    style={[styles.fieldInput, styles.fieldInputLarge]}
                   />
-                </WalletTextField>
+                  <WalletButton
+                    label={t('commonCancel')}
+                    variant="secondary"
+                    onPress={() => setShowReview(false)}
+                  />
+                </View>
               </View>
-
-              {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-              <View style={styles.sheetActions}>
-                <WalletButton
-                  label={t('sendConfirm')}
-                  onPress={() => {
-                    if (pin.length !== PIN_LENGTH) {
-                      setError(t('sendErrorPinLength'));
-                      return;
-                    }
-
-                    setShowReview(false);
-                    navigation.navigate(ROUTES.TouchSign, {
-                      walletAddress,
-                      publicKeyHex,
-                      chainKey,
-                      recipient,
-                      amount,
-                      pin,
-                      gasPriceGwei,
-                      gasLimit,
-                    });
-                  }}
-                />
-                <WalletButton
-                  label={t('commonCancel')}
-                  variant="secondary"
-                  onPress={() => setShowReview(false)}
-                />
-              </View>
-            </View>
+            </KeyboardAvoidingView>
           </View>
         ) : null}
 
@@ -345,8 +412,8 @@ const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
                 <Text style={styles.resultLabel}>{t('sendTxHash')}</Text>
                 <Text style={styles.resultHash}>{result.transactionHash}</Text>
                 <Text style={styles.resultMeta}>
-                  {amount || result.amount} {getAssetSymbol(network)} |{' '}
-                  {result.gasLimit} gas
+                  {amount || result.amount} {assetSymbol} | {result.gasLimit}{' '}
+                  gas
                 </Text>
               </View>
               <WalletButton

@@ -13,3 +13,6 @@ After locale edits, update this file with added/removed keys and affected screen
 ## Verify
 - yarn -s tsc --noEmit
 - Toggle language and verify updated text appears.
+
+## Recent Locale Changes
+- Added `sendTotalLabel` for Send review and TouchSign transaction summaries.

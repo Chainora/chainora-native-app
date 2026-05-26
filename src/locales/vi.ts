@@ -139,6 +139,7 @@ export const vi = {
   sendFromLabel: 'Từ',
   sendNetworkLabel: 'Mạng',
   sendNetworkFeeLabel: 'Phí mạng',
+  sendTotalLabel: 'T\u1ed5ng',
   sendReviewTitle: 'Xem lại',
   sendEditGasFee: 'Sửa phí gas',
   sendHideGasEditor: 'Ẩn cài đặt gas',
@@ -490,4 +491,3 @@ Object.assign(vi, {
   qrFlashAction: '\u0110\u00e8n flash',
   qrErrorUnsupportedReceiveNetwork: 'M\u00e3 QR nh\u1eadn n\u00e0y s\u1eed d\u1ee5ng m\u1ea1ng ch\u01b0a \u0111\u01b0\u1ee3c th\u00eam v\u00e0o v\u00ed.',
 });
-

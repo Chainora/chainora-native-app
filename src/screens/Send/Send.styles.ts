@@ -102,11 +102,16 @@ export const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'flex-end',
   },
+  sheetKeyboardAvoider: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
   sheetScrim: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(3, 6, 10, 0.82)',
   },
   sheetCard: {
+    maxHeight: '88%',
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     borderWidth: 1,
@@ -129,6 +134,10 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
   },
+  sheetHeaderSpacer: {
+    width: 28,
+    height: 28,
+  },
   sheetIcon: {
     width: 28,
     height: 28,
@@ -146,10 +155,9 @@ export const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: 'center',
   },
-  sheetStep: {
-    color: WALLET_COLORS.textLow,
-    fontFamily: MONO_FONT,
-    fontSize: 11,
+  sheetScrollContent: {
+    gap: 14,
+    paddingBottom: 2,
   },
   reviewAmountWrap: {
     alignItems: 'center',

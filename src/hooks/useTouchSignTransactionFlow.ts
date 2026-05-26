@@ -29,6 +29,7 @@ type UseTouchSignTransactionFlowArgs = {
   isNfcEnabled: boolean | null;
   missingResultMessage: string;
   network: NetworkConfig;
+  onFailure?: (message: string) => void | Promise<void>;
   onSuccess: (result: TouchSignResult) => void | Promise<void>;
   pin: string;
   recipient: string;
@@ -43,6 +44,7 @@ export const useTouchSignTransactionFlow = ({
   isNfcEnabled,
   missingResultMessage,
   network,
+  onFailure,
   onSuccess,
   pin,
   recipient,
@@ -61,28 +63,33 @@ export const useTouchSignTransactionFlow = ({
       gasPriceWei: gasPriceGwei ? parseGwei(gasPriceGwei) : undefined,
       gasLimitWei: network.portfolioTokenAddress
         ? undefined
-        : gasLimit ? BigInt(gasLimit) : undefined,
+        : gasLimit
+        ? BigInt(gasLimit)
+        : undefined,
     });
   }, [amount, gasLimit, gasPriceGwei, network, pin, recipient, walletAddress]);
 
-  const handleFlowSuccess = useCallback(async (outcome: SendEthResult) => {
-    await addRecentActivity({
-      transactionHash: outcome.transactionHash,
-      networkKey: network.key,
-      fromAddress: walletAddress,
-      toAddress: recipient.trim(),
-      amountDisplay: amount.trim(),
-      currencySymbol: getAssetSymbol(network),
-      networkName: network.name,
-    });
+  const handleFlowSuccess = useCallback(
+    async (outcome: SendEthResult) => {
+      await addRecentActivity({
+        transactionHash: outcome.transactionHash,
+        networkKey: network.key,
+        fromAddress: walletAddress,
+        toAddress: recipient.trim(),
+        amountDisplay: amount.trim(),
+        currencySymbol: getAssetSymbol(network),
+        networkName: network.name,
+      });
 
-    await onSuccess({
-      transactionHash: outcome.transactionHash,
-      amount,
-      gasLimit: outcome.gasLimitWei.toString(),
-      gasPriceGwei: formatGweiFromWei(outcome.gasPriceWei),
-    });
-  }, [amount, network, onSuccess, recipient, walletAddress]);
+      await onSuccess({
+        transactionHash: outcome.transactionHash,
+        amount,
+        gasLimit: outcome.gasLimitWei.toString(),
+        gasPriceGwei: formatGweiFromWei(outcome.gasPriceWei),
+      });
+    },
+    [amount, network, onSuccess, recipient, walletAddress],
+  );
 
   return useWalletSendScanFlow({
     isNfcEnabled,
@@ -90,6 +97,8 @@ export const useTouchSignTransactionFlow = ({
     successMessage,
     missingResultMessage,
     onFlowScan: handleFlowScan,
+    onFailure,
+    closeOnFailure: true,
     onSuccess: handleFlowSuccess,
   });
 };

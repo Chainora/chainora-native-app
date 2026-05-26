@@ -10,6 +10,8 @@ type UseWalletSendScanFlowArgs = {
   missingResultMessage: string;
   onFlowScan: () => Promise<SendEthResult>;
   onSuccess: (result: SendEthResult) => Promise<void> | void;
+  onFailure?: (message: string) => Promise<void> | void;
+  closeOnFailure?: boolean;
   onClose?: () => Promise<void> | void;
 };
 
@@ -25,6 +27,8 @@ export const useWalletSendScanFlow = ({
   missingResultMessage,
   onFlowScan,
   onSuccess,
+  onFailure,
+  closeOnFailure = false,
   onClose,
 }: UseWalletSendScanFlowArgs): UseWalletSendScanFlowResult => {
   const pendingResultRef = useRef<SendEthResult | null>(null);
@@ -49,7 +53,8 @@ export const useWalletSendScanFlow = ({
             message: successMessage,
           };
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
+          const message =
+            error instanceof Error ? error.message : String(error);
           return {
             ok: false,
             message,
@@ -68,13 +73,26 @@ export const useWalletSendScanFlow = ({
           setSubmitting(false);
         }
       },
+      onFailure,
+      closeOnFailure,
       onClose: async () => {
         pendingResultRef.current = null;
         setSubmitting(false);
         await onClose?.();
       },
     });
-  }, [isNfcEnabled, missingResultMessage, onClose, onFlowScan, onSuccess, pin, submitting, successMessage]);
+  }, [
+    closeOnFailure,
+    isNfcEnabled,
+    missingResultMessage,
+    onClose,
+    onFailure,
+    onFlowScan,
+    onSuccess,
+    pin,
+    submitting,
+    successMessage,
+  ]);
 
   return {
     submitting,
