@@ -111,7 +111,17 @@ export const ActivatePinScreen: React.FC<Props> = ({ navigation }) => {
       },
     });
     navigation.navigate(ROUTES.ScanCard, { flowId });
-  }, [confirmPin, createPin, step, t]);
+  }, [
+    completeSession,
+    confirmPin,
+    createPin,
+    initializeSession,
+    isEnabled,
+    navigation,
+    showToast,
+    step,
+    t,
+  ]);
 
   const title = step === 'create' ? t('activateChoosePinTitle') : t('activateConfirmPinTitle');
   const bodyText =

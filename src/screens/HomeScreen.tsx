@@ -38,30 +38,26 @@ import {
   type WalletHomeVisibilityMap,
 } from '../features/wallet/walletHomePreferences';
 import {
-  buildPortfolioAssetSnapshot,
   calculatePortfolioDayChange,
   formatFiatAmount,
   formatFiatValue,
   formatSignedFiatDelta,
   formatSignedPercentDelta,
   getFiatUnit,
-  mergePortfolioActivities,
   sortPortfolioAssets,
   sumPortfolioUsdValue,
-  type PortfolioAssetSnapshot,
 } from '../features/wallet/homePortfolio';
 import {
-  getRecentActivitiesByWalletAcrossNetworks,
   type RecentActivity,
 } from '../features/wallet/recentActivityStorage';
 import { useWalletHomeNetworks } from '../features/wallet/useWalletHomeNetworks';
 import type { LocaleKey } from '../locales';
 import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
 import { ROUTES } from '../navigation/routes/routes';
-import { syncWalletActivities } from '../services/activitySyncService';
-import { fetchWalletBalance } from '../services/balanceService';
-import { getUsdPriceForNetwork } from '../services/priceService';
 import { walletRelaySessionManager } from '../services/walletRelaySessionManager';
+import { useHomeActivityPolling } from './wallet/hooks/useHomeActivityPolling';
+import { useHomePortfolioPolling } from './wallet/hooks/useHomePortfolioPolling';
+import { truncateAddress } from './wallet/utils/sendFlowUtils';
 
 type Props = NativeStackScreenProps<RootStackParamList, typeof ROUTES.Home>;
 type TabKey = 'assets' | 'activity';
@@ -77,14 +73,8 @@ const timeFormatter = new Intl.DateTimeFormat('en-US', {
   minute: '2-digit',
 });
 
-const truncateAddress = (value: string) => `${value.slice(0, 6)}...${value.slice(-4)}`;
 const getAssetSymbol = (currencySymbol: string, portfolioTokenSymbol?: string): string =>
   portfolioTokenSymbol ?? currencySymbol;
-const buildAssetSignature = (assets: PortfolioAssetSnapshot[]) =>
-  assets
-    .map(asset => `${asset.network.key}:${asset.balanceFormatted}:${asset.usdValue}:${asset.error ?? ''}:${asset.priceUnavailable ? '1' : '0'}`)
-    .join('|');
-const buildActivitySignature = (items: RecentActivity[]) => items.map(item => item.id).join('|');
 
 const getActivityHeadline = (item: RecentActivity, t: (key: LocaleKey) => string) =>
   item.kind === 'send' ? t('homeActivitySent') : t('homeActivityReceived');
@@ -114,9 +104,6 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<TabKey>('assets');
   const [isAppActive, setIsAppActive] = useState(AppState.currentState === 'active');
-  const [assets, setAssets] = useState<PortfolioAssetSnapshot[]>([]);
-  const [assetsLoading, setAssetsLoading] = useState(false);
-  const [activities, setActivities] = useState<RecentActivity[]>([]);
   const [visibility, setVisibility] = useState<WalletHomeVisibilityMap>(() =>
     buildDefaultWalletHomeVisibility(walletHomeNetworkKeys),
   );
@@ -129,29 +116,30 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const mountedRef = useRef(true);
   const wasAppActiveRef = useRef(isAppActive);
-  const assetSignatureRef = useRef('');
-  const activitySignatureRef = useRef('');
-  const activityInFlightRef = useRef(false);
-  const activityQueuedRef = useRef(false);
-  const activitySyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const setAssetsIfChanged = useCallback((next: PortfolioAssetSnapshot[]) => {
-    const signature = buildAssetSignature(next);
-    if (assetSignatureRef.current === signature) {
-      return;
-    }
-    assetSignatureRef.current = signature;
-    setAssets(next);
-  }, []);
-
-  const setActivitiesIfChanged = useCallback((next: RecentActivity[]) => {
-    const signature = buildActivitySignature(next);
-    if (activitySignatureRef.current === signature) {
-      return;
-    }
-    activitySignatureRef.current = signature;
-    setActivities(next);
-  }, []);
+  const {
+    assets,
+    assetsLoading,
+    refreshPortfolio,
+  } = useHomePortfolioPolling({
+    ethAddress,
+    isAppActive,
+    isFocused,
+    networks: walletHomeNetworks,
+    pollIntervalMs: BALANCE_POLL_INTERVAL_MS,
+  });
+  const {
+    activities,
+    loadRecentActivity,
+    scheduleActivitySync,
+  } = useHomeActivityPolling({
+    ethAddress,
+    isAppActive,
+    isFocused,
+    networkKeys: walletHomeNetworkKeys,
+    networks: walletHomeNetworks,
+    pollIntervalMs: ACTIVITY_POLL_INTERVAL_MS,
+    syncDebounceMs: ACTIVITY_SYNC_DEBOUNCE_MS,
+  });
 
   const loadPreferences = useCallback(async () => {
     try {
@@ -168,107 +156,6 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
       }
     }
   }, [walletHomeNetworkKeys]);
-
-  const refreshPortfolio = useCallback(async () => {
-    if (walletHomeNetworks.length === 0) {
-      setAssetsIfChanged([]);
-      return;
-    }
-
-    setAssetsLoading(true);
-    try {
-      const nextAssets = await Promise.all(
-        walletHomeNetworks.map(async network => {
-          const [balanceResult, priceResult] = await Promise.allSettled([
-            fetchWalletBalance(ethAddress, network),
-            getUsdPriceForNetwork(network),
-          ]);
-
-          const priceQuote = priceResult.status === 'fulfilled'
-            ? priceResult.value
-            : { usdPrice: 0, available: false };
-
-          if (balanceResult.status === 'fulfilled') {
-            return buildPortfolioAssetSnapshot({
-              network,
-              balanceFormatted: balanceResult.value.formatted,
-              balanceWei: balanceResult.value.wei,
-              usdPrice: priceQuote.usdPrice,
-              priceUnavailable: !priceQuote.available,
-            });
-          }
-
-          const message =
-            balanceResult.reason instanceof Error
-              ? balanceResult.reason.message
-              : String(balanceResult.reason);
-          return buildPortfolioAssetSnapshot({
-            network,
-            balanceFormatted: '0.0000',
-            usdPrice: priceQuote.usdPrice,
-            priceUnavailable: !priceQuote.available,
-            error: message,
-          });
-        }),
-      );
-
-      if (mountedRef.current) {
-        setAssetsIfChanged(sortPortfolioAssets(nextAssets));
-      }
-    } catch (error) {
-      console.warn('[Home] Failed to refresh portfolio', error);
-    } finally {
-      if (mountedRef.current) {
-        setAssetsLoading(false);
-      }
-    }
-  }, [ethAddress, setAssetsIfChanged, walletHomeNetworks]);
-
-  const loadRecentActivity = useCallback(async () => {
-    if (activityInFlightRef.current) {
-      activityQueuedRef.current = true;
-      return;
-    }
-
-    activityInFlightRef.current = true;
-
-    try {
-      const cached = await getRecentActivitiesByWalletAcrossNetworks(ethAddress, walletHomeNetworkKeys);
-      if (mountedRef.current) {
-        setActivitiesIfChanged(mergePortfolioActivities(cached));
-      }
-
-      await Promise.allSettled(walletHomeNetworks.map(network => syncWalletActivities(ethAddress, network)));
-      const next = await getRecentActivitiesByWalletAcrossNetworks(ethAddress, walletHomeNetworkKeys);
-      if (mountedRef.current) {
-        setActivitiesIfChanged(mergePortfolioActivities(next));
-      }
-    } catch (error) {
-      console.warn('[Home] Failed to load recent activity', error);
-    } finally {
-      activityInFlightRef.current = false;
-      if (activityQueuedRef.current) {
-        activityQueuedRef.current = false;
-        setTimeout(() => {
-          loadRecentActivity().catch(nextError => {
-            console.warn('[Home] Queued activity sync failed', nextError);
-          });
-        }, 0);
-      }
-    }
-  }, [ethAddress, setActivitiesIfChanged, walletHomeNetworkKeys, walletHomeNetworks]);
-
-  const scheduleActivitySync = useCallback(() => {
-    if (activitySyncTimerRef.current) {
-      clearTimeout(activitySyncTimerRef.current);
-    }
-
-    activitySyncTimerRef.current = setTimeout(() => {
-      loadRecentActivity().catch(error => {
-        console.warn('[Home] Scheduled activity sync failed', error);
-      });
-    }, ACTIVITY_SYNC_DEBOUNCE_MS);
-  }, [loadRecentActivity]);
 
   useEffect(() => {
     initializeSession(ethAddress).catch(error => {
@@ -294,43 +181,13 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
     loadPreferences().catch(error => {
       console.warn('[Home] Initial preferences load failed', error);
     });
-    refreshPortfolio().catch(error => {
-      console.warn('[Home] Initial portfolio refresh failed', error);
-    });
-    loadRecentActivity().catch(error => {
-      console.warn('[Home] Initial activity refresh failed', error);
-    });
-  }, [loadPreferences, loadRecentActivity, refreshPortfolio]);
+  }, [loadPreferences]);
 
   useEffect(() => {
     return () => {
       mountedRef.current = false;
-      if (activitySyncTimerRef.current) {
-        clearTimeout(activitySyncTimerRef.current);
-      }
     };
   }, []);
-
-  useEffect(() => {
-    if (!isFocused || !isAppActive) {
-      return;
-    }
-
-    const balanceIntervalId = setInterval(() => {
-      refreshPortfolio().catch(error => {
-        console.warn('[Home] Interval portfolio refresh failed', error);
-      });
-    }, BALANCE_POLL_INTERVAL_MS);
-
-    const activityIntervalId = setInterval(() => {
-      scheduleActivitySync();
-    }, ACTIVITY_POLL_INTERVAL_MS);
-
-    return () => {
-      clearInterval(balanceIntervalId);
-      clearInterval(activityIntervalId);
-    };
-  }, [isAppActive, isFocused, refreshPortfolio, scheduleActivitySync]);
 
   useEffect(() => {
     if (!isFocused) {

@@ -29,10 +29,6 @@ export type RootStackParamList = {
     publicKeyHex?: string;
     mode: ScanMode;
   };
-  [ROUTES.SendTransaction]: {
-    fromAddress: string;
-    availableAmount: string;
-  };
   [ROUTES.WalletDetails]: {
     address: string;
     publicKeyHex?: string;

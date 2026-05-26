@@ -7,30 +7,33 @@ import {
 } from '@react-navigation/native-stack';
 import { enableScreens } from 'react-native-screens';
 
-import HomeScreen from '../screens/HomeScreen.tsx';
-import WelcomeScreen from '../screens/WelcomeScreen.tsx';
-import LoginPinScreen from '../screens/LoginPinScreen.tsx';
-import ActivatePinScreen from '../screens/ActivatePinScreen.tsx';
-import ActivateSuccessScreen from '../screens/ActivateSuccessScreen.tsx';
-import ScanCardScreen from '../screens/ScanCardScreen';
-import EcdhBackupScreen from '../screens/EcdhBackupScreen.tsx';
-import SettingsScreen from '../screens/SettingsScreen';
-import GeneralScreen from '../screens/GeneralScreen';
-import LanguageSettingsScreen from '../screens/LanguageSettingsScreen';
-import CurrencySettingsScreen from '../screens/CurrencySettingsScreen';
-import ChangePinScreen from '../screens/ChangePinScreen';
-import QRScannerScreen from '../screens/QRScannerScreen';
-import SendTransactionScreen from '../screens/SendTransactionScreen';
-import WalletDetailsScreen from '../screens/WalletDetailsScreen';
-import WalletRelayRequestScreen from '../screens/WalletRelayRequestScreen';
 import {
+  ActivatePinScreen,
+  ActivateSuccessScreen,
+  EcdhBackupScreen,
+  LoginPinScreen,
+  ScanCardScreen,
+  WelcomeScreen,
+} from '../screens/auth';
+import {
+  ChangePinScreen,
+  CurrencySettingsScreen,
+  GeneralScreen,
+  LanguageSettingsScreen,
+  SettingsScreen,
+} from '../screens/settings';
+import {
+  HomeScreen,
+  QRScannerScreen,
   AddTokenScreen,
   ReceiveScreen,
   SendScreen,
   SendPickScreen,
   TokenManageScreen,
   TouchSignScreen,
-} from '../screens/WalletFlowScreens';
+  WalletDetailsScreen,
+} from '../screens/wallet';
+import { WalletRelayRequestScreen } from '../screens/relay';
 import Header from '../components/layout/header';
 import { useSettings } from '../features/settings';
 import { walletRelaySessionManager } from '../services/walletRelaySessionManager';
@@ -161,11 +164,6 @@ export const AppNavigator: React.FC = () => {
             name={ROUTES.Home}
             component={HomeScreen}
             options={{ headerShown: false }}
-          />
-          <Stack.Screen
-            name={ROUTES.SendTransaction}
-            component={SendTransactionScreen}
-            options={{ headerShown: false, animation: 'none' }}
           />
           <Stack.Screen
             name={ROUTES.WalletDetails}

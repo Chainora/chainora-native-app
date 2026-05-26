@@ -16,7 +16,6 @@ import Clipboard from '@react-native-clipboard/clipboard';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
-import { encodeFunctionData, erc20Abi, getAddress } from 'viem';
 
 import {
   DISPLAY_FONT,
@@ -42,6 +41,7 @@ import {
 import { getNetworkLogoSource } from '../config/networkLogos';
 import { useNfcEnabled } from '../features/nfc/hooks/useNfcEnabled';
 import { useSettings } from '../features/settings';
+import { detectChainIdFromRpc, saveImportedNetwork } from '../features/wallet/importedNetworkStorage';
 import {
   buildDefaultWalletHomeVisibility,
   getWalletHomeVisibility,
@@ -60,14 +60,24 @@ import type { RootStackParamList } from '../navigation/routes/rootStackParamList
 import { ROUTES } from '../navigation/routes/routes';
 import { fetchWalletBalance } from '../services/balanceService';
 import { getUsdPriceForNetwork } from '../services/priceService';
-import { registerScanCardFlow } from '../services/scanCardFlowRegistry';
 import {
   fetchSuggestedGasPriceWei,
-  parseEther,
   sendEthTransaction,
   type SendEthResult,
 } from '../services/transactionService';
-import { detectChainIdFromRpc, saveImportedNetwork } from '../features/wallet/importedNetworkStorage';
+import { useWalletSendScanFlow } from './wallet/hooks/useWalletSendScanFlow';
+import {
+  buildTransferPayload,
+  DEFAULT_GAS_LIMIT,
+  formatFeeNative,
+  formatGweiFromWei,
+  getAssetSymbol,
+  isValidEvmAddress,
+  parseGwei,
+  parseTransferAmount,
+  PIN_LENGTH,
+  truncateAddress,
+} from './wallet/utils/sendFlowUtils';
 
 type SendPickProps = NativeStackScreenProps<RootStackParamList, typeof ROUTES.SendPick>;
 type SendProps = NativeStackScreenProps<RootStackParamList, typeof ROUTES.Send>;
@@ -80,99 +90,6 @@ type FilterKey = 'all' | WalletHomeNetworkKey;
 type TokenManageItem = {
   key: WalletHomeNetworkKey;
   enabled: boolean;
-};
-
-const PIN_LENGTH = 4;
-const DEFAULT_GAS_LIMIT = '21000';
-
-const truncateAddress = (value: string) => `${value.slice(0, 6)}...${value.slice(-4)}`;
-const getAssetSymbol = (network: NetworkConfig): string => network.portfolioTokenSymbol ?? network.currencySymbol;
-const getAssetDecimals = (network: NetworkConfig): number => network.portfolioTokenDecimals ?? 18;
-
-const parseAmountToUnits = (value: string, decimals: number): bigint => {
-  const trimmed = value.trim();
-  if (!/^\d+(\.\d+)?$/.test(trimmed)) {
-    throw new Error('Amount must be a positive decimal number');
-  }
-
-  const [whole, fraction = ''] = trimmed.split('.');
-  if (fraction.length > decimals) {
-    throw new Error(`Amount has more than ${decimals} decimal places`);
-  }
-
-  const base = 10n ** BigInt(decimals);
-  const wholeUnits = BigInt(whole) * base;
-  const fractionPadded = `${fraction}${'0'.repeat(decimals)}`.slice(0, decimals);
-  const fractionUnits = fractionPadded ? BigInt(fractionPadded) : 0n;
-  return wholeUnits + fractionUnits;
-};
-
-const parseTransferAmount = (network: NetworkConfig, amount: string): bigint => {
-  if (network.portfolioTokenAddress) {
-    return parseAmountToUnits(amount, getAssetDecimals(network));
-  }
-  return parseEther(amount);
-};
-
-const buildTransferPayload = (network: NetworkConfig, recipient: string, amount: string) => {
-  if (!network.portfolioTokenAddress) {
-    return {
-      to: recipient.trim(),
-      valueWei: parseTransferAmount(network, amount),
-      dataHex: undefined as string | undefined,
-    };
-  }
-
-  const recipientAddress = getAddress(recipient.trim());
-  const amountUnits = parseTransferAmount(network, amount);
-  const dataHex = encodeFunctionData({
-    abi: erc20Abi,
-    functionName: 'transfer',
-    args: [recipientAddress, amountUnits],
-  });
-
-  return {
-    to: network.portfolioTokenAddress,
-    valueWei: 0n,
-    dataHex,
-  };
-};
-
-const parseGwei = (value: string): bigint => {
-  const trimmed = value.trim();
-  if (!/^\d+(\.\d+)?$/.test(trimmed)) {
-    throw new Error('Invalid gas price');
-  }
-  const [whole, fraction = ''] = trimmed.split('.');
-  const wholeWei = BigInt(whole) * 1_000_000_000n;
-  const fractionPadded = (fraction + '000000000').slice(0, 9);
-  return wholeWei + BigInt(fractionPadded);
-};
-
-const formatGweiFromWei = (wei: bigint): string => {
-  const whole = wei / 1_000_000_000n;
-  const fraction = (wei % 1_000_000_000n).toString().padStart(9, '0').slice(0, 2);
-  return `${whole.toString()}.${fraction}`;
-};
-
-const formatFeeNative = (gasLimit: string, gasPriceGwei?: string): string | null => {
-  if (!gasPriceGwei || !/^\d+$/.test(gasLimit)) {
-    return null;
-  }
-  const gasPriceWei = parseGwei(gasPriceGwei);
-  const feeWei = BigInt(gasLimit) * gasPriceWei;
-  const whole = feeWei / 1_000_000_000_000_000_000n;
-  const fraction = (feeWei % 1_000_000_000_000_000_000n).toString().padStart(18, '0').slice(0, 6);
-  return `${whole.toString()}.${fraction}`;
-};
-
-const isValidEvmAddress = (value: string): boolean => {
-  try {
-    getAddress(value.trim());
-    return true;
-  } catch {
-    return false;
-  }
 };
 
 const renderNetworkCoin = (network: NetworkConfig, size = 42) => {
@@ -841,100 +758,62 @@ export const TouchSignScreen: React.FC<TouchSignProps> = ({ navigation, route })
   const screenBase = useMemo(() => buildWalletScreenStyles(colors), [colors]);
   const { isEnabled } = useNfcEnabled();
   const network = getNetworkConfig(chainKey);
-  const pendingResultRef = useRef<SendEthResult | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const handleFlowScan = useCallback(async () => {
+    const transferPayload = buildTransferPayload(network, recipient, amount);
+    return sendEthTransaction({
+      from: walletAddress,
+      to: transferPayload.to,
+      valueWei: transferPayload.valueWei,
+      dataHex: transferPayload.dataHex,
+      pin,
+      network,
+      gasPriceWei: gasPriceGwei ? parseGwei(gasPriceGwei) : undefined,
+      gasLimitWei: network.portfolioTokenAddress
+        ? undefined
+        : gasLimit ? BigInt(gasLimit) : undefined,
+    });
+  }, [amount, gasLimit, gasPriceGwei, network, pin, recipient, walletAddress]);
 
-  const startTouchSign = useCallback(() => {
-    if (submitting) {
-      return;
-    }
-
-    setSubmitting(true);
-
-    const flowId = registerScanCardFlow({
-      isNfcEnabled: isEnabled,
-      flowType: 'flow',
-      prefilledPin: pin,
-      onFlowScan: async () => {
-        try {
-          const transferPayload = buildTransferPayload(network, recipient, amount);
-          const outcome = await sendEthTransaction({
-            from: walletAddress,
-            to: transferPayload.to,
-            valueWei: transferPayload.valueWei,
-            dataHex: transferPayload.dataHex,
-            pin,
-            network,
-            gasPriceWei: gasPriceGwei ? parseGwei(gasPriceGwei) : undefined,
-            gasLimitWei: network.portfolioTokenAddress
-              ? undefined
-              : gasLimit ? BigInt(gasLimit) : undefined,
-          });
-
-          pendingResultRef.current = outcome;
-          return {
-            ok: true,
-            message: t('sendStatusSuccess'),
-          };
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          return {
-            ok: false,
-            message,
-          };
-        }
-      },
-      onSuccess: async () => {
-        const outcome = pendingResultRef.current;
-        setSubmitting(false);
-
-        if (!outcome) {
-          throw new Error(t('sendErrorMissingDetails'));
-        }
-
-        await addRecentActivity({
-          transactionHash: outcome.transactionHash,
-          networkKey: network.key,
-          fromAddress: walletAddress,
-          toAddress: recipient.trim(),
-          amountDisplay: amount.trim(),
-          currencySymbol: getAssetSymbol(network),
-          networkName: network.name,
-        });
-
-        navigation.replace(ROUTES.Send, {
-          walletAddress,
-          publicKeyHex,
-          chainKey,
-          result: {
-            transactionHash: outcome.transactionHash,
-            amount,
-            gasLimit: outcome.gasLimitWei.toString(),
-            gasPriceGwei: formatGweiFromWei(outcome.gasPriceWei),
-          },
-        });
-      },
-      onClose: async () => {
-        setSubmitting(false);
-      },
+  const handleFlowSuccess = useCallback(async (outcome: SendEthResult) => {
+    await addRecentActivity({
+      transactionHash: outcome.transactionHash,
+      networkKey: network.key,
+      fromAddress: walletAddress,
+      toAddress: recipient.trim(),
+      amountDisplay: amount.trim(),
+      currencySymbol: getAssetSymbol(network),
+      networkName: network.name,
     });
 
-    navigation.navigate(ROUTES.ScanCard, { flowId });
-  }, [
-    amount,
-    chainKey,
-    gasLimit,
-    gasPriceGwei,
-    isEnabled,
-    navigation,
-    network,
+    navigation.replace(ROUTES.Send, {
+      walletAddress,
+      publicKeyHex,
+      chainKey,
+      result: {
+        transactionHash: outcome.transactionHash,
+        amount,
+        gasLimit: outcome.gasLimitWei.toString(),
+        gasPriceGwei: formatGweiFromWei(outcome.gasPriceWei),
+      },
+    });
+  }, [amount, chainKey, navigation, network, publicKeyHex, recipient, walletAddress]);
+
+  const { submitting, startSendScanFlow } = useWalletSendScanFlow({
+    isNfcEnabled: isEnabled,
     pin,
-    publicKeyHex,
-    recipient,
-    submitting,
-    t,
-    walletAddress,
-  ]);
+    successMessage: t('sendStatusSuccess'),
+    missingResultMessage: t('sendErrorMissingDetails'),
+    onFlowScan: handleFlowScan,
+    onSuccess: handleFlowSuccess,
+  });
+
+  const startTouchSign = useCallback(() => {
+    const flowId = startSendScanFlow();
+    if (!flowId) {
+      return;
+    }
+    navigation.navigate(ROUTES.ScanCard, { flowId });
+  }, [navigation, startSendScanFlow]);
 
   return (
     <View style={screenBase.screen}>

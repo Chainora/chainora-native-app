@@ -1,8 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Animated, Easing, Linking, Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import NfcManager from 'react-native-nfc-manager';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
 import { PinInput } from '../components/ui/PinInput';
@@ -16,17 +14,19 @@ import {
   PIN_SANS_FONT_SEMIBOLD,
 } from '../components/ui/pinTheme';
 import { useSettings } from '../features/settings';
-import { initialiseWallet, signInWallet, WalletActionCode } from '../services/cardService';
+import { initialiseWallet, signInWallet } from '../services/cardService';
 import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
 import { clearScanCardFlow, getScanCardFlow, type ScanCardFlowKind, type ScanMode } from '../services/scanCardFlowRegistry';
+import { ScanCardShell } from './auth/components/ScanCardShell';
+import { useScanCardFlowState } from './auth/hooks/useScanCardFlowState';
+import { useScanCardNfcLifecycle } from './auth/hooks/useScanCardNfcLifecycle';
+import { resolveScanResultMessage, toFriendlyMessage } from './auth/utils/scanCardResult';
 
 type ModeOption = {
   value: ScanMode;
 };
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ScanCard'>;
-
-type ScanPhase = 'pin' | 'working' | 'success' | 'error';
 
 const PIN_LENGTH = 4;
 
@@ -54,51 +54,6 @@ const COLORS = {
   signal: '#0A7CF2',
   signalBright: '#2897FF',
   success: '#10B981',
-};
-
-const suggestionForCode = (
-  _mode: ScanMode,
-  code: WalletActionCode | undefined,
-  translate: (key: any) => string,
-): string | null => {
-  switch (code) {
-    case 'PIN_ALREADY_INITIALISED':
-      return translate('scanHintSwitchToSignin');
-    case 'PIN_NOT_INITIALISED':
-      return translate('scanHintRunInitFirst');
-    case 'PIN_INVALID':
-      return translate('scanHintPinInvalid');
-    case 'TRANSPORT_ERROR':
-      return translate('scanHintKeepCardClose');
-    default:
-      return null;
-  }
-};
-
-const toFriendlyMessage = (raw: string, fallback: string): string => {
-  const message = String(raw ?? '').trim();
-  if (!message) {
-    return fallback;
-  }
-
-  const lower = message.toLowerCase();
-  if (
-    lower.includes('session')
-    || lower.includes('payload')
-    || lower.includes('selector')
-    || lower.includes('nonce')
-    || lower.includes('rpc')
-    || lower.includes('sequence')
-    || lower.includes('status word')
-    || lower.includes('sw:')
-    || lower.includes('eth_sendrawtransaction')
-    || lower.includes('tx ')
-    || /0x[a-f0-9]{10,}/i.test(message)
-  ) {
-    return fallback;
-  }
-
-  return message.length > 140 ? fallback : message;
 };
 
 const SuccessIcon = ({ color }: { color: string }) => {
@@ -153,13 +108,41 @@ const ScanCardScreen: React.FC<Props> = ({ navigation, route }) => {
       });
   }, [flowConfig, navigation]);
 
-  const [mode, setMode] = useState<ScanMode>(initialMode ?? 'init');
-  const [pinValue, setPinValue] = useState('');
-  const [pinStage, setPinStage] = useState<'create' | 'confirm'>('create');
-  const [confirmPinValue, setConfirmPinValue] = useState('');
-  const [phase, setPhase] = useState<ScanPhase>('pin');
-  const [statusMessage, setStatusMessage] = useState(t('scanStatusEnterSetup'));
-  const [stageLogs, setStageLogs] = useState<string[]>([]);
+  const modeInstructions = useMemo(
+    () => ({
+      initCreate: t('scanStatusCreatePin'),
+      initConfirm: t('scanStatusConfirmPin'),
+      signin: t('scanStatusEnterPinSignIn'),
+    }),
+    [t],
+  );
+
+  const {
+    appendStageLog,
+    confirmPinValue,
+    handlePinChange,
+    isVisualScanning,
+    mode,
+    operationTokenRef,
+    phase,
+    pinStage,
+    pinValue,
+    resetForMode,
+    setConfirmPinValue,
+    setPhase,
+    setPinStage,
+    setPinValue,
+    setStageLogs,
+    setStatusMessage,
+    stageLogs,
+    statusMessage,
+  } = useScanCardFlowState({
+    initialMode,
+    modeInstructions,
+    onStatusChange,
+    prefilledPin,
+    t,
+  });
   const [allowBackdropClose, setAllowBackdropClose] = useState(false);
 
   const indicatorAnim = useRef(new Animated.Value(0)).current;
@@ -170,25 +153,12 @@ const ScanCardScreen: React.FC<Props> = ({ navigation, route }) => {
   const scanSignalAnim = useRef(new Animated.Value(0)).current;
 
   const [tabWidth, setTabWidth] = useState(0);
-  const operationTokenRef = useRef(0);
-  const hasPrefilledPin = Boolean(prefilledPin);
-  const isAutoStartPending = visible && hasPrefilledPin && phase === 'pin';
-  const isVisualScanning = phase === 'working' || isAutoStartPending;
-
-  const modeInstructions = useMemo(
-    () => ({
-      initCreate: t('scanStatusCreatePin'),
-      initConfirm: t('scanStatusConfirmPin'),
-      signin: t('scanStatusEnterPinSignIn'),
-    }),
-    [t],
-  );
 
   useEffect(() => {
     return () => {
       operationTokenRef.current += 1;
     };
-  }, []);
+  }, [operationTokenRef]);
 
   useEffect(() => {
     onScanningChange?.(phase === 'working');
@@ -235,20 +205,6 @@ const ScanCardScreen: React.FC<Props> = ({ navigation, route }) => {
     [onShowToast],
   );
 
-  const appendStageLog = useCallback((raw: string) => {
-    const message = raw.trim();
-    if (!message) {
-      return;
-    }
-
-    setStageLogs(previous => {
-      if (previous[0] === message) {
-        return previous;
-      }
-      return [message];
-    });
-  }, []);
-
   const shakeDialog = useCallback(() => {
     Animated.sequence([
       Animated.timing(shakeAnim, { toValue: 8, duration: 50, useNativeDriver: true }),
@@ -257,48 +213,19 @@ const ScanCardScreen: React.FC<Props> = ({ navigation, route }) => {
       Animated.timing(shakeAnim, { toValue: 0, duration: 50, useNativeDriver: true }),
     ]).start();
   }, [shakeAnim]);
-
-  const openNfcSettings = useCallback(async () => {
-    try {
-      const manager = NfcManager as unknown as { goToNfcSetting?: () => Promise<void> };
-      if (manager.goToNfcSetting) {
-        await manager.goToNfcSetting();
-        return;
-      }
-
-      await Linking.openSettings();
-    } catch {
-      showToast(t('scanOpenSettingsFail'), 'error');
-    }
-  }, [showToast, t]);
-
-  const resetForMode = useCallback(
-    (nextMode: ScanMode, snapIndicator = true) => {
-      operationTokenRef.current += 1;
-      if (mode !== nextMode) {
-        setMode(nextMode);
-      }
-      setPhase('pin');
-      setPinStage('create');
-      setPinValue('');
-      setConfirmPinValue('');
-      setStageLogs([]);
-      const instructions =
-        nextMode === 'init' ? modeInstructions.initCreate : modeInstructions.signin;
-      setStatusMessage(instructions);
-      onStatusChange?.(instructions);
-      if (snapIndicator) {
-        indicatorAnim.setValue(nextMode === 'init' ? 0 : 1);
-      }
-    },
-    [indicatorAnim, mode, modeInstructions, onStatusChange],
-  );
+  const { ensureNfcReady } = useScanCardNfcLifecycle({
+    isNfcEnabled,
+    showToast,
+    shakeDialog,
+    t,
+  });
 
   useEffect(() => {
     if (visible) {
       setAllowBackdropClose(false);
       const startMode = initialMode ?? mode;
       resetForMode(startMode, false);
+      indicatorAnim.setValue(startMode === 'init' ? 0 : 1);
       if (prefilledPin) {
         setPinValue(prefilledPin);
         setStatusMessage(t('scanStatusHoldCard'));
@@ -328,7 +255,8 @@ const ScanCardScreen: React.FC<Props> = ({ navigation, route }) => {
     }
     setAllowBackdropClose(false);
     resetForMode(initialMode ?? 'init');
-  }, [visible, mode, resetForMode, modalScaleAnim, modalOpacityAnim, initialMode, prefilledPin, onStatusChange, t]);
+    indicatorAnim.setValue((initialMode ?? 'init') === 'init' ? 0 : 1);
+  }, [visible, mode, resetForMode, modalScaleAnim, modalOpacityAnim, initialMode, prefilledPin, onStatusChange, t, indicatorAnim, setPinValue, setStatusMessage]);
 
   const handleModeChange = useCallback(
     (nextMode: ScanMode) => {
@@ -345,39 +273,9 @@ const ScanCardScreen: React.FC<Props> = ({ navigation, route }) => {
     [indicatorAnim, mode, resetForMode],
   );
 
-  const handlePinChange = useCallback(
-    (value: string) => {
-      const next = value.replace(/\D/g, '').slice(0, PIN_LENGTH);
-      if (mode === 'init' && pinStage === 'confirm') {
-        setConfirmPinValue(next);
-      } else {
-        setPinValue(next);
-      }
-    },
-    [mode, pinStage],
-  );
-
   const beginScan = useCallback(async () => {
-    let currentNfcEnabled = isNfcEnabled;
-    if (currentNfcEnabled !== true) {
-      try {
-        currentNfcEnabled = await NfcManager.isEnabled();
-      } catch {
-        currentNfcEnabled = isNfcEnabled;
-      }
-    }
-
-    if (currentNfcEnabled === false) {
-      Alert.alert(t('scanNfcDisabledTitle'), t('scanNfcDisabledMessage'), [
-        {
-          text: t('scanOpenSettings'),
-          onPress: () => {
-            openNfcSettings().catch(() => undefined);
-          },
-        },
-      ]);
-      showToast(t('scanToastNfcDisabled'), 'error');
-      shakeDialog();
+    const nfcReady = await ensureNfcReady();
+    if (!nfcReady) {
       return;
     }
 
@@ -430,17 +328,13 @@ const ScanCardScreen: React.FC<Props> = ({ navigation, route }) => {
         }
 
         setPhase('success');
-        const successMessage = toFriendlyMessage(result.message, t('scanStatusGenericSuccess'));
+        const successMessage = resolveScanResultMessage(mode, result, t);
         setStatusMessage(successMessage);
         appendStageLog(successMessage);
         onStatusChange?.(successMessage);
         showToast(t('scanToastSuccess'), 'success');
       } else {
-        const codeHint = suggestionForCode(mode, result.code, t);
-        const failureMessage = codeHint ?? toFriendlyMessage(
-          result.message,
-          t('scanErrorGeneric'),
-        );
+        const failureMessage = resolveScanResultMessage(mode, result, t);
         setPhase('error');
         setStatusMessage(failureMessage);
         appendStageLog(failureMessage);
@@ -460,15 +354,18 @@ const ScanCardScreen: React.FC<Props> = ({ navigation, route }) => {
       shakeDialog();
     }
   }, [
-    isNfcEnabled,
+    ensureNfcReady,
     mode,
+    operationTokenRef,
     onFlowScan,
     onStatusChange,
     onSuccess,
-    openNfcSettings,
     appendStageLog,
     pinValue,
     prefilledPin,
+    setPhase,
+    setStageLogs,
+    setStatusMessage,
     showToast,
     shakeDialog,
     t,
@@ -524,6 +421,9 @@ const ScanCardScreen: React.FC<Props> = ({ navigation, route }) => {
     onStatusChange,
     pinStage,
     pinValue,
+    setConfirmPinValue,
+    setPinStage,
+    setStatusMessage,
     shakeDialog,
     showToast,
     t,
@@ -572,7 +472,7 @@ const ScanCardScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const headerTitle = phase === 'success' ? t('scanPrimaryComplete') : t('scanPrimaryScanCard');
   const stageMessage = stageLogs[0] ?? (phase === 'working' ? t('scanStageWaitingHandshake') : null);
-  const showShellStatus = phase !== 'pin' || prefilledPin || types === 'flow';
+  const showShellStatus = phase !== 'pin' || Boolean(prefilledPin) || types === 'flow';
   const isScanExperience = showShellStatus;
   const pinPromptTitle =
     mode === 'init'
@@ -611,37 +511,16 @@ const ScanCardScreen: React.FC<Props> = ({ navigation, route }) => {
   }
 
   return (
-    <View style={styles.screenRoot}>
-      <StatusBar
-        barStyle={resolvedTheme === 'light' ? 'dark-content' : 'light-content'}
-        backgroundColor="#08111B"
-      />
-      <SafeAreaView style={styles.screenRoot} edges={['top', 'bottom']}>
-        <Pressable
-          style={StyleSheet.absoluteFill}
-          onPress={() => {
-            if (!allowBackdropClose) {
-              return;
-            }
-            handleClose();
-          }}
-        />
-
-        <Animated.View
-          style={[
-            styles.dialog,
-            isScanExperience ? styles.scanShell : styles.authShell,
-            styles.screenDialog,
-            {
-              opacity: modalOpacityAnim,
-              transform: [
-                { scale: modalScaleAnim },
-                { translateX: shakeAnim },
-              ],
-            },
-          ]}
-        >
-          {isScanExperience ? (
+    <ScanCardShell
+      resolvedTheme={resolvedTheme}
+      allowBackdropClose={allowBackdropClose}
+      isScanExperience={isScanExperience}
+      modalOpacityAnim={modalOpacityAnim}
+      modalScaleAnim={modalScaleAnim}
+      shakeAnim={shakeAnim}
+      onClose={handleClose}
+    >
+      {isScanExperience ? (
             <View style={styles.scanLayout}>
               <View style={styles.scanHeaderRow}>
                 <Pressable style={styles.scanBackButton} onPress={handleClose} hitSlop={10}>
@@ -895,9 +774,7 @@ const ScanCardScreen: React.FC<Props> = ({ navigation, route }) => {
               ) : null}
             </>
           )}
-        </Animated.View>
-      </SafeAreaView>
-    </View>
+    </ScanCardShell>
   );
 };
 

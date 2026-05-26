@@ -12,7 +12,6 @@ export const ROUTES = {
   Home: 'Home',
   QRScanner: 'QRScanner',
   ActivateSuccess: 'ActivateSuccess',
-  SendTransaction: 'SendTransaction',
   WalletDetails: 'WalletDetails',
   WalletRelayRequest: 'WalletRelayRequest',
   SendPick: 'SendPick',
