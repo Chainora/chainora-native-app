@@ -1,7 +1,7 @@
 import { Point, Signature } from '@noble/secp256k1';
 
-import { hexToBytes } from '../../utils/encoding';
-import { bytesToHex } from '../../utils/encoding';
+import { hexToBytes } from '@utils/encoding';
+import { bytesToHex } from '@utils/encoding';
 
 export type RecoveredSignature = {
   r: string;
@@ -138,7 +138,6 @@ export const recoverSignature = (
 ): RecoveredSignature => {
   const signature = derToSignature(signatureDer);
   const canonical = signature.normalizeS();
-  const compact = canonical.toCompactRawBytes();
   const expectedKey = toCanonicalPublicKeyBytes(publicKeyHex);
 
   let recovery = -1;

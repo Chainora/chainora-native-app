@@ -5,7 +5,7 @@ import { getActiveNetwork, type NetworkConfig } from '../config/network';
 import {
   addRecentActivities,
   type AddRecentActivityParams,
-} from '../features/wallet/recentActivityStorage';
+} from '@services/storage/recentActivityStorage';
 import { getPublicViemClient } from './web3Client';
 
 const INITIAL_SCAN_LIMIT = 40n;

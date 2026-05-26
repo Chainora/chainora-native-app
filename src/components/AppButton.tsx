@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, StyleProp, ViewStyle } from 'react-native';
 
-import { useSettings } from '../features/settings';
+import { useSettings } from '@hooks/useSettings';
 import type { ThemeTokens } from '../types/theme/colors';
 
 type ButtonVariant = 'primary' | 'secondary' | 'text';

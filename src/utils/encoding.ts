@@ -24,7 +24,7 @@ export const bytesToUtf8 = (bytes: Uint8Array): string => {
       .map(byte => `%${byte.toString(16).padStart(2, '0')}`)
       .join('');
     return decodeURIComponent(hexString);
-  } catch (error) {
+  } catch {
     throw new Error('Failed to decode UTF-8 payload');
   }
 };

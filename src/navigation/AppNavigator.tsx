@@ -7,39 +7,33 @@ import {
 } from '@react-navigation/native-stack';
 import { enableScreens } from 'react-native-screens';
 
-import {
-  ActivatePinScreen,
-  ActivateSuccessScreen,
-  EcdhBackupScreen,
-  LoginPinScreen,
-  ScanCardScreen,
-  WelcomeScreen,
-} from '../screens/auth';
-import {
-  ChangePinScreen,
-  CurrencySettingsScreen,
-  GeneralScreen,
-  LanguageSettingsScreen,
-  SettingsScreen,
-} from '../screens/settings';
-import {
-  HomeScreen,
-  QRScannerScreen,
-  AddTokenScreen,
-  ReceiveScreen,
-  SendScreen,
-  SendPickScreen,
-  TokenManageScreen,
-  TouchSignScreen,
-  WalletDetailsScreen,
-} from '../screens/wallet';
-import { WalletRelayRequestScreen } from '../screens/relay';
-import Header from '../components/layout/header';
-import { useSettings } from '../features/settings';
-import { walletRelaySessionManager } from '../services/walletRelaySessionManager';
-import type { RootStackParamList } from './routes/rootStackParamList';
-import { navigationRef } from './navigationRef';
-import { ROUTES } from './routes/routes';
+import ActivatePinScreen from '@screens/ActivatePin';
+import ActivateSuccessScreen from '@screens/ActivateSuccess';
+import EcdhBackupScreen from '@screens/EcdhBackup';
+import LoginPinScreen from '@screens/LoginPin';
+import ScanCardScreen from '@screens/ScanCard';
+import WelcomeScreen from '@screens/Welcome';
+import SettingsScreen from '@screens/Settings';
+import GeneralScreen from '@screens/General';
+import LanguageSettingsScreen from '@screens/LanguageSettings';
+import CurrencySettingsScreen from '@screens/CurrencySettings';
+import ChangePinScreen from '@screens/ChangePin';
+import HomeScreen from '@screens/Home';
+import QRScannerScreen from '@screens/QRScanner';
+import AddTokenScreen from '@screens/AddToken';
+import ReceiveScreen from '@screens/Receive';
+import SendScreen from '@screens/Send';
+import SendPickScreen from '@screens/SendPick';
+import TokenManageScreen from '@screens/TokenManage';
+import TouchSignScreen from '@screens/TouchSign';
+import WalletDetailsScreen from '@screens/WalletDetails';
+import WalletRelayRequestScreen from '@screens/WalletRelayRequest';
+import Header from '@components/layout/header';
+import { useSettings } from '@hooks/useSettings';
+import { walletRelaySessionManager } from '@services/walletRelaySessionManager';
+import type { RootStackParamList } from '@navigation/routes/rootStackParamList';
+import { navigationRef } from '@navigation/navigationRef';
+import { ROUTES } from '@navigation/routes/routes';
 
 enableScreens(true);
 

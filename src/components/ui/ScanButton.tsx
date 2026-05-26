@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View, Easing } from 'react-native';
 
-import { THEME } from '../../types/theme/colors';
+import { THEME } from '@app-types/theme/colors';
 
 type ScanButtonProps = {
   label?: string;

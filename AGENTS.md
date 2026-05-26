@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-`src/` holds all app code. Keep screen flows in `src/screens/`, reusable UI in `src/components/`, domain logic in `src/features/`, external integrations in `src/services/`, navigation types/routes in `src/navigation/`, shared config in `src/config/`, and helpers in `src/lib/` or `src/utils/`. Assets and fonts live under `src/assets/`. Native platform projects stay in `android/` and `ios/`. Utility scripts such as `scripts/deploy-android.sh` and `scripts/setup-android-sdk.sh` are for local/devops tasks, not runtime logic.
+`src/` holds all app code. Keep screen flows in `src/screens/`, reusable UI in `src/components/`, app-wide React hooks in `src/hooks/`, global providers/state in `src/store/`, external integrations and side-effect storage in `src/services/`, navigation types/routes in `src/navigation/`, shared config in `src/config/`, constants in `src/constants/`, shared types in `src/types/`, and pure helpers in `src/lib/` or `src/utils/`. `src/features/` is reserved for future isolated modules only. Assets and fonts live under `src/assets/`. Native platform projects stay in `android/` and `ios/`. Utility scripts such as `scripts/deploy-android.sh` and `scripts/setup-android-sdk.sh` are for local/devops tasks, not runtime logic.
 
 ## Build, Test, and Development Commands
 Use Yarn 1 with Node 20+.
@@ -27,7 +27,7 @@ Keep user-visible copy behind existing `t('...')` keys whenever possible. Do not
 Preserve layout behavior, not just appearance: safe areas, keyboard avoidance, scroll reachability, sticky/bottom CTA visibility, and Android/iOS spacing should stay intact after the edit. For ambiguous design requests, default to the minimal diff that satisfies the requirement instead of broad visual experimentation.
 
 ## Testing Guidelines
-Jest uses the `react-native` preset, and tests should be colocated as `*.test.ts` or `*.test.tsx`. Coverage is currently light, so add tests for new logic in `src/services/`, `src/features/`, and parsing/storage helpers when behavior changes. For sensitive NFC, wallet, or Web3 flows, pair `yarn test` with `yarn -s tsc --noEmit` and at least one device/emulator verification.
+Jest uses the `react-native` preset, and tests should be colocated as `*.test.ts` or `*.test.tsx`. Coverage is currently light, so add tests for new logic in `src/services/`, `src/hooks/`, `src/utils/`, and parsing/storage helpers when behavior changes. For sensitive NFC, wallet, or Web3 flows, pair `yarn test` with `yarn -s tsc --noEmit` and at least one device/emulator verification.
 
 ## Commit & Pull Request Guidelines
 Recent history shows `feat:`, `fix:`, and `chore:` prefixes alongside a few informal messages. Standardize on short imperative Conventional Commit style, for example `fix: tighten wallet relay timeout`. PRs should include scope, risk areas, commands run, linked issue/task, and screenshots or recordings for UI changes.

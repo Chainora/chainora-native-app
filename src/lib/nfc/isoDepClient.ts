@@ -18,7 +18,7 @@ const requestIsoDepWithRetry = async (): Promise<void> => {
       alertMessage: 'Hold near your Chainora card',
     });
     return;
-  } catch (firstError) {
+  } catch {
     await safeCancelTechnology();
     await sleep(TECH_REQUEST_RETRY_DELAY_MS);
     await NfcManager.requestTechnology(NfcTech.IsoDep, {
@@ -58,7 +58,7 @@ export const withIsoDep = async <T>(callback: IsoDepSession<T>): Promise<T> => {
 const safeCancelTechnology = async () => {
   try {
     await NfcManager.cancelTechnologyRequest();
-  } catch (error) {
+  } catch {
     // ignore cancel failures so we do not mask the original error
   }
 };

@@ -1,27 +1,11 @@
-import type { ToastType } from '../features/toast';
-import type { WalletActionResult } from './cardService';
+import type { ScanCardFlowConfig } from '@app-types/wallet';
 
-export type ScanMode = 'init' | 'signin';
-export type ScanCardFlowKind = 'auth' | 'flow';
-
-export type ScanCardFlowSuccess = {
-  result: WalletActionResult;
-  mode: ScanMode;
-};
-
-export type ScanCardFlowConfig = {
-  isNfcEnabled: boolean | null;
-  initialMode?: ScanMode;
-  prefilledPin?: string;
-  flowType?: ScanCardFlowKind;
-  autoStartDelayMs?: number;
-  onClose?: () => void | Promise<void>;
-  onStatusChange?: (status: string) => void;
-  onScanningChange?: (isScanning: boolean) => void;
-  onShowToast?: (message: string, type: ToastType) => void;
-  onSuccess?: (details: ScanCardFlowSuccess) => void | Promise<void>;
-  onFlowScan?: (setStageStatus: (status: string) => void) => Promise<WalletActionResult>;
-};
+export type {
+  ScanCardFlowConfig,
+  ScanCardFlowKind,
+  ScanCardFlowSuccess,
+  ScanMode,
+} from '@app-types/wallet';
 
 const scanCardFlows = new Map<string, ScanCardFlowConfig>();
 

@@ -1,8 +1,8 @@
 import React, { useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { useSettings } from '../../features/settings';
-import type { ThemeTokens } from '../../types/theme/colors';
+import { useSettings } from '@hooks/useSettings';
+import type { ThemeTokens } from '@app-types/theme/colors';
 
 type StepProgressBarProps = {
   currentStep: number;

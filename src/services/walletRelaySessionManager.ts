@@ -11,6 +11,15 @@ import type {
   WalletRelayPairingPayload,
 } from './walletRelayProtocol';
 import { WALLET_RELAY_MESSAGE_TYPES } from './walletRelayProtocol';
+import type {
+  WalletRelayPendingRequest,
+  WalletRelaySnapshot,
+} from '@app-types/wallet';
+
+export type {
+  WalletRelayPendingRequest,
+  WalletRelaySnapshot,
+} from '@app-types/wallet';
 
 type RelaySessionState = {
   sessionId: string;
@@ -26,31 +35,9 @@ type RelaySessionState = {
   reconnectTimer: ReturnType<typeof setTimeout> | null;
 };
 
-export type WalletRelayPendingRequest = {
-  requestId: string;
-  sessionId: string;
-  type: typeof WALLET_RELAY_MESSAGE_TYPES.signMessage | typeof WALLET_RELAY_MESSAGE_TYPES.signTransaction;
-  chainId: string;
-  origin: string;
-  address: string;
-  payloadHash: string;
-  payload: Record<string, unknown>;
-  requiresSwitch: boolean;
-};
+type RelayManagerSnapshot = WalletRelaySnapshot;
 
-type RelayManagerSnapshot = {
-  activeAccount: string;
-  requestModalSuppressed: boolean;
-  sessions: Array<{
-    sessionId: string;
-    chainId: string;
-    boundAddress: string;
-    connectedAt: number;
-  }>;
-  pendingRequests: WalletRelayPendingRequest[];
-};
-
-type Listener = (state: RelayManagerSnapshot) => void;
+type Listener = (state: WalletRelaySnapshot) => void;
 
 type PendingConnectRequest = {
   sessionId: string;

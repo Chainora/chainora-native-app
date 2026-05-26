@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { Dimensions, StyleSheet, View } from 'react-native';
 
 import { FloatingOrb } from './FloatingOrb';
-import { THEME } from '../../../types/theme/colors';
+import { THEME } from '@app-types/theme/colors';
 
 type OrbConfig = {
   key: string;

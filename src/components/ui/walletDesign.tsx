@@ -10,7 +10,7 @@ import {
   ViewStyle,
 } from 'react-native';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
-import { useSettings } from '../../features/settings';
+import { useSettings } from '@hooks/useSettings';
 
 export const WALLET_COLORS = {
   background: '#08111B',

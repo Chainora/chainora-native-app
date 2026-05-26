@@ -1,5 +1,5 @@
-import type { ScanMode } from '../../services/scanCardFlowRegistry';
-import type { WalletHomeNetworkKey } from '../../config/network';
+import type { ScanMode } from '@services/scanCardFlowRegistry';
+import type { WalletHomeNetworkKey } from '@config/network';
 
 import { ROUTES } from './routes';
 

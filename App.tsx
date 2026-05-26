@@ -1,10 +1,10 @@
 import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { AuthProvider } from './src/features/auth';
-import { SettingsProvider } from './src/features/settings';
-import { ToastProvider } from './src/features/toast';
-import { AppNavigator } from './src/navigation';
+import { AuthProvider } from '@store/auth';
+import { SettingsProvider } from '@store/settings';
+import { ToastProvider } from '@store/toast';
+import { AppNavigator } from '@navigation';
 
 function App(): React.JSX.Element {
   return (

@@ -3,9 +3,9 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
 import { AppButton } from '../AppButton';
-import { useSettings } from '../../features/settings';
-import type { RecentActivity } from '../../features/wallet/recentActivityStorage';
-import type { ThemeTokens } from '../../types/theme/colors';
+import { useSettings } from '@hooks/useSettings';
+import type { RecentActivity } from '@app-types/wallet';
+import type { ThemeTokens } from '@app-types/theme/colors';
 
 type RecentActivitySectionProps = {
   activities: RecentActivity[];

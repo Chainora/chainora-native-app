@@ -5,6 +5,23 @@ import * as secp from '@noble/secp256k1';
 import { buildSelectApdu, parseApduResponse } from '../lib/apdu';
 import { withIsoDep, IsoDepClient } from '../lib/nfc/isoDepClient';
 import { bytesToHex, hexToBytes } from '../utils/encoding';
+import type {
+  CardAttestationResult,
+  CardCertificateResult,
+  WalletActionCode,
+  WalletActionResult,
+  WalletSignatureResult,
+  WalletSignAndAttestResult,
+} from '@app-types/wallet';
+
+export type {
+  CardAttestationResult,
+  CardCertificateResult,
+  WalletActionCode,
+  WalletActionResult,
+  WalletSignatureResult,
+  WalletSignAndAttestResult,
+} from '@app-types/wallet';
 
 const WALLET_AID = new Uint8Array([0xf0, 0x56, 0x4e, 0x43, 0x48, 0x57, 0x01]);
 const WALLET_CLA = 0x80;
@@ -51,52 +68,6 @@ type WalletCommandOptions = {
   p1?: number;
   p2?: number;
   le?: number;
-};
-
-export type WalletActionCode =
-  | 'PIN_ALREADY_INITIALISED'
-  | 'PIN_NOT_INITIALISED'
-  | 'PIN_INVALID'
-  | 'PIN_UPDATE_FAILED'
-  | 'KEYPAIR_FAILURE'
-  | 'PUBLIC_KEY_FAILURE'
-  | 'RESET_FAILED'
-  | 'SELECT_FAILED'
-  | 'PIN_STATE_UNAVAILABLE'
-  | 'TRANSPORT_ERROR'
-  | 'BACKUP_INIT_FAILED'
-  | 'BACKUP_EXPORT_FAILED'
-  | 'BACKUP_IMPORT_FAILED'
-  | 'CARD_NOT_CHAINORA'
-  | 'UNKNOWN';
-
-export type WalletActionResult = {
-  ok: boolean;
-  message: string;
-  statusWord?: string;
-  publicKeyHex?: string;
-  ethAddress?: string;
-  code?: WalletActionCode;
-  step?: string;
-};
-
-export type WalletSignatureResult = WalletActionResult & {
-  signatureDer?: Uint8Array;
-  signatureDerHex?: string;
-  deviceCertificate?: Uint8Array;
-};
-
-export type WalletSignAndAttestResult<TMeta = unknown> = WalletSignatureResult & {
-  attestationProof?: Uint8Array;
-  challengeMeta?: TMeta;
-};
-
-export type CardCertificateResult = WalletActionResult & {
-  deviceCertificate?: Uint8Array;
-};
-
-export type CardAttestationResult = WalletActionResult & {
-  attestationProof?: Uint8Array;
 };
 
 export type VerifiedWalletSession = {

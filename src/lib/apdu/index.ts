@@ -1,4 +1,4 @@
-import { bytesToHex } from '../../utils/encoding';
+import { bytesToHex } from '@utils/encoding';
 
 export type StatusWord = {
   sw1: number;

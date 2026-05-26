@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { THEME } from '../../types/theme/colors';
+import { THEME } from '@app-types/theme/colors';
 
 type NfcIconProps = {
   size?: number;

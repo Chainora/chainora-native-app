@@ -4,7 +4,7 @@ import { NavigationProp, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
-import { useSettings } from '../../../features/settings';
+import { useSettings } from '@hooks/useSettings';
 import { createStyles } from './styles';
 
 export type HeaderProps = {
