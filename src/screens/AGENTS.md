@@ -1,30 +1,19 @@
 # Screens Agent Guide
 
 ## Scope
-
 Screen-level UI and flow orchestration.
 
-## Prompt Update Rule
+## Rules
+- Keep screens focused on rendering and coordinating hooks, dialogs, and navigation.
+- Do not import `@services/*`, native SDKs, direct storage, or deep parent chains from screens.
+- Preserve route params, callbacks, service call order, translation keys, safe areas, keyboard behavior, scroll reachability, and sticky/bottom CTA visibility.
 
-After screen changes, update this file with affected screens, user flows, and side effects.
-
-## Fast Navigation
-
-- Screen components render and coordinate hooks/dialogs. They must not import `@services/*`, native SDKs, direct storage, or deep parent chains.
-- Every top-level screen lives in a PascalCase folder: `src/screens/<Screen>/index.tsx` owns rendering and orchestration; `src/screens/<Screen>/<Screen>.styles.ts` owns all `StyleSheet` objects and style-only constants.
-
-## Latest Update
-
-- Split every screen folder to exactly `index.tsx` plus `<Screen>.styles.ts`; removed the shared wallet-flow style file by copying used styles into SendPick, Send, Receive, TouchSign, TokenManage, and AddToken.
-- Legacy lowercase auth/relay/wallet groups were flattened into top-level PascalCase screen folders.
-- Auth, relay, and wallet screens route service/native side effects through global hooks. Auth support code lives in `src/components/auth`, `src/hooks`, and `src/utils`.
-- Home and ChangePin also use hook facades for storage/relay/card scan flows.
-- Wallet route implementations now live under `src/screens/Home`, `src/screens/SendPick`, `src/screens/Send`, `src/screens/Receive`, `src/screens/TouchSign`, `src/screens/TokenManage`, `src/screens/AddToken`, `src/screens/QRScanner`, and `src/screens/WalletDetails`; shared wallet hooks/services/components live in global layers.
-- `QRScannerScreen` now supports create-pool QR signing flow (`chainora-native-wallet:create-pool`) in addition to auth/username flows.
-- Added scanned payload details rendering for create-pool variables and dynamic success messaging.
-- Reset/progress logic now guards optional `sessionId` to avoid invalid auth-progress calls for non-auth QR features.
+## When Editing
+- Change only the named screen and the smallest required supporting pieces for UI-only requests.
+- Match adjacent visual language and reuse existing primitives/tokens before adding new styles.
+- Keep top-level screens in PascalCase folders: `src/screens/<Screen>/index.tsx` for orchestration and `src/screens/<Screen>/<Screen>.styles.ts` for styles.
+- Keep user-visible copy behind existing `t('...')` keys unless locale files are updated in the same change.
 
 ## Verify
-
-- yarn -s tsc --noEmit
-- Manually test the changed user paths on device/emulator.
+- Run `yarn -s tsc --noEmit`.
+- Device/emulator check changed UI, NFC, wallet, or Web3 flows.
