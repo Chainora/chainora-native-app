@@ -1,6 +1,6 @@
 import { createPublicClient, defineChain, fallback, http, type Chain, type PublicClient } from 'viem';
 
-import { NETWORKS, type NetworkConfig } from '../config/network';
+import type { NetworkConfig } from '../config/network';
 
 const RPC_TIMEOUT_MS = 12_000;
 const RPC_RETRY_COUNT = 2;
@@ -50,9 +50,7 @@ const toChain = (network: NetworkConfig): Chain =>
     },
   });
 
-const chains = Object.values(NETWORKS).map(toChain);
-
-const publicClientByChainId = new Map<number, PublicClient>();
+const publicClientByNetwork = new Map<string, PublicClient>();
 
 const buildTransport = (network: NetworkConfig) =>
   fallback(
@@ -68,21 +66,17 @@ const buildTransport = (network: NetworkConfig) =>
   );
 
 export const getPublicViemClient = (network: NetworkConfig): PublicClient => {
-  const cached = publicClientByChainId.get(network.chainId);
+  const cacheKey = `${network.key}:${network.rpcUrl}`;
+  const cached = publicClientByNetwork.get(cacheKey);
   if (cached) {
     return cached;
   }
 
-  const chain = chains.find(item => item.id === network.chainId);
-  if (!chain) {
-    throw new Error(`Unsupported chainId ${network.chainId}`);
-  }
-
   const client = createPublicClient({
-    chain,
+    chain: toChain(network),
     transport: buildTransport(network),
   });
 
-  publicClientByChainId.set(network.chainId, client);
+  publicClientByNetwork.set(cacheKey, client);
   return client;
 };

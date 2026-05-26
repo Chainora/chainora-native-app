@@ -1,9 +1,6 @@
 import {
-  NETWORKS,
-  WALLET_HOME_NETWORK_KEYS,
-  WALLET_NATIVE_PRICE_USD,
+  getWalletHomeNetworks,
   type NetworkConfig,
-  type WalletHomeNetworkKey,
 } from '../../config/network';
 import type { RecentActivity } from './recentActivityStorage';
 
@@ -14,6 +11,7 @@ export type PortfolioAssetSnapshot = {
   usdPrice: number;
   usdValue: number;
   error?: string;
+  priceUnavailable?: boolean;
 };
 
 export type PortfolioDayChange = {
@@ -21,6 +19,10 @@ export type PortfolioDayChange = {
   percent: number;
   direction: 'up' | 'down' | 'flat';
 };
+
+export type FiatCurrency = 'usd' | 'vnd';
+
+const USD_TO_VND_RATE = 26_000;
 
 const usdFormatter = new Intl.NumberFormat('en-US', {
   minimumFractionDigits: 2,
@@ -32,6 +34,16 @@ const compactUsdFormatter = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 2,
 });
 
+const vndFormatter = new Intl.NumberFormat('vi-VN', {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0,
+});
+
+const compactVndFormatter = new Intl.NumberFormat('vi-VN', {
+  notation: 'compact',
+  maximumFractionDigits: 1,
+});
+
 export const parseDisplayAmount = (value: string): number => {
   const parsed = Number.parseFloat(value.replace(/,/g, '').trim());
   if (!Number.isFinite(parsed) || parsed < 0) {
@@ -40,16 +52,15 @@ export const parseDisplayAmount = (value: string): number => {
   return parsed;
 };
 
-export const getUsdPriceForNetwork = (networkKey: WalletHomeNetworkKey): number =>
-  WALLET_NATIVE_PRICE_USD[networkKey];
-
 export const buildPortfolioAssetSnapshot = (params: {
   network: NetworkConfig;
   balanceFormatted: string;
   balanceWei?: bigint;
+  usdPrice?: number;
   error?: string;
+  priceUnavailable?: boolean;
 }): PortfolioAssetSnapshot => {
-  const usdPrice = getUsdPriceForNetwork(params.network.key as WalletHomeNetworkKey);
+  const usdPrice = Number.isFinite(params.usdPrice) ? params.usdPrice ?? 0 : 0;
   const usdValue = parseDisplayAmount(params.balanceFormatted) * usdPrice;
 
   return {
@@ -59,6 +70,7 @@ export const buildPortfolioAssetSnapshot = (params: {
     usdPrice,
     usdValue,
     error: params.error,
+    priceUnavailable: params.priceUnavailable,
   };
 };
 
@@ -71,11 +83,40 @@ export const sortPortfolioAssets = (assets: PortfolioAssetSnapshot[]): Portfolio
 export const mergePortfolioActivities = (activities: RecentActivity[]): RecentActivity[] =>
   [...activities].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
 
-export const formatUsdValue = (value: number, compact = false): string => {
-  if (!Number.isFinite(value)) {
-    return '$0.00';
+const toFiatValue = (valueUsd: number, currency: FiatCurrency): number => {
+  if (!Number.isFinite(valueUsd)) {
+    return 0;
   }
-  return compact ? `$${compactUsdFormatter.format(value)}` : `$${usdFormatter.format(value)}`;
+  return currency === 'vnd' ? valueUsd * USD_TO_VND_RATE : valueUsd;
+};
+
+export const getFiatUnit = (currency: FiatCurrency): string =>
+  (currency === 'vnd' ? '\u20AB' : '$');
+
+export const formatFiatAmount = (
+  valueUsd: number,
+  currency: FiatCurrency = 'usd',
+  compact = false,
+): string => {
+  const value = toFiatValue(valueUsd, currency);
+
+  if (currency === 'vnd') {
+    return compact ? compactVndFormatter.format(value) : vndFormatter.format(value);
+  }
+  return compact ? compactUsdFormatter.format(value) : usdFormatter.format(value);
+};
+
+export const formatFiatValue = (
+  valueUsd: number,
+  currency: FiatCurrency = 'usd',
+  compact = false,
+): string => {
+  const amount = formatFiatAmount(valueUsd, currency, compact);
+  return currency === 'vnd' ? `${amount} \u20AB` : `$${amount}`;
+};
+
+export const formatUsdValue = (value: number, compact = false): string => {
+  return formatFiatValue(value, 'usd', compact);
 };
 
 export const calculatePortfolioDayChange = (
@@ -107,6 +148,17 @@ export const formatSignedUsdDelta = (value: number): string => {
   return absValue;
 };
 
+export const formatSignedFiatDelta = (valueUsd: number, currency: FiatCurrency): string => {
+  const absValue = formatFiatValue(Math.abs(valueUsd), currency);
+  if (valueUsd > 0) {
+    return `+${absValue}`;
+  }
+  if (valueUsd < 0) {
+    return `-${absValue}`;
+  }
+  return absValue;
+};
+
 export const formatSignedPercentDelta = (value: number): string => {
   const absValue = Math.abs(value).toFixed(2);
   if (value > 0) {
@@ -119,4 +171,4 @@ export const formatSignedPercentDelta = (value: number): string => {
 };
 
 export const getWalletHomeAssetConfigs = (): NetworkConfig[] =>
-  WALLET_HOME_NETWORK_KEYS.map(key => NETWORKS[key]);
+  getWalletHomeNetworks();

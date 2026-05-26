@@ -6,6 +6,8 @@ export const ROUTES = {
   EcdhBackup: 'EcdhBackup',
   Settings: 'Settings',
   General: 'General',
+  LanguageSettings: 'LanguageSettings',
+  CurrencySettings: 'CurrencySettings',
   ChangePin: 'ChangePin',
   Home: 'Home',
   QRScanner: 'QRScanner',

@@ -4,6 +4,7 @@ import { useColorScheme } from 'react-native';
 
 import { translate, type LocaleKey } from '../../locales';
 import { setActiveNetwork } from '../../config/network';
+import { loadImportedNetworks } from '../wallet/importedNetworkStorage';
 import { resolveThemeTokens } from '../../types/theme/colors';
 import type {
   AppCurrency,
@@ -18,7 +19,7 @@ const STORAGE_KEY = '@chainora/settings';
 
 const DEFAULT_SETTINGS: AppSettings = {
   language: 'en',
-  currency: 'bnb',
+  currency: 'usd',
   theme: 'system',
   network: 'chainora',
 };
@@ -43,11 +44,13 @@ const parseStoredSettings = (raw: string | null): AppSettings => {
   }
 
   try {
-    const parsed = JSON.parse(raw) as Partial<AppSettings>;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const storedCurrency =
+      typeof parsed.currency === 'string' ? parsed.currency.trim().toLowerCase() : '';
 
     return {
       language: parsed.language === 'vi' ? 'vi' : 'en',
-      currency: parsed.currency === 'btc' || parsed.currency === 'usd' ? parsed.currency : 'bnb',
+      currency: storedCurrency === 'vnd' ? 'vnd' : 'usd',
       theme:
         parsed.theme === 'dark' || parsed.theme === 'light' || parsed.theme === 'system'
           ? parsed.theme
@@ -68,7 +71,12 @@ export const SettingsProvider: React.FC<React.PropsWithChildren> = ({ children }
     let mounted = true;
 
     const loadSettings = async () => {
-      const raw = await AsyncStorage.getItem(STORAGE_KEY);
+      const [raw] = await Promise.all([
+        AsyncStorage.getItem(STORAGE_KEY),
+        loadImportedNetworks().catch(error => {
+          console.warn('[Settings] Failed to load imported networks', error);
+        }),
+      ]);
       if (!mounted) {
         return;
       }

@@ -22,28 +22,29 @@ import {
   MONO_FONT,
   SANS_FONT,
   SANS_FONT_SEMIBOLD,
-  WALLET_COLORS,
+  type WalletColors,
   WalletPill,
   buildWalletScreenStyles,
+  useWalletColors,
 } from '../components/ui/walletDesign';
-import {
-  WALLET_HOME_NETWORK_KEYS,
-  type WalletHomeNetworkKey,
-} from '../config/network';
+import { type WalletHomeNetworkKey } from '../config/network';
+import { getNetworkLogoSource } from '../config/networkLogos';
 import { useAuth } from '../features/auth';
 import { useSettings } from '../features/settings';
 import {
   buildDefaultWalletHomeVisibility,
   getWalletHomeVisibility,
   syncPortfolioDailySnapshot,
+  type WalletHomeVisibilityMap,
 } from '../features/wallet/walletHomePreferences';
 import {
   buildPortfolioAssetSnapshot,
   calculatePortfolioDayChange,
+  formatFiatAmount,
+  formatFiatValue,
+  formatSignedFiatDelta,
   formatSignedPercentDelta,
-  formatSignedUsdDelta,
-  formatUsdValue,
-  getWalletHomeAssetConfigs,
+  getFiatUnit,
   mergePortfolioActivities,
   sortPortfolioAssets,
   sumPortfolioUsdValue,
@@ -53,27 +54,22 @@ import {
   getRecentActivitiesByWalletAcrossNetworks,
   type RecentActivity,
 } from '../features/wallet/recentActivityStorage';
+import { useWalletHomeNetworks } from '../features/wallet/useWalletHomeNetworks';
 import type { LocaleKey } from '../locales';
 import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
 import { ROUTES } from '../navigation/routes/routes';
-import { getNetworkLogoSource } from '../config/networkLogos';
 import { syncWalletActivities } from '../services/activitySyncService';
 import { fetchWalletBalance } from '../services/balanceService';
+import { getUsdPriceForNetwork } from '../services/priceService';
 import { walletRelaySessionManager } from '../services/walletRelaySessionManager';
 
 type Props = NativeStackScreenProps<RootStackParamList, typeof ROUTES.Home>;
 type TabKey = 'assets' | 'activity';
 
-const BALANCE_POLL_INTERVAL_MS = 15_000;
-const ACTIVITY_POLL_INTERVAL_MS = 30_000;
+const BALANCE_POLL_INTERVAL_MS = 5_000;
+const ACTIVITY_POLL_INTERVAL_MS = 5_000;
 const ACTIVITY_SYNC_DEBOUNCE_MS = 800;
 
-const screenBase = buildWalletScreenStyles();
-const walletHomeNetworks = getWalletHomeAssetConfigs();
-const usdFormatter = new Intl.NumberFormat('en-US', {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
 const timeFormatter = new Intl.DateTimeFormat('en-US', {
   month: 'short',
   day: 'numeric',
@@ -82,9 +78,11 @@ const timeFormatter = new Intl.DateTimeFormat('en-US', {
 });
 
 const truncateAddress = (value: string) => `${value.slice(0, 6)}...${value.slice(-4)}`;
+const getAssetSymbol = (currencySymbol: string, portfolioTokenSymbol?: string): string =>
+  portfolioTokenSymbol ?? currencySymbol;
 const buildAssetSignature = (assets: PortfolioAssetSnapshot[]) =>
   assets
-    .map(asset => `${asset.network.key}:${asset.balanceFormatted}:${asset.usdValue}:${asset.error ?? ''}`)
+    .map(asset => `${asset.network.key}:${asset.balanceFormatted}:${asset.usdValue}:${asset.error ?? ''}:${asset.priceUnavailable ? '1' : '0'}`)
     .join('|');
 const buildActivitySignature = (items: RecentActivity[]) => items.map(item => item.id).join('|');
 
@@ -103,7 +101,15 @@ const getActivityCounterpartyLine = (
 const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
   const { ethAddress, publicKeyHex } = route.params;
   const { initializeSession } = useAuth();
-  const { resolvedTheme, t } = useSettings();
+  const { settings, resolvedTheme, t } = useSettings();
+  const colors = useWalletColors();
+  const styles = useMemo(() => buildStyles(colors), [colors]);
+  const screenBase = useMemo(() => buildWalletScreenStyles(colors), [colors]);
+  const walletHomeNetworks = useWalletHomeNetworks();
+  const walletHomeNetworkKeys = useMemo(
+    () => walletHomeNetworks.map(network => network.key as WalletHomeNetworkKey),
+    [walletHomeNetworks],
+  );
   const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<TabKey>('assets');
@@ -111,10 +117,13 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
   const [assets, setAssets] = useState<PortfolioAssetSnapshot[]>([]);
   const [assetsLoading, setAssetsLoading] = useState(false);
   const [activities, setActivities] = useState<RecentActivity[]>([]);
-  const [visibility, setVisibility] = useState(buildDefaultWalletHomeVisibility());
+  const [visibility, setVisibility] = useState<WalletHomeVisibilityMap>(() =>
+    buildDefaultWalletHomeVisibility(walletHomeNetworkKeys),
+  );
   const [prefsReady, setPrefsReady] = useState(false);
+  const [isManualRefreshing, setIsManualRefreshing] = useState(false);
   const [dayChangeLabel, setDayChangeLabel] = useState({
-    text: `${formatSignedPercentDelta(0)} | ${formatSignedUsdDelta(0)}`,
+    text: `${formatSignedPercentDelta(0)} | ${formatSignedFiatDelta(0, settings.currency)}`,
     direction: 'flat' as 'up' | 'down' | 'flat',
   });
 
@@ -146,7 +155,7 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const loadPreferences = useCallback(async () => {
     try {
-      const nextVisibility = await getWalletHomeVisibility();
+      const nextVisibility = await getWalletHomeVisibility(walletHomeNetworkKeys);
       if (!mountedRef.current) {
         return;
       }
@@ -158,35 +167,50 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
         setPrefsReady(true);
       }
     }
-  }, []);
+  }, [walletHomeNetworkKeys]);
 
   const refreshPortfolio = useCallback(async () => {
+    if (walletHomeNetworks.length === 0) {
+      setAssetsIfChanged([]);
+      return;
+    }
+
     setAssetsLoading(true);
     try {
-      const results = await Promise.allSettled(
+      const nextAssets = await Promise.all(
         walletHomeNetworks.map(async network => {
-          const balance = await fetchWalletBalance(ethAddress, network);
+          const [balanceResult, priceResult] = await Promise.allSettled([
+            fetchWalletBalance(ethAddress, network),
+            getUsdPriceForNetwork(network),
+          ]);
+
+          const priceQuote = priceResult.status === 'fulfilled'
+            ? priceResult.value
+            : { usdPrice: 0, available: false };
+
+          if (balanceResult.status === 'fulfilled') {
+            return buildPortfolioAssetSnapshot({
+              network,
+              balanceFormatted: balanceResult.value.formatted,
+              balanceWei: balanceResult.value.wei,
+              usdPrice: priceQuote.usdPrice,
+              priceUnavailable: !priceQuote.available,
+            });
+          }
+
+          const message =
+            balanceResult.reason instanceof Error
+              ? balanceResult.reason.message
+              : String(balanceResult.reason);
           return buildPortfolioAssetSnapshot({
             network,
-            balanceFormatted: balance.formatted,
-            balanceWei: balance.wei,
+            balanceFormatted: '0.0000',
+            usdPrice: priceQuote.usdPrice,
+            priceUnavailable: !priceQuote.available,
+            error: message,
           });
         }),
       );
-
-      const nextAssets = results.map((result, index) => {
-        const network = walletHomeNetworks[index];
-        if (result.status === 'fulfilled') {
-          return result.value;
-        }
-
-        const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
-        return buildPortfolioAssetSnapshot({
-          network,
-          balanceFormatted: '0.0000',
-          error: message,
-        });
-      });
 
       if (mountedRef.current) {
         setAssetsIfChanged(sortPortfolioAssets(nextAssets));
@@ -198,7 +222,7 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
         setAssetsLoading(false);
       }
     }
-  }, [ethAddress, setAssetsIfChanged]);
+  }, [ethAddress, setAssetsIfChanged, walletHomeNetworks]);
 
   const loadRecentActivity = useCallback(async () => {
     if (activityInFlightRef.current) {
@@ -209,13 +233,13 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
     activityInFlightRef.current = true;
 
     try {
-      const cached = await getRecentActivitiesByWalletAcrossNetworks(ethAddress, [...WALLET_HOME_NETWORK_KEYS]);
+      const cached = await getRecentActivitiesByWalletAcrossNetworks(ethAddress, walletHomeNetworkKeys);
       if (mountedRef.current) {
         setActivitiesIfChanged(mergePortfolioActivities(cached));
       }
 
       await Promise.allSettled(walletHomeNetworks.map(network => syncWalletActivities(ethAddress, network)));
-      const next = await getRecentActivitiesByWalletAcrossNetworks(ethAddress, [...WALLET_HOME_NETWORK_KEYS]);
+      const next = await getRecentActivitiesByWalletAcrossNetworks(ethAddress, walletHomeNetworkKeys);
       if (mountedRef.current) {
         setActivitiesIfChanged(mergePortfolioActivities(next));
       }
@@ -232,7 +256,7 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
         }, 0);
       }
     }
-  }, [ethAddress, setActivitiesIfChanged]);
+  }, [ethAddress, setActivitiesIfChanged, walletHomeNetworkKeys, walletHomeNetworks]);
 
   const scheduleActivitySync = useCallback(() => {
     if (activitySyncTimerRef.current) {
@@ -333,14 +357,17 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
   const visibleAssets = useMemo(
     () =>
       sortPortfolioAssets(
-        assets.filter(asset => visibility[asset.network.key as WalletHomeNetworkKey]),
+        assets.filter(asset => visibility[asset.network.key] !== false),
       ),
     [assets, visibility],
   );
   const totalUsdValue = useMemo(() => sumPortfolioUsdValue(visibleAssets), [visibleAssets]);
-  const totalUsdNumber = useMemo(() => usdFormatter.format(totalUsdValue), [totalUsdValue]);
-  const primaryWalletNetwork =
-    visibleAssets[0]?.network ?? walletHomeNetworks[0];
+  const totalBalanceAmount = useMemo(
+    () => formatFiatAmount(totalUsdValue, settings.currency),
+    [settings.currency, totalUsdValue],
+  );
+  const totalBalanceUnit = getFiatUnit(settings.currency);
+  const primaryWalletNetwork = visibleAssets[0]?.network ?? walletHomeNetworks[0] ?? null;
 
   useEffect(() => {
     if (!prefsReady) {
@@ -355,14 +382,14 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
 
         const nextDayChange = calculatePortfolioDayChange(totalUsdValue, previousTotal ?? totalUsdValue);
         setDayChangeLabel({
-          text: `${formatSignedPercentDelta(nextDayChange.percent)} | ${formatSignedUsdDelta(nextDayChange.amountUsd)}`,
+          text: `${formatSignedPercentDelta(nextDayChange.percent)} | ${formatSignedFiatDelta(nextDayChange.amountUsd, settings.currency)}`,
           direction: nextDayChange.direction,
         });
       })
       .catch(error => {
         console.warn('[Home] Failed to sync portfolio snapshot', error);
       });
-  }, [ethAddress, prefsReady, totalUsdValue]);
+  }, [ethAddress, prefsReady, settings.currency, totalUsdValue]);
 
   const openSendPick = useCallback(() => {
     navigation.navigate(ROUTES.SendPick, {
@@ -374,9 +401,9 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
   const openReceive = useCallback((chainKey?: WalletHomeNetworkKey) => {
     navigation.navigate(ROUTES.Receive, {
       walletAddress: ethAddress,
-      chainKey: chainKey ?? (primaryWalletNetwork.key as WalletHomeNetworkKey),
+      chainKey: chainKey ?? (primaryWalletNetwork?.key as WalletHomeNetworkKey | undefined),
     });
-  }, [ethAddress, navigation, primaryWalletNetwork.key]);
+  }, [ethAddress, navigation, primaryWalletNetwork]);
 
   const copyAddress = useCallback(() => {
     Clipboard.setString(ethAddress);
@@ -395,6 +422,26 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
     navigation.navigate(ROUTES.TokenManage, { walletAddress: ethAddress });
   }, [ethAddress, navigation]);
 
+  const handleManualRefresh = useCallback(() => {
+    if (isManualRefreshing) {
+      return;
+    }
+
+    setIsManualRefreshing(true);
+    Promise.all([
+      refreshPortfolio(),
+      loadRecentActivity(),
+    ])
+      .catch(error => {
+        console.warn('[Home] Manual refresh failed', error);
+      })
+      .finally(() => {
+        if (mountedRef.current) {
+          setIsManualRefreshing(false);
+        }
+      });
+  }, [isManualRefreshing, loadRecentActivity, refreshPortfolio]);
+
   const dayChangePillStyle = useMemo(() => {
     if (dayChangeLabel.direction === 'up') {
       return styles.balanceDeltaPositive;
@@ -403,41 +450,45 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
       return styles.balanceDeltaNegative;
     }
     return styles.balanceDeltaNeutral;
-  }, [dayChangeLabel.direction]);
+  }, [dayChangeLabel.direction, styles.balanceDeltaNegative, styles.balanceDeltaNeutral, styles.balanceDeltaPositive]);
 
   const listScrollContentStyle = useMemo(
     () => [styles.listScrollContent, { paddingBottom: 126 + insets.bottom }],
-    [insets.bottom],
+    [insets.bottom, styles.listScrollContent],
   );
+
+  const refreshBusy = assetsLoading || isManualRefreshing;
 
   return (
     <View style={screenBase.screen}>
       <StatusBar
         barStyle={resolvedTheme === 'light' ? 'dark-content' : 'light-content'}
-        backgroundColor={WALLET_COLORS.background}
+        backgroundColor={colors.background}
       />
       <SafeAreaView style={screenBase.safeArea} edges={['top', 'bottom']}>
         <View style={styles.shell}>
           <View style={styles.header}>
             <Pressable style={styles.iconButton} onPress={openSettings}>
-              <Ionicons name="settings-outline" size={18} color={WALLET_COLORS.text} />
+              <Ionicons name="settings-outline" size={18} color={colors.text} />
             </Pressable>
             <View style={styles.headerTitleWrap} pointerEvents="none">
-              <Text style={styles.headerTitle}>Home</Text>
+              <Text style={styles.headerTitle}>{t('homeBottomHome')}</Text>
             </View>
 
             <Pressable style={styles.iconButton} onPress={handleScanQr}>
-              <Ionicons name="scan-outline" size={18} color={WALLET_COLORS.text} />
+              <Ionicons name="scan-outline" size={18} color={colors.text} />
             </Pressable>
           </View>
 
           <View style={styles.walletBar}>
             <Pressable style={styles.walletPill} onPress={copyAddress}>
               <View style={styles.walletDot} />
-              <Text style={styles.walletName}>{t('homePrimaryWallet')}</Text>
-              <Text style={styles.walletAddress}>{truncateAddress(ethAddress)}</Text>
+              <Text style={styles.walletName} numberOfLines={1}>{t('homePrimaryWallet')}</Text>
+              <Text style={styles.walletAddress} numberOfLines={1} ellipsizeMode="middle">
+                {truncateAddress(ethAddress)}
+              </Text>
               <View style={styles.walletCopy}>
-                <Ionicons name="copy-outline" size={11} color={WALLET_COLORS.textMuted} />
+                <Ionicons name="copy-outline" size={11} color={colors.textMuted} />
               </View>
             </Pressable>
           </View>
@@ -445,8 +496,8 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
           <View style={styles.balanceBlock}>
             <Text style={styles.balanceLabel}>{t('homeTotalBalance')}</Text>
             <View style={styles.balanceRow}>
-              <Text style={styles.balanceValue}>{totalUsdNumber}</Text>
-              <Text style={styles.balanceUnit}>$</Text>
+              <Text style={styles.balanceValue}>{totalBalanceAmount}</Text>
+              <Text style={styles.balanceUnit}>{totalBalanceUnit}</Text>
             </View>
             <WalletPill style={[styles.balanceDelta, dayChangePillStyle]}>
               <Text style={styles.balanceDeltaText}>{dayChangeLabel.text}</Text>
@@ -456,28 +507,28 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
           <View style={styles.quickActions}>
             <Pressable style={[styles.quickAction, styles.quickActionPrimary]} onPress={openSendPick}>
               <View style={styles.quickIcon}>
-                <Ionicons name="arrow-up-outline" size={18} color={WALLET_COLORS.signal} />
+                <Ionicons name="arrow-up-outline" size={18} color={colors.signal} />
               </View>
               <Text style={[styles.quickLabel, styles.quickLabelPrimary]}>{t('homeSendEth')}</Text>
             </Pressable>
 
             <Pressable style={styles.quickAction} onPress={() => openReceive()}>
               <View style={styles.quickIcon}>
-                <Ionicons name="arrow-down-outline" size={18} color={WALLET_COLORS.signal} />
+                <Ionicons name="arrow-down-outline" size={18} color={colors.signal} />
               </View>
               <Text style={styles.quickLabel}>{t('homeReceive')}</Text>
             </Pressable>
 
             <Pressable style={styles.quickAction} onPress={handleScanQr}>
               <View style={styles.quickIcon}>
-                <Ionicons name="scan-outline" size={18} color={WALLET_COLORS.signal} />
+                <Ionicons name="scan-outline" size={18} color={colors.signal} />
               </View>
               <Text style={styles.quickLabel}>{t('homeScanQrTitle')}</Text>
             </Pressable>
 
             <Pressable style={styles.quickAction} onPress={() => setActiveTab('activity')}>
               <View style={styles.quickIcon}>
-                <Ionicons name="time-outline" size={18} color={WALLET_COLORS.signal} />
+                <Ionicons name="time-outline" size={18} color={colors.signal} />
               </View>
               <Text style={styles.quickLabel}>{t('homeHistory')}</Text>
             </Pressable>
@@ -498,14 +549,14 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
             </Pressable>
             <View style={styles.tabsSpacer} />
             <Pressable
-              style={[styles.tabIconButton, assetsLoading && styles.tabIconButtonBusy]}
-              disabled={assetsLoading}
-              onPress={() => refreshPortfolio().catch(() => undefined)}
+              style={[styles.tabIconButton, refreshBusy && styles.tabIconButtonBusy]}
+              disabled={refreshBusy}
+              onPress={handleManualRefresh}
             >
-              <Ionicons name="refresh-outline" size={15} color={WALLET_COLORS.textSoft} />
+              <Ionicons name="refresh-outline" size={15} color={colors.textSoft} />
             </Pressable>
             <Pressable style={styles.tabIconButton} onPress={openManageTokens}>
-              <Ionicons name="options-outline" size={15} color={WALLET_COLORS.textSoft} />
+              <Ionicons name="options-outline" size={15} color={colors.textSoft} />
             </Pressable>
           </View>
 
@@ -519,6 +570,16 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
                 <View style={styles.listCard}>
                   {visibleAssets.map((asset, index) => {
                     const assetLogoSource = getNetworkLogoSource(asset.network.key);
+                    const assetSymbol = getAssetSymbol(asset.network.currencySymbol, asset.network.portfolioTokenSymbol);
+                    const priceLine = `${formatFiatValue(asset.usdPrice, settings.currency)} / ${assetSymbol}`;
+                    const statusParts = [priceLine];
+                    if (asset.error) {
+                      statusParts.push(t('homeSyncDelayed'));
+                    }
+                    if (asset.priceUnavailable) {
+                      statusParts.push(t('homePriceUnavailable'));
+                    }
+
                     return (
                       <View key={asset.network.key}>
                         <View style={styles.assetRow}>
@@ -543,18 +604,14 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
                             </View>
                             <View style={styles.assetInfo}>
                               <View style={styles.assetTopLine}>
-                                <Text style={styles.assetSymbol}>{asset.network.currencySymbol}</Text>
+                                <Text style={styles.assetSymbol}>{assetSymbol}</Text>
                                 <Text style={styles.assetTag}>{asset.network.name}</Text>
                               </View>
-                              <Text style={styles.assetBottomLine}>
-                                {asset.error
-                                  ? `${formatUsdValue(asset.usdPrice)} / ${asset.network.currencySymbol} | ${t('homeSyncDelayed')}`
-                                  : `${formatUsdValue(asset.usdPrice)} / ${asset.network.currencySymbol}`}
-                              </Text>
+                              <Text style={styles.assetBottomLine}>{statusParts.join(' | ')}</Text>
                             </View>
                             <View style={styles.assetRight}>
                               <Text style={styles.assetBalance}>{asset.balanceFormatted}</Text>
-                              <Text style={styles.assetQuote}>{formatUsdValue(asset.usdValue)}</Text>
+                              <Text style={styles.assetQuote}>{formatFiatValue(asset.usdValue, settings.currency)}</Text>
                             </View>
                           </Pressable>
                           <Pressable
@@ -567,7 +624,7 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
                               })
                             }
                           >
-                            <Ionicons name="arrow-up-outline" size={16} color={WALLET_COLORS.text} />
+                            <Ionicons name="arrow-up-outline" size={16} color={colors.text} />
                           </Pressable>
                         </View>
                         {index < visibleAssets.length - 1 ? <View style={styles.assetDivider} /> : null}
@@ -577,13 +634,13 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
 
                   <Pressable style={styles.manageRow} onPress={openManageTokens}>
                     <View style={[styles.coinBadge, styles.coinBadgeSoft]}>
-                      <Ionicons name="grid-outline" size={18} color={WALLET_COLORS.text} />
+                      <Ionicons name="grid-outline" size={18} color={colors.text} />
                     </View>
                     <View style={styles.assetInfo}>
                       <Text style={styles.assetSymbol}>{t('homeManageAssets')}</Text>
                       <Text style={styles.assetBottomLine}>{t('homeManageAssetsBody')}</Text>
                     </View>
-                    <Ionicons name="chevron-forward" size={14} color={WALLET_COLORS.textSoft} />
+                    <Ionicons name="chevron-forward" size={14} color={colors.textSoft} />
                   </Pressable>
                 </View>
               </ScrollView>
@@ -597,7 +654,7 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
                   {activities.length === 0 ? (
                     <View style={styles.emptyState}>
                       <View style={styles.emptyIconWrap}>
-                        <Ionicons name="time-outline" size={20} color={WALLET_COLORS.textSoft} />
+                        <Ionicons name="time-outline" size={20} color={colors.textSoft} />
                       </View>
                       <Text style={styles.emptyTitle}>{t('homeNoTransactions')}</Text>
                       <Text style={styles.emptyBody}>{t('homeNoTransactionsDesc')}</Text>
@@ -649,7 +706,7 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
               <Ionicons
                 name="home-outline"
                 size={18}
-                color={activeTab === 'assets' ? WALLET_COLORS.text : WALLET_COLORS.textSoft}
+                color={activeTab === 'assets' ? colors.text : colors.textSoft}
               />
               <Text style={[styles.bottomLabel, activeTab === 'assets' && styles.bottomLabelActive]}>
                 {t('homeBottomHome')}
@@ -660,7 +717,7 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
               <Ionicons
                 name="time-outline"
                 size={18}
-                color={activeTab === 'activity' ? WALLET_COLORS.text : WALLET_COLORS.textSoft}
+                color={activeTab === 'activity' ? colors.text : colors.textSoft}
               />
               <Text style={[styles.bottomLabel, activeTab === 'activity' && styles.bottomLabelActive]}>
                 {t('homeBottomActivity')}
@@ -675,12 +732,12 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
             </Pressable>
 
             <Pressable style={styles.bottomItem}>
-              <Ionicons name="gift-outline" size={18} color={WALLET_COLORS.textSoft} />
+              <Ionicons name="gift-outline" size={18} color={colors.textSoft} />
               <Text style={styles.bottomLabel}>{t('homeBottomCollect')}</Text>
             </Pressable>
 
             <Pressable style={styles.bottomItem} onPress={openSettings}>
-              <Ionicons name="settings-outline" size={18} color={WALLET_COLORS.textSoft} />
+              <Ionicons name="settings-outline" size={18} color={colors.textSoft} />
               <Text style={styles.bottomLabel}>{t('homeBottomSettings')}</Text>
             </Pressable>
           </View>
@@ -690,85 +747,46 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
   );
 };
 
-const styles = StyleSheet.create({
-  shell: {
-    flex: 1,
-    paddingHorizontal: 12,
-    paddingTop: 12,
-    paddingBottom: 0,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    position: 'relative',
-  },
-  headerTitleWrap: {
-    position: 'absolute',
-    left: 56,
-    right: 56,
-    alignItems: 'center',
-  },
-  headerTitle: {
-    color: WALLET_COLORS.text,
-    fontFamily: DISPLAY_FONT_MEDIUM,
-    fontSize: 17,
-    letterSpacing: -0.2,
-  },
+const buildStyles = (colors: WalletColors) => StyleSheet.create({
+  shell: { flex: 1, paddingHorizontal: 12, paddingTop: 12, paddingBottom: 0 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', position: 'relative' },
+  headerTitleWrap: { position: 'absolute', left: 56, right: 56, alignItems: 'center' },
+  headerTitle: { color: colors.text, fontFamily: DISPLAY_FONT_MEDIUM, fontSize: 17, letterSpacing: -0.2 },
   iconButton: {
     width: 36,
     height: 36,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: WALLET_COLORS.border,
-    backgroundColor: WALLET_COLORS.surfaceAlt,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  walletBar: {
-    alignItems: 'center',
-    marginTop: 10,
-  },
+  walletBar: { alignItems: 'center', marginTop: 10 },
   walletPill: {
     minHeight: 34,
+    maxWidth: '100%',
     paddingHorizontal: 12,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: WALLET_COLORS.border,
-    backgroundColor: WALLET_COLORS.surfaceAlt,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
-  walletDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: WALLET_COLORS.signal,
-  },
-  walletName: {
-    color: WALLET_COLORS.text,
-    fontFamily: SANS_FONT_SEMIBOLD,
-    fontSize: 13,
-  },
-  walletAddress: {
-    color: WALLET_COLORS.textSoft,
-    fontFamily: MONO_FONT,
-    fontSize: 11,
-  },
+  walletDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.signal },
+  walletName: { color: colors.text, fontFamily: SANS_FONT_SEMIBOLD, fontSize: 13 },
+  walletAddress: { color: colors.textSoft, fontFamily: MONO_FONT, fontSize: 11, flexShrink: 1 },
   walletCopy: {
     width: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: WALLET_COLORS.surfaceSoft,
+    backgroundColor: colors.surfaceSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  balanceBlock: {
-    alignItems: 'center',
-    marginTop: 16,
-    marginBottom: 14,
-  },
+  balanceBlock: { alignItems: 'center', marginTop: 16, marginBottom: 14 },
   balanceLabel: {
     color: '#62BBFF',
     fontFamily: MONO_FONT,
@@ -777,80 +795,30 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginBottom: 6,
   },
-  balanceRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 6,
-  },
-  balanceValue: {
-    color: WALLET_COLORS.text,
-    fontFamily: DISPLAY_FONT,
-    fontSize: 52,
-    lineHeight: 56,
-    letterSpacing: -2.4,
-  },
-  balanceUnit: {
-    color: WALLET_COLORS.textSoft,
-    fontFamily: DISPLAY_FONT_MEDIUM,
-    fontSize: 28,
-    marginBottom: 7,
-  },
-  balanceDelta: {
-    minHeight: 30,
-    marginTop: 10,
-    paddingHorizontal: 12,
-  },
-  balanceDeltaNeutral: {
-    backgroundColor: WALLET_COLORS.surfaceSoft,
-    borderColor: WALLET_COLORS.borderStrong,
-  },
-  balanceDeltaPositive: {
-    backgroundColor: WALLET_COLORS.successSoft,
-    borderColor: 'rgba(52, 211, 153, 0.35)',
-  },
-  balanceDeltaNegative: {
-    backgroundColor: WALLET_COLORS.dangerSoft,
-    borderColor: 'rgba(255, 122, 122, 0.35)',
-  },
-  balanceDeltaText: {
-    color: WALLET_COLORS.text,
-    fontFamily: MONO_FONT,
-    fontSize: 11,
-  },
-  quickActions: {
-    flexDirection: 'row',
-    gap: 9,
-    marginBottom: 14,
-  },
+  balanceRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
+  balanceValue: { color: colors.text, fontFamily: DISPLAY_FONT, fontSize: 52, lineHeight: 56, letterSpacing: -2.4 },
+  balanceUnit: { color: colors.textSoft, fontFamily: DISPLAY_FONT_MEDIUM, fontSize: 28, marginBottom: 7 },
+  balanceDelta: { minHeight: 30, marginTop: 10, paddingHorizontal: 12 },
+  balanceDeltaNeutral: { backgroundColor: colors.surfaceSoft, borderColor: colors.borderStrong },
+  balanceDeltaPositive: { backgroundColor: colors.successSoft, borderColor: 'rgba(52, 211, 153, 0.35)' },
+  balanceDeltaNegative: { backgroundColor: colors.dangerSoft, borderColor: 'rgba(255, 122, 122, 0.35)' },
+  balanceDeltaText: { color: colors.text, fontFamily: MONO_FONT, fontSize: 11 },
+  quickActions: { flexDirection: 'row', gap: 9, marginBottom: 14 },
   quickAction: {
     flex: 1,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: WALLET_COLORS.border,
-    backgroundColor: WALLET_COLORS.surface,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 12,
     gap: 8,
   },
-  quickActionPrimary: {
-    borderColor: WALLET_COLORS.signalBorder,
-    backgroundColor: WALLET_COLORS.signalSoft,
-  },
-  quickIcon: {
-    width: 34,
-    height: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  quickLabel: {
-    color: WALLET_COLORS.textMuted,
-    fontFamily: SANS_FONT_SEMIBOLD,
-    fontSize: 12,
-  },
-  quickLabelPrimary: {
-    color: WALLET_COLORS.text,
-  },
+  quickActionPrimary: { borderColor: colors.signalBorder, backgroundColor: colors.signalSoft },
+  quickIcon: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
+  quickLabel: { color: colors.textMuted, fontFamily: SANS_FONT_SEMIBOLD, fontSize: 12 },
+  quickLabelPrimary: { color: colors.text },
   tabsRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -858,231 +826,89 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     marginBottom: 6,
     borderBottomWidth: 1,
-    borderBottomColor: WALLET_COLORS.border,
+    borderBottomColor: colors.border,
   },
-  tabItem: {
-    gap: 8,
-  },
-  tabText: {
-    color: WALLET_COLORS.textSoft,
-    fontFamily: SANS_FONT_SEMIBOLD,
-    fontSize: 14,
-  },
-  tabTextActive: {
-    color: WALLET_COLORS.text,
-  },
-  tabIndicator: {
-    height: 3,
-    borderRadius: 999,
-    backgroundColor: WALLET_COLORS.signal,
-  },
-  tabsSpacer: {
-    flex: 1,
-  },
-  tabIconButton: {
-    width: 30,
-    height: 30,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tabIconButtonBusy: {
-    opacity: 0.45,
-  },
-  listWrap: {
-    flex: 1,
-    minHeight: 0,
-  },
-  listScroll: {
-    flex: 1,
-  },
-  listScrollContent: {
-    paddingBottom: 0,
-  },
+  tabItem: { gap: 8 },
+  tabText: { color: colors.textSoft, fontFamily: SANS_FONT_SEMIBOLD, fontSize: 14 },
+  tabTextActive: { color: colors.text },
+  tabIndicator: { height: 3, borderRadius: 999, backgroundColor: colors.signal },
+  tabsSpacer: { flex: 1 },
+  tabIconButton: { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  tabIconButtonBusy: { opacity: 0.45 },
+  listWrap: { flex: 1, minHeight: 0 },
+  listScroll: { flex: 1 },
+  listScrollContent: { paddingBottom: 0 },
   listCard: {
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: WALLET_COLORS.border,
-    backgroundColor: WALLET_COLORS.surface,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
     overflow: 'hidden',
   },
-  assetRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 13,
-  },
-  assetTapArea: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  coinBadge: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  coinBadgeSoft: {
-    backgroundColor: WALLET_COLORS.surfaceSoft,
-    borderColor: WALLET_COLORS.border,
-  },
-  coinBadgeText: {
-    color: '#F8FBFF',
-    fontFamily: DISPLAY_FONT,
-    fontSize: 14,
-    letterSpacing: -0.4,
-  },
-  coinBadgeLogo: {
-    width: 26,
-    height: 26,
-    borderRadius: 999,
-  },
-  assetInfo: {
-    flex: 1,
-  },
-  assetTopLine: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  assetSymbol: {
-    color: WALLET_COLORS.text,
-    fontFamily: SANS_FONT_SEMIBOLD,
-    fontSize: 15,
-  },
+  assetRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingVertical: 13 },
+  assetTapArea: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  coinBadge: { width: 42, height: 42, borderRadius: 21, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  coinBadgeSoft: { backgroundColor: colors.surfaceSoft, borderColor: colors.border },
+  coinBadgeText: { color: '#F8FBFF', fontFamily: DISPLAY_FONT, fontSize: 14, letterSpacing: -0.4 },
+  coinBadgeLogo: { width: 26, height: 26, borderRadius: 999 },
+  assetInfo: { flex: 1 },
+  assetTopLine: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  assetSymbol: { color: colors.text, fontFamily: SANS_FONT_SEMIBOLD, fontSize: 15 },
   assetTag: {
-    color: WALLET_COLORS.textSoft,
+    color: colors.textSoft,
     fontFamily: MONO_FONT,
     fontSize: 10,
-    backgroundColor: WALLET_COLORS.surfaceSoft,
+    backgroundColor: colors.surfaceSoft,
     borderRadius: 6,
     paddingHorizontal: 6,
     paddingVertical: 3,
   },
-  assetBottomLine: {
-    color: WALLET_COLORS.textSoft,
-    fontFamily: SANS_FONT,
-    fontSize: 12,
-    marginTop: 4,
-  },
-  assetRight: {
-    alignItems: 'flex-end',
-    gap: 4,
-  },
-  assetBalance: {
-    color: WALLET_COLORS.text,
-    fontFamily: SANS_FONT_SEMIBOLD,
-    fontSize: 14,
-  },
-  assetQuote: {
-    color: WALLET_COLORS.textSoft,
-    fontFamily: MONO_FONT,
-    fontSize: 12,
-  },
+  assetBottomLine: { color: colors.textSoft, fontFamily: SANS_FONT, fontSize: 12, marginTop: 4 },
+  assetRight: { alignItems: 'flex-end', gap: 4 },
+  assetBalance: { color: colors.text, fontFamily: SANS_FONT_SEMIBOLD, fontSize: 14 },
+  assetQuote: { color: colors.textSoft, fontFamily: MONO_FONT, fontSize: 12 },
   assetIconButton: {
     width: 34,
     height: 34,
     borderRadius: 17,
     borderWidth: 1,
-    borderColor: WALLET_COLORS.border,
-    backgroundColor: WALLET_COLORS.surfaceSoft,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  assetDivider: {
-    height: 1,
-    backgroundColor: '#203149',
-    marginHorizontal: 16,
-  },
-  manageRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 14,
-  },
-  emptyState: {
-    alignItems: 'center',
-    paddingHorizontal: 22,
-    paddingVertical: 28,
-  },
+  assetDivider: { height: 1, backgroundColor: '#203149', marginHorizontal: 16 },
+  manageRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingVertical: 14 },
+  emptyState: { alignItems: 'center', paddingHorizontal: 22, paddingVertical: 28 },
   emptyIconWrap: {
     width: 46,
     height: 46,
     borderRadius: 23,
     borderWidth: 1,
-    borderColor: WALLET_COLORS.border,
-    backgroundColor: WALLET_COLORS.surfaceSoft,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  emptyTitle: {
-    color: WALLET_COLORS.text,
-    fontFamily: SANS_FONT_SEMIBOLD,
-    fontSize: 15,
-    marginTop: 14,
-  },
+  emptyTitle: { color: colors.text, fontFamily: SANS_FONT_SEMIBOLD, fontSize: 15, marginTop: 14 },
   emptyBody: {
-    color: WALLET_COLORS.textSoft,
+    color: colors.textSoft,
     fontFamily: SANS_FONT,
     fontSize: 12,
     lineHeight: 18,
     textAlign: 'center',
     marginTop: 6,
   },
-  activityRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 13,
-  },
-  activityIconWrap: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  activityIconSend: {
-    backgroundColor: WALLET_COLORS.dangerSoft,
-  },
-  activityIconReceive: {
-    backgroundColor: WALLET_COLORS.successSoft,
-  },
-  activityInfo: {
-    flex: 1,
-  },
-  activityTitle: {
-    color: WALLET_COLORS.text,
-    fontFamily: SANS_FONT_SEMIBOLD,
-    fontSize: 14,
-  },
-  activitySubtitle: {
-    color: WALLET_COLORS.textSoft,
-    fontFamily: SANS_FONT,
-    fontSize: 12,
-    marginTop: 4,
-  },
-  activityRight: {
-    alignItems: 'flex-end',
-    gap: 4,
-  },
-  activityAmount: {
-    color: WALLET_COLORS.text,
-    fontFamily: SANS_FONT_SEMIBOLD,
-    fontSize: 13,
-  },
-  activityTime: {
-    color: WALLET_COLORS.textSoft,
-    fontFamily: MONO_FONT,
-    fontSize: 10,
-  },
+  activityRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingVertical: 13 },
+  activityIconWrap: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
+  activityIconSend: { backgroundColor: colors.dangerSoft },
+  activityIconReceive: { backgroundColor: colors.successSoft },
+  activityInfo: { flex: 1 },
+  activityTitle: { color: colors.text, fontFamily: SANS_FONT_SEMIBOLD, fontSize: 14 },
+  activitySubtitle: { color: colors.textSoft, fontFamily: SANS_FONT, fontSize: 12, marginTop: 4 },
+  activityRight: { alignItems: 'flex-end', gap: 4 },
+  activityAmount: { color: colors.text, fontFamily: SANS_FONT_SEMIBOLD, fontSize: 13 },
+  activityTime: { color: colors.textSoft, fontFamily: MONO_FONT, fontSize: 10 },
   bottomDock: {
     position: 'absolute',
     left: 0,
@@ -1097,43 +923,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: WALLET_COLORS.border,
-    backgroundColor: WALLET_COLORS.surfaceAlt,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
     paddingVertical: 7,
     paddingHorizontal: 6,
   },
-  bottomItem: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 3,
-  },
-  bottomCenter: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 3,
-  },
+  bottomItem: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 3 },
+  bottomCenter: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 3 },
   bottomCenterBubble: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: WALLET_COLORS.signal,
+    backgroundColor: colors.signal,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: -16,
   },
-  bottomLabel: {
-    color: WALLET_COLORS.textSoft,
-    fontFamily: SANS_FONT_SEMIBOLD,
-    fontSize: 10,
-  },
-  bottomLabelActive: {
-    color: WALLET_COLORS.text,
-  },
-  bottomCenterLabel: {
-    color: '#8FD1FF',
-  },
+  bottomLabel: { color: colors.textSoft, fontFamily: SANS_FONT_SEMIBOLD, fontSize: 10 },
+  bottomLabelActive: { color: colors.text },
+  bottomCenterLabel: { color: '#8FD1FF' },
 });
 
 export default HomeScreen;

@@ -1,20 +1,19 @@
 type EnvMap = Record<string, string | undefined>;
 
-export type NetworkKey =
+export type BuiltInNetworkKey =
   | 'ethMainnet'
   | 'bscMainnet'
   | 'polygonMainnet'
-  | 'baseMainnet'
+  | 'optimismMainnet'
   | 'arbitrumMainnet'
   | 'eth'
   | 'polygon'
   | 'bnb'
   | 'chainora';
 
-export type WalletHomeNetworkKey = Extract<
-  NetworkKey,
-  'ethMainnet' | 'bscMainnet' | 'polygonMainnet' | 'baseMainnet' | 'arbitrumMainnet'
->;
+export type ImportedNetworkKey = `imported:${string}`;
+export type NetworkKey = BuiltInNetworkKey | ImportedNetworkKey;
+export type WalletHomeNetworkKey = NetworkKey;
 
 export type NetworkConfig = {
   key: NetworkKey;
@@ -29,6 +28,10 @@ export type NetworkConfig = {
   iconBorder: string;
   stablecoinAddress?: string;
   stablecoinDecimals?: number;
+  portfolioTokenAddress?: string;
+  portfolioTokenDecimals?: number;
+  portfolioTokenSymbol?: string;
+  priceTickerSymbol?: string;
   visibleInHome?: boolean;
 };
 
@@ -55,10 +58,12 @@ const CHAINORA_STABLECOIN_ADDRESS = '0x79abce4dc09dce832361090d35ba8ae051cd1fd6'
 const ETHEREUM_PUBLIC_RPC = readEnvVar('CHAINORA_PUBLIC_ETH_RPC_URL', 'https://ethereum-rpc.publicnode.com');
 const BSC_PUBLIC_RPC = readEnvVar('CHAINORA_PUBLIC_BSC_RPC_URL', 'https://bsc-rpc.publicnode.com');
 const POLYGON_PUBLIC_RPC = readEnvVar('CHAINORA_PUBLIC_POLYGON_RPC_URL', 'https://polygon-bor-rpc.publicnode.com');
-const BASE_PUBLIC_RPC = readEnvVar('CHAINORA_PUBLIC_BASE_RPC_URL', 'https://base-rpc.publicnode.com');
+const OPTIMISM_PUBLIC_RPC = readEnvVar('CHAINORA_PUBLIC_OPTIMISM_RPC_URL', 'https://optimism-rpc.publicnode.com');
 const ARBITRUM_PUBLIC_RPC = readEnvVar('CHAINORA_PUBLIC_ARBITRUM_RPC_URL', 'https://arbitrum-one-rpc.publicnode.com');
+const ARBITRUM_TOKEN_ADDRESS = '0x912CE59144191C1204E64559FE8253a0e49E6548';
+const OPTIMISM_TOKEN_ADDRESS = '0x4200000000000000000000000000000000000042';
 
-export const NETWORKS: Record<NetworkKey, NetworkConfig> = {
+export const NETWORKS: Record<BuiltInNetworkKey, NetworkConfig> = {
   ethMainnet: {
     key: 'ethMainnet',
     name: 'Ethereum',
@@ -98,30 +103,38 @@ export const NETWORKS: Record<NetworkKey, NetworkConfig> = {
     iconBorder: '#412080',
     visibleInHome: true,
   },
-  baseMainnet: {
-    key: 'baseMainnet',
-    name: 'Base',
-    shortName: 'BASE',
-    chainId: 8453,
-    rpcUrl: BASE_PUBLIC_RPC,
-    currencySymbol: 'BASE',
-    nativeAssetName: 'Base Ether',
-    glyph: 'B',
-    iconBackground: '#0052FF',
-    iconBorder: '#002C88',
-    visibleInHome: true,
-  },
   arbitrumMainnet: {
     key: 'arbitrumMainnet',
     name: 'Arbitrum',
     shortName: 'ARB',
     chainId: 42161,
     rpcUrl: ARBITRUM_PUBLIC_RPC,
-    currencySymbol: 'ARB',
-    nativeAssetName: 'Arbitrum Ether',
+    currencySymbol: 'ETH',
+    nativeAssetName: 'Ether',
     glyph: 'A',
     iconBackground: '#28A0F0',
     iconBorder: '#134F79',
+    portfolioTokenAddress: ARBITRUM_TOKEN_ADDRESS,
+    portfolioTokenDecimals: 18,
+    portfolioTokenSymbol: 'ARB',
+    priceTickerSymbol: 'ARBUSDT',
+    visibleInHome: true,
+  },
+  optimismMainnet: {
+    key: 'optimismMainnet',
+    name: 'Optimism',
+    shortName: 'OP',
+    chainId: 10,
+    rpcUrl: OPTIMISM_PUBLIC_RPC,
+    currencySymbol: 'ETH',
+    nativeAssetName: 'Ether',
+    glyph: 'O',
+    iconBackground: '#FF0420',
+    iconBorder: '#950215',
+    portfolioTokenAddress: OPTIMISM_TOKEN_ADDRESS,
+    portfolioTokenDecimals: 18,
+    portfolioTokenSymbol: 'OP',
+    priceTickerSymbol: 'OPUSDT',
     visibleInHome: true,
   },
   eth: {
@@ -176,38 +189,134 @@ export const NETWORKS: Record<NetworkKey, NetworkConfig> = {
   },
 };
 
-export const WALLET_HOME_NETWORK_KEYS = [
+const BUILTIN_WALLET_HOME_NETWORK_KEYS = [
   'ethMainnet',
   'bscMainnet',
   'polygonMainnet',
-  'baseMainnet',
   'arbitrumMainnet',
-] as const satisfies readonly WalletHomeNetworkKey[];
+  'optimismMainnet',
+] as const satisfies readonly BuiltInNetworkKey[];
 
-export const WALLET_HOME_NETWORKS = WALLET_HOME_NETWORK_KEYS.map(key => NETWORKS[key]);
+export const WALLET_HOME_NETWORK_KEYS = [...BUILTIN_WALLET_HOME_NETWORK_KEYS];
 
-export const WALLET_NATIVE_PRICE_USD: Record<WalletHomeNetworkKey, number> = {
-  ethMainnet: 3498.24,
-  bscMainnet: 611.42,
-  polygonMainnet: 0.74,
-  baseMainnet: 3498.24,
-  arbitrumMainnet: 3498.24,
-};
-
+let importedNetworks: Record<ImportedNetworkKey, NetworkConfig> = {};
 let activeNetworkKey: NetworkKey = 'chainora';
 
-export const getNetworkConfig = (key: NetworkKey): NetworkConfig => NETWORKS[key];
+const registryListeners = new Set<() => void>();
 
-export const getActiveNetwork = (): NetworkConfig => NETWORKS[activeNetworkKey];
+const emitNetworkRegistryChanged = () => {
+  registryListeners.forEach(listener => {
+    listener();
+  });
+};
+
+const getNetworkRegistry = (): Record<NetworkKey, NetworkConfig> => ({
+  ...(NETWORKS as Record<NetworkKey, NetworkConfig>),
+  ...(importedNetworks as Record<NetworkKey, NetworkConfig>),
+});
+
+const normalizeImportedNetwork = (network: NetworkConfig): NetworkConfig => ({
+  ...network,
+  visibleInHome: network.visibleInHome !== false,
+  shortName: network.shortName.trim() || network.currencySymbol.trim().toUpperCase(),
+  currencySymbol: network.currencySymbol.trim().toUpperCase(),
+  nativeAssetName: network.nativeAssetName.trim() || network.name.trim(),
+  portfolioTokenAddress: network.portfolioTokenAddress?.trim(),
+  portfolioTokenDecimals: network.portfolioTokenDecimals,
+  portfolioTokenSymbol: network.portfolioTokenSymbol?.trim().toUpperCase(),
+  priceTickerSymbol: network.priceTickerSymbol?.trim().toUpperCase(),
+  name: network.name.trim(),
+  rpcUrl: network.rpcUrl.trim(),
+});
+
+const toImportedNetworkKey = (key: string): ImportedNetworkKey => {
+  if (key.startsWith('imported:')) {
+    return key as ImportedNetworkKey;
+  }
+  return `imported:${key}` as ImportedNetworkKey;
+};
+
+export const subscribeNetworkRegistry = (listener: () => void): (() => void) => {
+  registryListeners.add(listener);
+  return () => {
+    registryListeners.delete(listener);
+  };
+};
+
+export const setImportedNetworks = (networks: NetworkConfig[]): void => {
+  const next: Record<ImportedNetworkKey, NetworkConfig> = {};
+
+  networks.forEach(network => {
+    if (network.key in NETWORKS) {
+      return;
+    }
+
+    const key = toImportedNetworkKey(network.key);
+    next[key] = normalizeImportedNetwork({
+      ...network,
+      key,
+    });
+  });
+
+  importedNetworks = next;
+
+  const registry = getNetworkRegistry();
+  if (!registry[activeNetworkKey]) {
+    activeNetworkKey = 'chainora';
+  }
+
+  emitNetworkRegistryChanged();
+};
+
+export const upsertImportedNetwork = (network: NetworkConfig): NetworkConfig => {
+  if (network.key in NETWORKS) {
+    throw new Error(`Cannot overwrite built-in network key: ${network.key}`);
+  }
+
+  const key = toImportedNetworkKey(network.key);
+  const next = normalizeImportedNetwork({
+    ...network,
+    key,
+  });
+
+  importedNetworks = {
+    ...importedNetworks,
+    [key]: next,
+  };
+
+  emitNetworkRegistryChanged();
+  return next;
+};
+
+export const getNetworkConfig = (key: NetworkKey): NetworkConfig => {
+  const network = getNetworkRegistry()[key];
+  if (!network) {
+    throw new Error(`Unknown network key: ${key}`);
+  }
+  return network;
+};
+
+export const getActiveNetwork = (): NetworkConfig => getNetworkConfig(activeNetworkKey);
 
 export const setActiveNetwork = (key: NetworkKey): NetworkConfig => {
+  if (!getNetworkRegistry()[key]) {
+    throw new Error(`Unknown active network key: ${key}`);
+  }
+
   activeNetworkKey = key;
   return getActiveNetwork();
 };
 
-export const getNetworkList = (): NetworkConfig[] => Object.values(NETWORKS);
+export const getNetworkList = (): NetworkConfig[] => Object.values(getNetworkRegistry());
 
-export const getWalletHomeNetworks = (): NetworkConfig[] => WALLET_HOME_NETWORKS;
+export const getWalletHomeNetworks = (): NetworkConfig[] => {
+  const builtins = BUILTIN_WALLET_HOME_NETWORK_KEYS.map(key => NETWORKS[key]);
+  const imported = Object.values(importedNetworks).filter(network => network.visibleInHome !== false);
+  return [...builtins, ...imported];
+};
+
+export const getWalletHomeNetworkKeys = (): NetworkKey[] =>
+  getWalletHomeNetworks().map(network => network.key);
 
 export const isWalletHomeNetworkKey = (key: string): key is WalletHomeNetworkKey =>
-  WALLET_HOME_NETWORK_KEYS.includes(key as WalletHomeNetworkKey);
+  getWalletHomeNetworkKeys().includes(key as NetworkKey);

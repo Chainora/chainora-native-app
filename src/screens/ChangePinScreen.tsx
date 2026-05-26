@@ -1,12 +1,11 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { StatusBar, StyleSheet, Text, View } from 'react-native';
+import { StatusBar, StyleSheet, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
   PinGhostButton,
   PIN_COLORS,
-  PinAuras,
   PinTopBar,
 } from '../components/ui/pinTheme';
 import { PinInput } from '../components/ui/PinInput';
@@ -35,19 +34,7 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 18,
     paddingTop: 6,
-    paddingBottom: 14,
-  },
-  stepText: {
-    color: PIN_COLORS.textSoft,
-    fontSize: 10,
-    letterSpacing: 1.5,
-    fontWeight: '600',
-  },
-  footerStatus: {
-    color: PIN_COLORS.textSoft,
-    fontSize: 12,
-    lineHeight: 18,
-    textAlign: 'center',
+    paddingBottom: 18,
   },
 });
 
@@ -148,7 +135,32 @@ const ChangePinScreen: React.FC<Props> = ({ navigation }) => {
       onSuccess: handleFlowSuccess,
     });
     navigation.navigate(ROUTES.ScanCard, { flowId });
-  }, [canSubmit, pins.confirm, pins.next, pins.old, stepIndex, stepMeta, t]);
+  }, [
+    canSubmit,
+    executeChangePin,
+    handleFlowSuccess,
+    isEnabled,
+    navigation,
+    pins.confirm,
+    pins.next,
+    pins.old,
+    showToast,
+    stepIndex,
+    stepMeta,
+    t,
+  ]);
+
+  const handleStepBack = useCallback(() => {
+    if (stepIndex <= 0) {
+      return;
+    }
+    setErrorMessage(null);
+    setStepIndex(prev => {
+      const previousStep = prev - 1;
+      setStatusMessage(stepMeta[previousStep].subtitle);
+      return previousStep;
+    });
+  }, [stepIndex, stepMeta]);
 
   return (
     <View style={styles.screen}>
@@ -157,19 +169,11 @@ const ChangePinScreen: React.FC<Props> = ({ navigation }) => {
         backgroundColor={PIN_COLORS.background}
       />
       <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
-        <PinAuras />
         <View style={styles.content}>
-          <PinTopBar
-            onBack={() => navigation.goBack()}
-            right={(
-              <Text style={styles.stepText}>
-                {`${t('commonStep').toUpperCase()} ${stepIndex + 1}/${TOTAL_STEPS}`}
-              </Text>
-            )}
-          />
+          <PinTopBar onBack={() => navigation.goBack()} />
 
           <PinInput
-            variant="screen"
+            variant="card"
             value={currentPin}
             onDigit={handleDigit}
             onBackspace={handleBackspace}
@@ -178,15 +182,15 @@ const ChangePinScreen: React.FC<Props> = ({ navigation }) => {
             title={currentStep.title}
             subtitle={currentStep.subtitle}
             ctaLabel={submitLabel}
+            showHero={false}
+            squareIndicators
             heroIconName="key-outline"
             progressCurrent={stepIndex + 1}
             progressTotal={TOTAL_STEPS}
             progressLabel={`${t('commonStep')} ${stepIndex + 1}/${TOTAL_STEPS}`}
             supportingText={statusMessage}
             errorMessage={errorMessage}
-            afterActionSlot={
-              <PinGhostButton label={t('commonCancel')} onPress={() => navigation.goBack()} />
-            }
+            afterActionSlot={stepIndex > 0 ? <PinGhostButton label={t('commonBack')} onPress={handleStepBack} /> : null}
           />
         </View>
       </SafeAreaView>

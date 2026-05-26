@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  FlatList,
   Image,
   Pressable,
   ScrollView,
@@ -15,7 +16,7 @@ import Clipboard from '@react-native-clipboard/clipboard';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
-import { getAddress } from 'viem';
+import { encodeFunctionData, erc20Abi, getAddress } from 'viem';
 
 import {
   DISPLAY_FONT,
@@ -23,6 +24,7 @@ import {
   SANS_FONT,
   SANS_FONT_SEMIBOLD,
   WALLET_COLORS,
+  useWalletColors,
   WalletAuras,
   WalletButton,
   WalletPanel,
@@ -34,7 +36,6 @@ import {
 } from '../components/ui/walletDesign';
 import {
   getNetworkConfig,
-  getWalletHomeNetworks,
   type NetworkConfig,
   type WalletHomeNetworkKey,
 } from '../config/network';
@@ -50,14 +51,15 @@ import { useWalletBalance } from '../features/wallet/hooks/useWalletBalance';
 import { addRecentActivity } from '../features/wallet/recentActivityStorage';
 import {
   buildPortfolioAssetSnapshot,
-  formatUsdValue,
-  getUsdPriceForNetwork,
+  formatFiatValue,
   sortPortfolioAssets,
   type PortfolioAssetSnapshot,
 } from '../features/wallet/homePortfolio';
+import { useWalletHomeNetworks } from '../features/wallet/useWalletHomeNetworks';
 import type { RootStackParamList } from '../navigation/routes/rootStackParamList';
 import { ROUTES } from '../navigation/routes/routes';
 import { fetchWalletBalance } from '../services/balanceService';
+import { getUsdPriceForNetwork } from '../services/priceService';
 import { registerScanCardFlow } from '../services/scanCardFlowRegistry';
 import {
   fetchSuggestedGasPriceWei,
@@ -65,6 +67,7 @@ import {
   sendEthTransaction,
   type SendEthResult,
 } from '../services/transactionService';
+import { detectChainIdFromRpc, saveImportedNetwork } from '../features/wallet/importedNetworkStorage';
 
 type SendPickProps = NativeStackScreenProps<RootStackParamList, typeof ROUTES.SendPick>;
 type SendProps = NativeStackScreenProps<RootStackParamList, typeof ROUTES.Send>;
@@ -81,10 +84,59 @@ type TokenManageItem = {
 
 const PIN_LENGTH = 4;
 const DEFAULT_GAS_LIMIT = '21000';
-const walletHomeNetworks = getWalletHomeNetworks() as NetworkConfig[];
-const screenBase = buildWalletScreenStyles();
 
 const truncateAddress = (value: string) => `${value.slice(0, 6)}...${value.slice(-4)}`;
+const getAssetSymbol = (network: NetworkConfig): string => network.portfolioTokenSymbol ?? network.currencySymbol;
+const getAssetDecimals = (network: NetworkConfig): number => network.portfolioTokenDecimals ?? 18;
+
+const parseAmountToUnits = (value: string, decimals: number): bigint => {
+  const trimmed = value.trim();
+  if (!/^\d+(\.\d+)?$/.test(trimmed)) {
+    throw new Error('Amount must be a positive decimal number');
+  }
+
+  const [whole, fraction = ''] = trimmed.split('.');
+  if (fraction.length > decimals) {
+    throw new Error(`Amount has more than ${decimals} decimal places`);
+  }
+
+  const base = 10n ** BigInt(decimals);
+  const wholeUnits = BigInt(whole) * base;
+  const fractionPadded = `${fraction}${'0'.repeat(decimals)}`.slice(0, decimals);
+  const fractionUnits = fractionPadded ? BigInt(fractionPadded) : 0n;
+  return wholeUnits + fractionUnits;
+};
+
+const parseTransferAmount = (network: NetworkConfig, amount: string): bigint => {
+  if (network.portfolioTokenAddress) {
+    return parseAmountToUnits(amount, getAssetDecimals(network));
+  }
+  return parseEther(amount);
+};
+
+const buildTransferPayload = (network: NetworkConfig, recipient: string, amount: string) => {
+  if (!network.portfolioTokenAddress) {
+    return {
+      to: recipient.trim(),
+      valueWei: parseTransferAmount(network, amount),
+      dataHex: undefined as string | undefined,
+    };
+  }
+
+  const recipientAddress = getAddress(recipient.trim());
+  const amountUnits = parseTransferAmount(network, amount);
+  const dataHex = encodeFunctionData({
+    abi: erc20Abi,
+    functionName: 'transfer',
+    args: [recipientAddress, amountUnits],
+  });
+
+  return {
+    to: network.portfolioTokenAddress,
+    valueWei: 0n,
+    dataHex,
+  };
+};
 
 const parseGwei = (value: string): bigint => {
   const trimmed = value.trim();
@@ -151,13 +203,13 @@ const renderNetworkCoin = (network: NetworkConfig, size = 42) => {
   );
 };
 
-const useWalletHomeVisibility = () => {
-  const [visibility, setVisibility] = useState(buildDefaultWalletHomeVisibility());
+const useWalletHomeVisibility = (networkKeys: WalletHomeNetworkKey[]) => {
+  const [visibility, setVisibility] = useState(() => buildDefaultWalletHomeVisibility(networkKeys));
 
   useEffect(() => {
     let mounted = true;
 
-    getWalletHomeVisibility()
+    getWalletHomeVisibility(networkKeys)
       .then(next => {
         if (mounted) {
           setVisibility(next);
@@ -170,22 +222,23 @@ const useWalletHomeVisibility = () => {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [networkKeys]);
 
   const updateVisibility = useCallback(async (key: WalletHomeNetworkKey, enabled: boolean) => {
     setVisibility(prev => ({ ...prev, [key]: enabled }));
     try {
-      const next = await setWalletHomeAssetEnabled(key, enabled);
+      const next = await setWalletHomeAssetEnabled(key, enabled, networkKeys);
       setVisibility(next);
     } catch (error) {
       console.warn('[WalletFlow] Failed to persist visibility', error);
     }
-  }, []);
+  }, [networkKeys]);
 
   return { visibility, updateVisibility };
 };
 
 const useWalletHomeAssets = (
+  networks: NetworkConfig[],
   walletAddress: string,
   visibility?: Partial<Record<WalletHomeNetworkKey, boolean>>,
 ) => {
@@ -195,13 +248,36 @@ const useWalletHomeAssets = (
     let mounted = true;
 
     const load = async () => {
-      const results = await Promise.allSettled(
-        walletHomeNetworks.map(async network => {
-          const balance = await fetchWalletBalance(walletAddress, network);
+      const nextAssets = await Promise.all(
+        networks.map(async network => {
+          const [balanceResult, priceResult] = await Promise.allSettled([
+            fetchWalletBalance(walletAddress, network),
+            getUsdPriceForNetwork(network),
+          ]);
+
+          const priceQuote = priceResult.status === 'fulfilled'
+            ? priceResult.value
+            : { usdPrice: 0, available: false };
+
+          if (balanceResult.status === 'fulfilled') {
+            return buildPortfolioAssetSnapshot({
+              network,
+              balanceFormatted: balanceResult.value.formatted,
+              balanceWei: balanceResult.value.wei,
+              usdPrice: priceQuote.usdPrice,
+              priceUnavailable: !priceQuote.available,
+            });
+          }
+
           return buildPortfolioAssetSnapshot({
             network,
-            balanceFormatted: balance.formatted,
-            balanceWei: balance.wei,
+            balanceFormatted: '0.0000',
+            usdPrice: priceQuote.usdPrice,
+            priceUnavailable: !priceQuote.available,
+            error:
+              balanceResult.reason instanceof Error
+                ? balanceResult.reason.message
+                : String(balanceResult.reason),
           });
         }),
       );
@@ -210,21 +286,8 @@ const useWalletHomeAssets = (
         return;
       }
 
-      const nextAssets = results.map((result, index) => {
-        const network = walletHomeNetworks[index];
-        if (result.status === 'fulfilled') {
-          return result.value;
-        }
-
-        return buildPortfolioAssetSnapshot({
-          network,
-          balanceFormatted: '0.0000',
-          error: result.reason instanceof Error ? result.reason.message : String(result.reason),
-        });
-      });
-
       const filteredAssets = visibility
-        ? nextAssets.filter(asset => visibility[asset.network.key as WalletHomeNetworkKey] !== false)
+        ? nextAssets.filter(asset => visibility[asset.network.key] !== false)
         : nextAssets;
       setAssets(sortPortfolioAssets(filteredAssets));
     };
@@ -236,29 +299,95 @@ const useWalletHomeAssets = (
     return () => {
       mounted = false;
     };
-  }, [visibility, walletAddress]);
+  }, [networks, visibility, walletAddress]);
 
   return assets;
 };
 
 export const SendPickScreen: React.FC<SendPickProps> = ({ navigation, route }) => {
   const { walletAddress, publicKeyHex } = route.params;
-  const { t } = useSettings();
-  const { visibility } = useWalletHomeVisibility();
+  const { settings, t } = useSettings();
+  const colors = useWalletColors();
+  const screenBase = useMemo(() => buildWalletScreenStyles(colors), [colors]);
+  const walletHomeNetworks = useWalletHomeNetworks();
+  const walletHomeNetworkKeys = useMemo(
+    () => walletHomeNetworks.map(network => network.key as WalletHomeNetworkKey),
+    [walletHomeNetworks],
+  );
+  const { visibility } = useWalletHomeVisibility(walletHomeNetworkKeys);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<FilterKey>('all');
-  const assets = useWalletHomeAssets(walletAddress, visibility);
+  const sendPickListRef = useRef<FlatList<PortfolioAssetSnapshot> | null>(null);
+  const shouldResetSendPickScrollRef = useRef(false);
+  const assets = useWalletHomeAssets(walletHomeNetworks, walletAddress, visibility);
 
   const filteredAssets = useMemo(
     () =>
       assets.filter(asset => {
-        const haystack = `${asset.network.name} ${asset.network.currencySymbol}`.toLowerCase();
+        const haystack = `${asset.network.name} ${getAssetSymbol(asset.network)} ${asset.network.currencySymbol}`.toLowerCase();
         const matchesQuery = query.trim().length === 0 || haystack.includes(query.trim().toLowerCase());
         const matchesFilter = filter === 'all' || asset.network.key === filter;
         return matchesQuery && matchesFilter;
       }),
     [assets, filter, query],
   );
+
+  const handleSelectFilter = useCallback((next: FilterKey) => {
+    shouldResetSendPickScrollRef.current = true;
+    setFilter(next);
+    requestAnimationFrame(() => {
+      sendPickListRef.current?.scrollToOffset({ offset: 0, animated: false });
+    });
+  }, []);
+
+  useEffect(() => {
+    shouldResetSendPickScrollRef.current = true;
+    sendPickListRef.current?.scrollToOffset({ offset: 0, animated: false });
+  }, [query, filteredAssets.length]);
+
+  const renderSendPickItem = useCallback(
+    ({ item, index }: { item: PortfolioAssetSnapshot; index: number }) => (
+      <View>
+        <Pressable
+          style={styles.tokenRow}
+          onPress={() =>
+            navigation.navigate(ROUTES.Send, {
+              walletAddress,
+              publicKeyHex,
+              chainKey: item.network.key as WalletHomeNetworkKey,
+            })
+          }
+        >
+          {renderNetworkCoin(item.network)}
+          <View style={styles.tokenInfo}>
+            <Text style={styles.tokenSymbol}>{getAssetSymbol(item.network)}</Text>
+            <View style={styles.tokenMetaRow}>
+              <Text style={styles.tokenNetworkTag}>{item.network.name}</Text>
+            </View>
+            <Text style={styles.tokenName}>
+              {formatFiatValue(item.usdPrice, settings.currency)} / {getAssetSymbol(item.network)}
+            </Text>
+          </View>
+          <View style={styles.tokenRight}>
+            <Text style={styles.tokenValue}>{formatFiatValue(item.usdValue, settings.currency)}</Text>
+            <Text style={styles.tokenBalance}>
+              {item.balanceFormatted} {getAssetSymbol(item.network)}
+            </Text>
+          </View>
+        </Pressable>
+        {index < filteredAssets.length - 1 ? <View style={styles.tokenDivider} /> : null}
+      </View>
+    ),
+    [filteredAssets.length, navigation, publicKeyHex, settings.currency, walletAddress],
+  );
+
+  const handleSendPickListContentSizeChange = useCallback(() => {
+    if (!shouldResetSendPickScrollRef.current) {
+      return;
+    }
+    shouldResetSendPickScrollRef.current = false;
+    sendPickListRef.current?.scrollToOffset({ offset: 0, animated: false });
+  }, []);
 
   return (
     <View style={screenBase.screen}>
@@ -280,62 +409,45 @@ export const SendPickScreen: React.FC<SendPickProps> = ({ navigation, route }) =
             />
           </WalletTextField>
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+          <ScrollView
+            style={styles.sendPickFilterScroll}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.chipRow}
+          >
             <Pressable
               style={[styles.filterChip, filter === 'all' && styles.filterChipOn]}
-              onPress={() => setFilter('all')}
+              onPress={() => handleSelectFilter('all')}
             >
-              <Text style={[styles.filterChipText, filter === 'all' && styles.filterChipTextOn]}>All</Text>
+              <Text style={[styles.filterChipText, filter === 'all' && styles.filterChipTextOn]}>
+                {t('walletFilterAll')}
+              </Text>
             </Pressable>
             {walletHomeNetworks
-              .filter(network => visibility[network.key as WalletHomeNetworkKey] !== false)
+              .filter(network => visibility[network.key] !== false)
               .map(network => (
                 <Pressable
                   key={network.key}
                   style={[styles.filterChip, filter === network.key && styles.filterChipOn]}
-                  onPress={() => setFilter(network.key as WalletHomeNetworkKey)}
+                  onPress={() => handleSelectFilter(network.key as WalletHomeNetworkKey)}
                 >
                   {renderNetworkCoin(network, 28)}
                 </Pressable>
               ))}
           </ScrollView>
 
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.flowScroll}>
-            <WalletPanel style={styles.tokenListCard}>
-              {filteredAssets.map((asset, index) => (
-                <View key={asset.network.key}>
-                  <Pressable
-                    style={styles.tokenRow}
-                    onPress={() =>
-                      navigation.navigate(ROUTES.Send, {
-                        walletAddress,
-                        publicKeyHex,
-                        chainKey: asset.network.key as WalletHomeNetworkKey,
-                      })
-                    }
-                  >
-                    {renderNetworkCoin(asset.network)}
-                    <View style={styles.tokenInfo}>
-                      <Text style={styles.tokenSymbol}>{asset.network.currencySymbol}</Text>
-                      <View style={styles.tokenMetaRow}>
-                        <Text style={styles.tokenNetworkTag}>{asset.network.name}</Text>
-                      </View>
-                      <Text style={styles.tokenName}>
-                        {formatUsdValue(asset.usdPrice)} / {asset.network.currencySymbol}
-                      </Text>
-                    </View>
-                    <View style={styles.tokenRight}>
-                      <Text style={styles.tokenValue}>{formatUsdValue(asset.usdValue)}</Text>
-                      <Text style={styles.tokenBalance}>
-                        {asset.balanceFormatted} {asset.network.currencySymbol}
-                      </Text>
-                    </View>
-                  </Pressable>
-                  {index < filteredAssets.length - 1 ? <View style={styles.tokenDivider} /> : null}
-                </View>
-              ))}
-            </WalletPanel>
-          </ScrollView>
+          <WalletPanel style={[styles.tokenListCard, styles.sendPickResultsPanel]}>
+            <FlatList
+              ref={sendPickListRef}
+              data={filteredAssets}
+              keyExtractor={item => item.network.key}
+              renderItem={renderSendPickItem}
+              style={styles.sendPickResultsScroll}
+              contentContainerStyle={styles.sendPickResultsContent}
+              showsVerticalScrollIndicator={false}
+              onContentSizeChange={handleSendPickListContentSizeChange}
+            />
+          </WalletPanel>
         </View>
       </SafeAreaView>
     </View>
@@ -345,6 +457,8 @@ export const SendPickScreen: React.FC<SendPickProps> = ({ navigation, route }) =
 export const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
   const { walletAddress, publicKeyHex, chainKey, result } = route.params;
   const { t } = useSettings();
+  const colors = useWalletColors();
+  const screenBase = useMemo(() => buildWalletScreenStyles(colors), [colors]);
   const network = getNetworkConfig(chainKey);
   const balanceState = useWalletBalance(walletAddress, network);
   const [recipient, setRecipient] = useState('');
@@ -371,7 +485,10 @@ export const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
     };
   }, [network]);
 
-  const feeNative = useMemo(() => formatFeeNative(gasLimit, gasPriceGwei), [gasLimit, gasPriceGwei]);
+  const feeNative = useMemo(
+    () => (network.portfolioTokenAddress ? null : formatFeeNative(gasLimit, gasPriceGwei)),
+    [gasLimit, gasPriceGwei, network.portfolioTokenAddress],
+  );
 
   const openReview = useCallback(() => {
     const trimmedRecipient = recipient.trim();
@@ -388,7 +505,7 @@ export const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
     }
 
     try {
-      if (parseEther(trimmedAmount) <= 0n) {
+      if (parseTransferAmount(network, trimmedAmount) <= 0n) {
         setError(t('sendErrorAmountPositive'));
         return;
       }
@@ -399,7 +516,7 @@ export const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
 
     setError(null);
     setShowReview(true);
-  }, [amount, recipient, t]);
+  }, [amount, network, recipient, t]);
 
   return (
     <View style={screenBase.screen}>
@@ -413,7 +530,7 @@ export const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
               <View style={styles.networkHeroText}>
                 <Text style={styles.networkHeroTitle}>{network.name}</Text>
                 <Text style={styles.networkHeroSub}>
-                  {balanceState.formatted ?? '0.0000'} {network.currencySymbol}
+                  {balanceState.formatted ?? '0.0000'} {getAssetSymbol(network)}
                 </Text>
               </View>
               <WalletPill style={styles.networkBadge}>
@@ -453,7 +570,7 @@ export const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
                 right={
                   <View style={styles.fieldActions}>
                     <WalletPill style={styles.amountTag}>
-                      <Text style={styles.amountTagText}>{network.currencySymbol}</Text>
+                      <Text style={styles.amountTagText}>{getAssetSymbol(network)}</Text>
                     </WalletPill>
                     <Pressable onPress={() => setAmount(balanceState.formatted ?? '0.0000')}>
                       <Text style={styles.fieldActionText}>{t('commonMax')}</Text>
@@ -498,7 +615,7 @@ export const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
 
               <View style={styles.reviewAmountWrap}>
                 <Text style={styles.reviewAmount}>
-                  {amount || '0'} <Text style={styles.reviewAmountUnit}>{network.currencySymbol}</Text>
+                  {amount || '0'} <Text style={styles.reviewAmountUnit}>{getAssetSymbol(network)}</Text>
                 </Text>
                 <Text style={styles.reviewUsd}>{network.name}</Text>
               </View>
@@ -588,7 +705,7 @@ export const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
                 <Text style={styles.resultLabel}>{t('sendTxHash')}</Text>
                 <Text style={styles.resultHash}>{result.transactionHash}</Text>
                 <Text style={styles.resultMeta}>
-                  {amount || result.amount} {network.currencySymbol} | {result.gasLimit} gas
+                  {amount || result.amount} {getAssetSymbol(network)} | {result.gasLimit} gas
                 </Text>
               </View>
               <WalletButton label={t('commonDone')} onPress={() => navigation.goBack()} />
@@ -603,7 +720,26 @@ export const SendScreen: React.FC<SendProps> = ({ navigation, route }) => {
 export const ReceiveScreen: React.FC<ReceiveProps> = ({ navigation, route }) => {
   const { walletAddress, chainKey } = route.params;
   const { t } = useSettings();
-  const [selectedChainKey, setSelectedChainKey] = useState<WalletHomeNetworkKey>(chainKey ?? 'ethMainnet');
+  const colors = useWalletColors();
+  const screenBase = useMemo(() => buildWalletScreenStyles(colors), [colors]);
+  const walletHomeNetworks = useWalletHomeNetworks();
+  const [selectedChainKey, setSelectedChainKey] = useState<WalletHomeNetworkKey | null>(
+    (chainKey ?? (walletHomeNetworks[0]?.key as WalletHomeNetworkKey)) ?? null,
+  );
+
+  useEffect(() => {
+    if (selectedChainKey) {
+      return;
+    }
+    if (walletHomeNetworks.length > 0) {
+      setSelectedChainKey(walletHomeNetworks[0].key as WalletHomeNetworkKey);
+    }
+  }, [selectedChainKey, walletHomeNetworks]);
+
+  if (!selectedChainKey) {
+    return null;
+  }
+
   const network = getNetworkConfig(selectedChainKey);
 
   return (
@@ -615,7 +751,7 @@ export const ReceiveScreen: React.FC<ReceiveProps> = ({ navigation, route }) => 
             onBack={() => navigation.goBack()}
             right={
               <Pressable style={styles.iconButton}>
-                <Ionicons name="information-circle-outline" size={18} color={WALLET_COLORS.textMuted} />
+                <Ionicons name="information-circle-outline" size={18} color={colors.textMuted} />
               </Pressable>
             }
           />
@@ -635,17 +771,18 @@ export const ReceiveScreen: React.FC<ReceiveProps> = ({ navigation, route }) => 
 
             <WalletPanel style={styles.warningCard}>
               <View style={styles.warningIcon}>
-                <Ionicons name="information-circle-outline" size={14} color={WALLET_COLORS.warning} />
+                <Ionicons name="information-circle-outline" size={14} color={colors.warning} />
               </View>
               <Text style={styles.warningText}>
-                Only send <Text style={styles.warningStrong}>{network.currencySymbol}</Text> on {network.name} to this
-                address.
+                {t('walletReceiveWarning')
+                  .replace('{SYMBOL}', getAssetSymbol(network))
+                  .replace('{NETWORK}', network.name)}
               </Text>
             </WalletPanel>
 
             <View style={styles.receiveCoinHead}>
               {renderNetworkCoin(network, 30)}
-              <Text style={styles.receiveCoinText}>{network.currencySymbol}</Text>
+              <Text style={styles.receiveCoinText}>{getAssetSymbol(network)}</Text>
               <WalletPill style={styles.receiveBadge}>
                 <Text style={styles.receiveBadgeText}>{network.name}</Text>
               </WalletPill>
@@ -657,7 +794,7 @@ export const ReceiveScreen: React.FC<ReceiveProps> = ({ navigation, route }) => 
                 <View style={styles.qrCornerTR} />
                 <View style={styles.qrCornerBL} />
                 <View style={styles.qrBrand}>
-                  <Ionicons name="shield-checkmark-outline" size={28} color={WALLET_COLORS.text} />
+                  <Ionicons name="shield-checkmark-outline" size={28} color={colors.text} />
                 </View>
               </View>
               <Text style={styles.receiveAddress}>{walletAddress}</Text>
@@ -672,7 +809,7 @@ export const ReceiveScreen: React.FC<ReceiveProps> = ({ navigation, route }) => 
                 }}
               >
                 <View style={styles.receiveActionIcon}>
-                  <Ionicons name="copy-outline" size={18} color={WALLET_COLORS.text} />
+                  <Ionicons name="copy-outline" size={18} color={colors.text} />
                 </View>
                 <Text style={styles.receiveActionLabel}>{t('homeWalletCopyAddress')}</Text>
               </Pressable>
@@ -685,7 +822,7 @@ export const ReceiveScreen: React.FC<ReceiveProps> = ({ navigation, route }) => 
                 }}
               >
                 <View style={styles.receiveActionIcon}>
-                  <Ionicons name="share-social-outline" size={18} color={WALLET_COLORS.text} />
+                  <Ionicons name="share-social-outline" size={18} color={colors.text} />
                 </View>
                 <Text style={styles.receiveActionLabel}>{t('homeReceiveShare')}</Text>
               </Pressable>
@@ -700,6 +837,8 @@ export const ReceiveScreen: React.FC<ReceiveProps> = ({ navigation, route }) => 
 export const TouchSignScreen: React.FC<TouchSignProps> = ({ navigation, route }) => {
   const { walletAddress, publicKeyHex, chainKey, recipient, amount, pin, gasPriceGwei, gasLimit } = route.params;
   const { t } = useSettings();
+  const colors = useWalletColors();
+  const screenBase = useMemo(() => buildWalletScreenStyles(colors), [colors]);
   const { isEnabled } = useNfcEnabled();
   const network = getNetworkConfig(chainKey);
   const pendingResultRef = useRef<SendEthResult | null>(null);
@@ -718,14 +857,18 @@ export const TouchSignScreen: React.FC<TouchSignProps> = ({ navigation, route })
       prefilledPin: pin,
       onFlowScan: async () => {
         try {
+          const transferPayload = buildTransferPayload(network, recipient, amount);
           const outcome = await sendEthTransaction({
             from: walletAddress,
-            to: recipient.trim(),
-            valueWei: parseEther(amount.trim()),
+            to: transferPayload.to,
+            valueWei: transferPayload.valueWei,
+            dataHex: transferPayload.dataHex,
             pin,
             network,
             gasPriceWei: gasPriceGwei ? parseGwei(gasPriceGwei) : undefined,
-            gasLimitWei: gasLimit ? BigInt(gasLimit) : undefined,
+            gasLimitWei: network.portfolioTokenAddress
+              ? undefined
+              : gasLimit ? BigInt(gasLimit) : undefined,
           });
 
           pendingResultRef.current = outcome;
@@ -755,7 +898,7 @@ export const TouchSignScreen: React.FC<TouchSignProps> = ({ navigation, route })
           fromAddress: walletAddress,
           toAddress: recipient.trim(),
           amountDisplay: amount.trim(),
-          currencySymbol: network.currencySymbol,
+          currencySymbol: getAssetSymbol(network),
           networkName: network.name,
         });
 
@@ -822,7 +965,7 @@ export const TouchSignScreen: React.FC<TouchSignProps> = ({ navigation, route })
               <Text style={styles.resultLabel}>{t('sendNetworkLabel')}</Text>
               <Text style={styles.resultHash}>{network.name}</Text>
               <Text style={styles.resultMeta}>
-                {amount} {network.currencySymbol} | {truncateAddress(recipient)}
+                {amount} {getAssetSymbol(network)} | {truncateAddress(recipient)}
               </Text>
             </WalletPanel>
           </View>
@@ -842,24 +985,33 @@ export const TouchSignScreen: React.FC<TouchSignProps> = ({ navigation, route })
 };
 
 export const TokenManageScreen: React.FC<TokenManageProps> = ({ navigation }) => {
-  const { visibility, updateVisibility } = useWalletHomeVisibility();
+  const { settings, t } = useSettings();
+  const colors = useWalletColors();
+  const screenBase = useMemo(() => buildWalletScreenStyles(colors), [colors]);
+  const walletHomeNetworks = useWalletHomeNetworks();
+  const walletHomeNetworkKeys = useMemo(
+    () => walletHomeNetworks.map(network => network.key as WalletHomeNetworkKey),
+    [walletHomeNetworks],
+  );
+  const { visibility, updateVisibility } = useWalletHomeVisibility(walletHomeNetworkKeys);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<FilterKey>('all');
+  const [priceByNetworkKey, setPriceByNetworkKey] = useState<Record<string, { usdPrice: number; available: boolean }>>({});
 
   const items = useMemo<TokenManageItem[]>(
     () =>
       walletHomeNetworks.map(network => ({
         key: network.key as WalletHomeNetworkKey,
-        enabled: visibility[network.key as WalletHomeNetworkKey] !== false,
+        enabled: visibility[network.key] !== false,
       })),
-    [visibility],
+    [visibility, walletHomeNetworks],
   );
 
   const filtered = useMemo(
     () =>
       items.filter(item => {
         const network = getNetworkConfig(item.key);
-        const haystack = `${network.currencySymbol} ${network.name}`.toLowerCase();
+        const haystack = `${getAssetSymbol(network)} ${network.currencySymbol} ${network.name}`.toLowerCase();
         const matchesQuery = query.trim().length === 0 || haystack.includes(query.trim().toLowerCase());
         const matchesFilter = filter === 'all' || filter === item.key;
         return matchesQuery && matchesFilter;
@@ -867,16 +1019,49 @@ export const TokenManageScreen: React.FC<TokenManageProps> = ({ navigation }) =>
     [filter, items, query],
   );
 
+  useEffect(() => {
+    let mounted = true;
+
+    Promise.all(
+      walletHomeNetworks.map(async network => ({
+        networkKey: network.key,
+        quote: await getUsdPriceForNetwork(network),
+      })),
+    )
+      .then(results => {
+        if (!mounted) {
+          return;
+        }
+
+        const next = results.reduce<Record<string, { usdPrice: number; available: boolean }>>((result, item) => {
+          result[item.networkKey] = {
+            usdPrice: item.quote.usdPrice,
+            available: item.quote.available,
+          };
+          return result;
+        }, {});
+
+        setPriceByNetworkKey(next);
+      })
+      .catch(error => {
+        console.warn('[WalletFlow] Failed to load token prices', error);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [walletHomeNetworks]);
+
   return (
     <View style={screenBase.screen}>
       <SafeAreaView style={screenBase.safeArea} edges={['top', 'bottom']}>
         <View style={screenBase.content}>
           <WalletTopBar
-            title="Manage Assets"
+            title={t('walletManageAssetsTitle')}
             onBack={() => navigation.goBack()}
             right={
               <Pressable style={styles.iconButton} onPress={() => navigation.navigate(ROUTES.AddToken)}>
-                <Ionicons name="add" size={18} color={WALLET_COLORS.text} />
+                <Ionicons name="add" size={18} color={colors.text} />
               </Pressable>
             }
           />
@@ -884,11 +1069,11 @@ export const TokenManageScreen: React.FC<TokenManageProps> = ({ navigation }) =>
           <View style={styles.manageControls}>
             <WalletTextField
               style={styles.manageSearchField}
-              left={<Ionicons name="search-outline" size={15} color={WALLET_COLORS.textSoft} />}
+              left={<Ionicons name="search-outline" size={15} color={colors.textSoft} />}
             >
               <TextInput
-                placeholder="Search network..."
-                placeholderTextColor={WALLET_COLORS.textLow}
+                placeholder={t('walletManageSearchPlaceholder')}
+                placeholderTextColor={colors.textLow}
                 value={query}
                 onChangeText={setQuery}
                 multiline={false}
@@ -901,7 +1086,9 @@ export const TokenManageScreen: React.FC<TokenManageProps> = ({ navigation }) =>
                 style={[styles.filterChip, filter === 'all' && styles.filterChipOn]}
                 onPress={() => setFilter('all')}
               >
-                <Text style={[styles.filterChipText, filter === 'all' && styles.filterChipTextOn]}>All</Text>
+                <Text style={[styles.filterChipText, filter === 'all' && styles.filterChipTextOn]}>
+                  {t('walletFilterAll')}
+                </Text>
               </Pressable>
               {walletHomeNetworks.map(network => (
                 <Pressable
@@ -926,19 +1113,22 @@ export const TokenManageScreen: React.FC<TokenManageProps> = ({ navigation }) =>
                       {renderNetworkCoin(network)}
                       <View style={styles.tokenInfo}>
                         <View style={styles.inlineRow}>
-                          <Text style={styles.tokenSymbol}>{network.currencySymbol}</Text>
+                          <Text style={styles.tokenSymbol}>{getAssetSymbol(network)}</Text>
                           <WalletPill style={styles.manageChainPill}>
                             <Text style={styles.manageChainText}>{network.name}</Text>
                           </WalletPill>
                         </View>
                         <Text style={styles.tokenName}>
-                          {formatUsdValue(getUsdPriceForNetwork(network.key as WalletHomeNetworkKey))} / {network.currencySymbol}
+                          {formatFiatValue(priceByNetworkKey[network.key]?.usdPrice ?? 0, settings.currency)} / {getAssetSymbol(network)}
+                          {priceByNetworkKey[network.key] && !priceByNetworkKey[network.key].available
+                            ? ` | ${t('homePriceUnavailable')}`
+                            : ''}
                         </Text>
                       </View>
                       <Switch
                         value={item.enabled}
                         thumbColor="#FFFFFF"
-                        trackColor={{ false: '#27364D', true: WALLET_COLORS.signal }}
+                        trackColor={{ false: '#27364D', true: colors.signal }}
                         onValueChange={value => {
                           updateVisibility(item.key, value).catch(() => undefined);
                         }}
@@ -957,29 +1147,81 @@ export const TokenManageScreen: React.FC<TokenManageProps> = ({ navigation }) =>
 };
 
 export const AddTokenScreen: React.FC<AddTokenProps> = ({ navigation }) => {
+  const { t } = useSettings();
+  const colors = useWalletColors();
+  const screenBase = useMemo(() => buildWalletScreenStyles(colors), [colors]);
+  const walletHomeNetworks = useWalletHomeNetworks();
   const [tab, setTab] = useState<'token' | 'network'>('token');
+  const [selectedTokenNetworkKey, setSelectedTokenNetworkKey] = useState<WalletHomeNetworkKey | null>(
+    walletHomeNetworks[0]?.key as WalletHomeNetworkKey,
+  );
   const [address, setAddress] = useState('');
   const [name, setName] = useState('');
   const [symbol, setSymbol] = useState('');
   const [decimals, setDecimals] = useState('');
   const [networkName, setNetworkName] = useState('');
+  const [networkSymbol, setNetworkSymbol] = useState('');
   const [rpcUrl, setRpcUrl] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const canSave = tab === 'token'
     ? Boolean(address && name && symbol && decimals)
-    : Boolean(networkName && rpcUrl);
+    : Boolean(networkName && rpcUrl && networkSymbol && !saving);
+
+  useEffect(() => {
+    if (walletHomeNetworks.length === 0) {
+      return;
+    }
+
+    if (!selectedTokenNetworkKey || !walletHomeNetworks.some(network => network.key === selectedTokenNetworkKey)) {
+      setSelectedTokenNetworkKey(walletHomeNetworks[0].key as WalletHomeNetworkKey);
+    }
+  }, [selectedTokenNetworkKey, walletHomeNetworks]);
+
+  const handleSave = useCallback(() => {
+    if (!canSave) {
+      return;
+    }
+
+    if (tab === 'token') {
+      Alert.alert(t('walletImportTokenSavedTitle'), t('walletImportTokenSavedBody'));
+      return;
+    }
+
+    setSaving(true);
+    detectChainIdFromRpc(rpcUrl)
+      .then(chainId =>
+        saveImportedNetwork({
+          name: networkName,
+          rpcUrl,
+          currencySymbol: networkSymbol,
+          chainId,
+        }),
+      )
+      .then(() => {
+        Alert.alert(t('walletImportNetworkSavedTitle'), t('walletImportNetworkSavedBody'));
+        navigation.goBack();
+      })
+      .catch(error => {
+        const message = error instanceof Error ? error.message : String(error);
+        Alert.alert(t('walletImportNetworkSaveFailedTitle'), message);
+      })
+      .finally(() => {
+        setSaving(false);
+      });
+  }, [canSave, navigation, networkName, networkSymbol, rpcUrl, t, tab]);
 
   return (
     <View style={screenBase.screen}>
       <SafeAreaView style={screenBase.safeArea} edges={['top', 'bottom']}>
         <View style={screenBase.content}>
-          <WalletTopBar title="Import Token" onBack={() => navigation.goBack()} />
+          <WalletTopBar title={t('walletImportTitle')} onBack={() => navigation.goBack()} />
 
           <View style={styles.tabSwitch}>
             {(['token', 'network'] as const).map(option => (
               <Pressable key={option} style={styles.tabSwitchItem} onPress={() => setTab(option)}>
                 <Text style={[styles.tabSwitchText, tab === option && styles.tabSwitchTextOn]}>
-                  {option === 'token' ? 'Token' : 'Network'}
+                  {option === 'token' ? t('walletImportTabToken') : t('walletImportTabNetwork')}
                 </Text>
                 {tab === option ? <View style={styles.tabSwitchIndicator} /> : null}
               </Pressable>
@@ -989,28 +1231,39 @@ export const AddTokenScreen: React.FC<AddTokenProps> = ({ navigation }) => {
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.formScroll}>
             <WalletPanel style={styles.warningCard}>
               <View style={[styles.warningIcon, styles.warningIconAmber]}>
-                <Ionicons name="warning-outline" size={14} color={WALLET_COLORS.warning} />
+                <Ionicons name="warning-outline" size={14} color={colors.warning} />
               </View>
-              <Text style={styles.warningText}>
-                Only add assets and networks you trust. A malicious RPC or fake token can mislead balances.
-              </Text>
+              <Text style={styles.warningText}>{t('walletImportWarningBody')}</Text>
             </WalletPanel>
 
             {tab === 'token' ? (
               <>
                 <View style={styles.fieldGroup}>
-                  <WalletSectionLabel label="Network" />
-                  <WalletTextField left={renderNetworkCoin(walletHomeNetworks[0], 20)}>
-                    <Text style={styles.networkPillText}>Ethereum</Text>
+                  <WalletSectionLabel label={t('walletImportNetworkLabel')} />
+                  <WalletTextField left={selectedTokenNetworkKey ? renderNetworkCoin(getNetworkConfig(selectedTokenNetworkKey), 20) : null}>
+                    <Text style={styles.networkPillText}>
+                      {selectedTokenNetworkKey ? getNetworkConfig(selectedTokenNetworkKey).name : '-'}
+                    </Text>
                   </WalletTextField>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRowCompact}>
+                    {walletHomeNetworks.map(network => (
+                      <Pressable
+                        key={network.key}
+                        style={[styles.filterChip, selectedTokenNetworkKey === network.key && styles.filterChipOn]}
+                        onPress={() => setSelectedTokenNetworkKey(network.key as WalletHomeNetworkKey)}
+                      >
+                        {renderNetworkCoin(network, 28)}
+                      </Pressable>
+                    ))}
+                  </ScrollView>
                 </View>
 
                 <View style={styles.fieldGroup}>
-                  <WalletSectionLabel label="Contract Address" />
+                  <WalletSectionLabel label={t('walletImportContractAddressLabel')} />
                   <WalletTextField>
                     <TextInput
                       placeholder="0x..."
-                      placeholderTextColor={WALLET_COLORS.textLow}
+                      placeholderTextColor={colors.textLow}
                       value={address}
                       onChangeText={setAddress}
                       autoCapitalize="none"
@@ -1020,11 +1273,11 @@ export const AddTokenScreen: React.FC<AddTokenProps> = ({ navigation }) => {
                 </View>
 
                 <View style={styles.fieldGroup}>
-                  <WalletSectionLabel label="Name" />
+                  <WalletSectionLabel label={t('walletImportNameLabel')} />
                   <WalletTextField>
                     <TextInput
-                      placeholder="Example: Pepe"
-                      placeholderTextColor={WALLET_COLORS.textLow}
+                      placeholder={t('walletImportNamePlaceholder')}
+                      placeholderTextColor={colors.textLow}
                       value={name}
                       onChangeText={setName}
                       style={styles.fieldInput}
@@ -1033,11 +1286,11 @@ export const AddTokenScreen: React.FC<AddTokenProps> = ({ navigation }) => {
                 </View>
 
                 <View style={styles.fieldGroup}>
-                  <WalletSectionLabel label="Ticker" />
+                  <WalletSectionLabel label={t('walletImportTickerLabel')} />
                   <WalletTextField>
                     <TextInput
-                      placeholder="PEPE"
-                      placeholderTextColor={WALLET_COLORS.textLow}
+                      placeholder={t('walletImportTickerPlaceholder')}
+                      placeholderTextColor={colors.textLow}
                       value={symbol}
                       onChangeText={text => setSymbol(text.toUpperCase())}
                       style={styles.fieldInput}
@@ -1046,11 +1299,11 @@ export const AddTokenScreen: React.FC<AddTokenProps> = ({ navigation }) => {
                 </View>
 
                 <View style={styles.fieldGroup}>
-                  <WalletSectionLabel label="Decimals" />
+                  <WalletSectionLabel label={t('walletImportDecimalsLabel')} />
                   <WalletTextField>
                     <TextInput
                       placeholder="18"
-                      placeholderTextColor={WALLET_COLORS.textLow}
+                      placeholderTextColor={colors.textLow}
                       value={decimals}
                       onChangeText={text => setDecimals(text.replace(/[^\d]/g, '').slice(0, 2))}
                       keyboardType="number-pad"
@@ -1062,11 +1315,11 @@ export const AddTokenScreen: React.FC<AddTokenProps> = ({ navigation }) => {
             ) : (
               <>
                 <View style={styles.fieldGroup}>
-                  <WalletSectionLabel label="Network Name" />
+                  <WalletSectionLabel label={t('walletImportNetworkNameLabel')} />
                   <WalletTextField>
                     <TextInput
-                      placeholder="Example: Base Mainnet"
-                      placeholderTextColor={WALLET_COLORS.textLow}
+                      placeholder={t('walletImportNetworkNamePlaceholder')}
+                      placeholderTextColor={colors.textLow}
                       value={networkName}
                       onChangeText={setNetworkName}
                       style={styles.fieldInput}
@@ -1074,11 +1327,23 @@ export const AddTokenScreen: React.FC<AddTokenProps> = ({ navigation }) => {
                   </WalletTextField>
                 </View>
                 <View style={styles.fieldGroup}>
-                  <WalletSectionLabel label="RPC URL" />
+                  <WalletSectionLabel label={t('walletImportNetworkSymbolLabel')} />
+                  <WalletTextField>
+                    <TextInput
+                      placeholder={t('walletImportNetworkSymbolPlaceholder')}
+                      placeholderTextColor={colors.textLow}
+                      value={networkSymbol}
+                      onChangeText={text => setNetworkSymbol(text.toUpperCase())}
+                      style={styles.fieldInput}
+                    />
+                  </WalletTextField>
+                </View>
+                <View style={styles.fieldGroup}>
+                  <WalletSectionLabel label={t('walletImportRpcUrlLabel')} />
                   <WalletTextField>
                     <TextInput
                       placeholder="https://..."
-                      placeholderTextColor={WALLET_COLORS.textLow}
+                      placeholderTextColor={colors.textLow}
                       value={rpcUrl}
                       onChangeText={setRpcUrl}
                       autoCapitalize="none"
@@ -1090,7 +1355,11 @@ export const AddTokenScreen: React.FC<AddTokenProps> = ({ navigation }) => {
             )}
           </ScrollView>
 
-          <WalletButton label="Save" disabled={!canSave} />
+          <WalletButton
+            label={saving ? t('walletImportSaving') : t('walletImportSave')}
+            disabled={!canSave}
+            onPress={handleSave}
+          />
         </View>
       </SafeAreaView>
     </View>
@@ -1101,6 +1370,18 @@ const styles = StyleSheet.create({
   flowScroll: {
     paddingBottom: 24,
     gap: 14,
+  },
+  sendPickResultsScroll: {
+    flex: 1,
+    minHeight: 0,
+  },
+  sendPickResultsPanel: {
+    flex: 1,
+  },
+  sendPickResultsContent: {
+    paddingBottom: 24,
+    justifyContent: 'flex-start',
+    alignItems: 'stretch',
   },
   formScroll: {
     paddingVertical: 16,
@@ -1124,6 +1405,11 @@ const styles = StyleSheet.create({
     width: '100%',
     minHeight: 56,
     alignSelf: 'stretch',
+  },
+  sendPickFilterScroll: {
+    flexGrow: 0,
+    flexShrink: 0,
+    maxHeight: 66,
   },
   chipRow: {
     gap: 10,

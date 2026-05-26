@@ -1,10 +1,16 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { Alert, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 
-import { DISPLAY_FONT, MONO_FONT, WALLET_COLORS } from '../components/ui/walletDesign';
+import {
+  DISPLAY_FONT,
+  DISPLAY_FONT_MEDIUM,
+  MONO_FONT,
+  type WalletColors,
+  useWalletColors,
+} from '../components/ui/walletDesign';
 import { useAuth } from '../features/auth';
 import { useSettings } from '../features/settings';
 import { clearRecentActivities } from '../features/wallet/recentActivityStorage';
@@ -37,14 +43,20 @@ const truncateAddress = (value: string) => {
 const SettingsScreen: React.FC<Props> = ({ navigation }) => {
   const { session, clearSession } = useAuth();
   const { settings, resolvedTheme, setTheme, t } = useSettings();
-  const [biometricEnabled, setBiometricEnabled] = useState(true);
+  const colors = useWalletColors();
+  const styles = useMemo(() => buildStyles(colors), [colors]);
+  const biometricEnabled = false;
 
   const languageLabel = settings.language === 'vi' ? t('languageVietnamese') : t('languageEnglish');
   const currencyCode = settings.currency.toUpperCase();
   const isDarkTheme = resolvedTheme === 'dark';
 
-  const handleGeneral = useCallback(() => {
-    navigation.navigate(ROUTES.General);
+  const handleLanguage = useCallback(() => {
+    navigation.navigate(ROUTES.LanguageSettings);
+  }, [navigation]);
+
+  const handleCurrency = useCallback(() => {
+    navigation.navigate(ROUTES.CurrencySettings);
   }, [navigation]);
 
   const handleChangePin = useCallback(() => {
@@ -118,7 +130,6 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
         subtitle: t('settingsBiometricSubtitle'),
         icon: 'finger-print-outline',
         toggle: biometricEnabled,
-        onPress: () => setBiometricEnabled(prev => !prev),
       },
     ],
     [biometricEnabled, handleThemeToggle, isDarkTheme, t],
@@ -152,7 +163,7 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
         subtitle: languageLabel,
         icon: 'language-outline',
         meta: settings.language.toUpperCase(),
-        onPress: handleGeneral,
+        onPress: handleLanguage,
       },
       {
         id: 'currency',
@@ -160,10 +171,10 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
         subtitle: t('settingsCurrencyPrimarySubtitle'),
         icon: 'cash-outline',
         meta: currencyCode,
-        onPress: handleGeneral,
+        onPress: handleCurrency,
       },
     ],
-    [currencyCode, handleGeneral, languageLabel, settings.language, t],
+    [currencyCode, handleCurrency, handleLanguage, languageLabel, settings.language, t],
   );
 
   const socialRows = useMemo<RowItem[]>(
@@ -263,15 +274,15 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
             ) : row.social ? (
               <View style={styles.socialCta}>
                 <Text style={styles.socialCtaText}>{t('settingsSocialOpen')}</Text>
-                <Ionicons name="arrow-up-outline" size={10} color={WALLET_COLORS.textMuted} />
+                <Ionicons name="arrow-up-outline" size={10} color={colors.textMuted} />
               </View>
             ) : row.meta ? (
               <View style={styles.metaWrap}>
                 <Text style={styles.metaText}>{row.meta}</Text>
-                <Ionicons name="chevron-forward" size={12} color={WALLET_COLORS.textSoft} />
+                <Ionicons name="chevron-forward" size={12} color={colors.textSoft} />
               </View>
             ) : (
-              <Ionicons name="chevron-forward" size={14} color={WALLET_COLORS.textSoft} />
+              <Ionicons name="chevron-forward" size={14} color={colors.textSoft} />
             )}
 
             {index < rows.length - 1 ? <View style={styles.rowSeparator} /> : null}
@@ -303,13 +314,13 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
     <View style={styles.root}>
       <StatusBar
         barStyle={resolvedTheme === 'light' ? 'dark-content' : 'light-content'}
-        backgroundColor={WALLET_COLORS.background}
+        backgroundColor={colors.background}
       />
 
       <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
         <View style={styles.topBar}>
           <Pressable style={styles.backButton} onPress={() => navigation.goBack()}>
-            <Ionicons name="chevron-back" size={14} color={WALLET_COLORS.textMuted} />
+            <Ionicons name="chevron-back" size={14} color={colors.textMuted} />
           </Pressable>
           <Text style={styles.topTitle}>{t('headerSettingsTitle')}</Text>
           <View style={styles.backButtonGhost} />
@@ -369,10 +380,10 @@ const SettingsScreen: React.FC<Props> = ({ navigation }) => {
   );
 };
 
-const styles = StyleSheet.create({
+const buildStyles = (colors: WalletColors) => StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: WALLET_COLORS.background,
+    backgroundColor: colors.background,
   },
   safeArea: {
     flex: 1,
@@ -382,7 +393,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: WALLET_COLORS.border,
+    borderBottomColor: colors.border,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
@@ -392,8 +403,8 @@ const styles = StyleSheet.create({
     height: 32,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: WALLET_COLORS.border,
-    backgroundColor: WALLET_COLORS.surfaceAlt,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -404,9 +415,9 @@ const styles = StyleSheet.create({
   topTitle: {
     flex: 1,
     textAlign: 'center',
-    fontFamily: DISPLAY_FONT,
+    fontFamily: DISPLAY_FONT_MEDIUM,
     fontSize: 16,
-    color: WALLET_COLORS.text,
+    color: colors.text,
     letterSpacing: -0.4,
   },
   scrollContent: {
@@ -422,7 +433,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     borderColor: 'rgba(40, 151, 255, 0.3)',
-    backgroundColor: WALLET_COLORS.surfaceAlt,
+    backgroundColor: colors.surfaceAlt,
     marginBottom: 18,
   },
   profileAvatar: {
@@ -448,14 +459,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   profileName: {
-    color: WALLET_COLORS.text,
+    color: colors.text,
     fontFamily: DISPLAY_FONT,
     fontSize: 15,
     letterSpacing: -0.2,
   },
   profileAddress: {
     marginTop: 2,
-    color: WALLET_COLORS.textMuted,
+    color: colors.textMuted,
     fontFamily: MONO_FONT,
     fontSize: 11,
     letterSpacing: 0.4,
@@ -475,7 +486,7 @@ const styles = StyleSheet.create({
     width: 5,
     height: 5,
     borderRadius: 2.5,
-    backgroundColor: WALLET_COLORS.success,
+    backgroundColor: colors.success,
   },
   profileStatusText: {
     color: '#8DE9C5',
@@ -490,7 +501,7 @@ const styles = StyleSheet.create({
   groupLabel: {
     paddingHorizontal: 4,
     paddingBottom: 8,
-    color: WALLET_COLORS.textSoft,
+    color: colors.textSoft,
     fontFamily: MONO_FONT,
     fontSize: 10,
     letterSpacing: 1.6,
@@ -499,8 +510,8 @@ const styles = StyleSheet.create({
   groupCard: {
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: WALLET_COLORS.border,
-    backgroundColor: WALLET_COLORS.surface,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
     overflow: 'hidden',
   },
   row: {
@@ -512,7 +523,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   rowPressed: {
-    backgroundColor: WALLET_COLORS.surfaceAlt,
+    backgroundColor: colors.surfaceAlt,
   },
   rowIcon: {
     width: 32,
@@ -549,7 +560,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   rowTitle: {
-    color: WALLET_COLORS.text,
+    color: colors.text,
     fontSize: 14,
     fontWeight: '600',
     letterSpacing: -0.1,
@@ -559,7 +570,7 @@ const styles = StyleSheet.create({
   },
   rowSubtitle: {
     marginTop: 2,
-    color: WALLET_COLORS.textSoft,
+    color: colors.textSoft,
     fontSize: 11,
     letterSpacing: -0.05,
   },
@@ -569,7 +580,7 @@ const styles = StyleSheet.create({
     right: 14,
     bottom: 0,
     height: 1,
-    backgroundColor: WALLET_COLORS.border,
+    backgroundColor: colors.border,
   },
   toggle: {
     width: 40,
@@ -580,7 +591,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
   },
   toggleOn: {
-    backgroundColor: WALLET_COLORS.signal,
+    backgroundColor: colors.signal,
   },
   toggleKnob: {
     width: 18,
@@ -597,7 +608,7 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   metaText: {
-    color: WALLET_COLORS.textMuted,
+    color: colors.textMuted,
     fontFamily: MONO_FONT,
     fontSize: 11,
     letterSpacing: 0.4,
@@ -610,11 +621,11 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: 7,
     borderWidth: 1,
-    borderColor: WALLET_COLORS.border,
+    borderColor: colors.border,
     backgroundColor: 'rgba(255, 255, 255, 0.04)',
   },
   socialCtaText: {
-    color: WALLET_COLORS.textMuted,
+    color: colors.textMuted,
     fontFamily: MONO_FONT,
     fontSize: 10,
     letterSpacing: 0.8,
@@ -624,12 +635,12 @@ const styles = StyleSheet.create({
     marginTop: 2,
     paddingTop: 2,
     textAlign: 'center',
-    color: WALLET_COLORS.textSoft,
+    color: colors.textSoft,
     fontSize: 11,
     lineHeight: 18,
   },
   versionSub: {
-    color: WALLET_COLORS.textMuted,
+    color: colors.textMuted,
     fontFamily: MONO_FONT,
     fontSize: 10,
     letterSpacing: 0.6,
@@ -637,4 +648,5 @@ const styles = StyleSheet.create({
 });
 
 export default SettingsScreen;
+
 

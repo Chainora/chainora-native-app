@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   Platform,
   Pressable,
@@ -10,6 +10,7 @@ import {
   ViewStyle,
 } from 'react-native';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
+import { useSettings } from '../../features/settings';
 
 export const WALLET_COLORS = {
   background: '#08111B',
@@ -35,6 +36,41 @@ export const WALLET_COLORS = {
   warningSoft: 'rgba(245, 158, 11, 0.12)',
   overlay: 'rgba(3, 6, 10, 0.82)',
 } as const;
+
+export const WALLET_LIGHT_COLORS = {
+  background: '#0E1724',
+  backgroundAlt: '#111C2C',
+  surface: '#142338',
+  surfaceAlt: '#172940',
+  surfaceSoft: '#1E324B',
+  border: '#2D4563',
+  borderStrong: '#3D5F86',
+  text: '#ECF3FF',
+  textMuted: '#ADC3E1',
+  textSoft: '#8FA7C6',
+  textLow: '#748DAE',
+  signal: '#1A8DFF',
+  signalSoft: 'rgba(26, 141, 255, 0.14)',
+  signalBorder: 'rgba(103, 187, 255, 0.4)',
+  cyan: '#33C2FF',
+  success: '#34D399',
+  successSoft: 'rgba(52, 211, 153, 0.14)',
+  danger: '#FF8A8A',
+  dangerSoft: 'rgba(255, 138, 138, 0.14)',
+  warning: '#F6B34A',
+  warningSoft: 'rgba(246, 179, 74, 0.14)',
+  overlay: 'rgba(4, 8, 14, 0.82)',
+} as const;
+
+export type WalletColors = typeof WALLET_COLORS | typeof WALLET_LIGHT_COLORS;
+
+export const resolveWalletColors = (theme: 'dark' | 'light'): WalletColors =>
+  (theme === 'light' ? WALLET_LIGHT_COLORS : WALLET_COLORS);
+
+export const useWalletColors = (): WalletColors => {
+  const { resolvedTheme } = useSettings();
+  return useMemo(() => resolveWalletColors(resolvedTheme), [resolvedTheme]);
+};
 
 export const DISPLAY_FONT = Platform.select({
   ios: 'Unbounded-Bold',
@@ -103,7 +139,7 @@ type TextFieldProps = {
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'back', '0', 'submit'] as const;
 
-export const walletShadow = (color = WALLET_COLORS.signal): ViewStyle => ({
+export const walletShadow = (color: string = WALLET_COLORS.signal): ViewStyle => ({
   shadowColor: color,
   shadowOffset: { width: 0, height: 12 },
   shadowOpacity: 0.28,
@@ -119,23 +155,35 @@ export const WalletAuras: React.FC = () => (
   </>
 );
 
-export const WalletTopBar: React.FC<TopBarProps> = ({ title, onBack, right, titleStyle }) => (
-  <View style={styles.topBar}>
-    {onBack ? (
-      <Pressable style={styles.iconButton} onPress={onBack}>
-        <Ionicons name="chevron-back" size={16} color={WALLET_COLORS.textMuted} />
-      </Pressable>
-    ) : (
-      <View style={styles.topBarGhost} />
-    )}
-    <View style={styles.topBarTitleWrap} pointerEvents="none">
-      <Text style={[styles.topBarTitle, titleStyle]} numberOfLines={1}>
-        {title}
-      </Text>
+export const WalletTopBar: React.FC<TopBarProps> = ({ title, onBack, right, titleStyle }) => {
+  const colors = useWalletColors();
+  return (
+    <View style={styles.topBar}>
+      {onBack ? (
+        <Pressable
+          style={[
+            styles.iconButton,
+            {
+              borderColor: colors.border,
+              backgroundColor: colors.surfaceAlt,
+            },
+          ]}
+          onPress={onBack}
+        >
+          <Ionicons name="chevron-back" size={16} color={colors.textMuted} />
+        </Pressable>
+      ) : (
+        <View style={styles.topBarGhost} />
+      )}
+      <View style={styles.topBarTitleWrap} pointerEvents="none">
+        <Text style={[styles.topBarTitle, { color: colors.text }, titleStyle]} numberOfLines={1}>
+          {title}
+        </Text>
+      </View>
+      {right ?? <View style={styles.topBarGhost} />}
     </View>
-    {right ?? <View style={styles.topBarGhost} />}
-  </View>
-);
+  );
+};
 
 export const WalletButton: React.FC<ButtonProps> = ({
   label,
@@ -145,56 +193,117 @@ export const WalletButton: React.FC<ButtonProps> = ({
   disabled = false,
   style,
   labelStyle,
-}) => (
-  <Pressable
-    style={({ pressed }) => [
-      styles.button,
-      variant === 'primary' && styles.buttonPrimary,
-      variant === 'secondary' && styles.buttonSecondary,
-      variant === 'ghost' && styles.buttonGhost,
-      disabled && styles.buttonDisabled,
-      pressed && !disabled && styles.buttonPressed,
-      style,
-    ]}
-    disabled={disabled}
-    onPress={onPress}
-  >
-    <Text
-      style={[
-        styles.buttonText,
-        variant === 'secondary' && styles.buttonTextSecondary,
-        variant === 'ghost' && styles.buttonTextGhost,
-        labelStyle,
+}) => {
+  const colors = useWalletColors();
+
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.button,
+        variant === 'primary' && {
+          borderColor: 'rgba(128, 204, 255, 0.7)',
+          backgroundColor: colors.signal,
+          ...walletShadow(colors.signal),
+        },
+        variant === 'secondary' && {
+          borderColor: colors.border,
+          backgroundColor: colors.surfaceAlt,
+        },
+        variant === 'ghost' && styles.buttonGhost,
+        disabled && styles.buttonDisabled,
+        pressed && !disabled && styles.buttonPressed,
+        style,
       ]}
+      disabled={disabled}
+      onPress={onPress}
     >
-      {label}
-    </Text>
-    {icon}
-  </Pressable>
-);
+      <Text
+        style={[
+          styles.buttonText,
+          { color: variant === 'primary' ? '#EFF7FF' : colors.text },
+          variant === 'ghost' && { color: colors.textSoft },
+          labelStyle,
+        ]}
+      >
+        {label}
+      </Text>
+      {icon}
+    </Pressable>
+  );
+};
 
 export const WalletSectionLabel: React.FC<{ label: string; style?: StyleProp<TextStyle> }> = ({
   label,
   style,
-}) => <Text style={[styles.sectionLabel, style]}>{label}</Text>;
+}) => {
+  const colors = useWalletColors();
+  return <Text style={[styles.sectionLabel, { color: colors.textSoft }, style]}>{label}</Text>;
+};
 
 export const WalletPanel: React.FC<{
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
-}> = ({ children, style }) => <View style={[styles.panel, style]}>{children}</View>;
+}> = ({ children, style }) => {
+  const colors = useWalletColors();
+  return (
+    <View
+      style={[
+        styles.panel,
+        {
+          borderColor: colors.border,
+          backgroundColor: colors.surface,
+        },
+        style,
+      ]}
+    >
+      {children}
+    </View>
+  );
+};
 
 export const WalletPill: React.FC<{
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
-}> = ({ children, style }) => <View style={[styles.pill, style]}>{children}</View>;
+}> = ({ children, style }) => {
+  const colors = useWalletColors();
+  return (
+    <View
+      style={[
+        styles.pill,
+        {
+          borderColor: colors.border,
+          backgroundColor: colors.surfaceAlt,
+        },
+        style,
+      ]}
+    >
+      {children}
+    </View>
+  );
+};
 
 export const WalletPinDots: React.FC<{ length: number; filled: number }> = ({ length, filled }) => (
   <View style={styles.pinDots}>
     {Array.from({ length }, (_, index) => (
-      <View key={index} style={[styles.pinDot, index < filled && styles.pinDotOn]} />
+      <WalletPinDot key={index} filled={index < filled} />
     ))}
   </View>
 );
+
+const WalletPinDot: React.FC<{ filled: boolean }> = ({ filled }) => {
+  const colors = useWalletColors();
+  return (
+    <View
+      style={[
+        styles.pinDot,
+        {
+          borderColor: filled ? colors.signal : colors.border,
+          backgroundColor: filled ? colors.signal : colors.surfaceAlt,
+        },
+      ]}
+    />
+  );
+};
 
 export const WalletKeypad: React.FC<KeypadProps> = ({
   onDigit,
@@ -204,52 +313,72 @@ export const WalletKeypad: React.FC<KeypadProps> = ({
   submitIcon = 'arrow-forward',
   submitLabel,
   compact = false,
-}) => (
-  <View style={[styles.keypad, compact && styles.keypadCompact]}>
-    {KEYS.map(key => {
-      const isBack = key === 'back';
-      const isSubmit = key === 'submit';
-      return (
-        <Pressable
-          key={key}
-          style={({ pressed }) => [
-            styles.key,
-            compact && styles.keyCompact,
-            isSubmit && styles.keySubmit,
-            (isSubmit && submitDisabled) && styles.keyDisabled,
-            pressed && styles.keyPressed,
-          ]}
-          disabled={isSubmit && submitDisabled}
-          onPress={() => {
-            if (key === 'back') {
-              onBackspace();
-              return;
-            }
-            if (key === 'submit') {
-              onSubmit?.();
-              return;
-            }
-            onDigit(key);
-          }}
-        >
-          {isBack ? (
-            <Ionicons name="backspace-outline" size={22} color={WALLET_COLORS.text} />
-          ) : isSubmit ? (
-            submitLabel ? (
-              <Text style={styles.keySubmitLabel}>{submitLabel}</Text>
+}) => {
+  const colors = useWalletColors();
+
+  return (
+    <View style={[styles.keypad, compact && styles.keypadCompact]}>
+      {KEYS.map(key => {
+        const isBack = key === 'back';
+        const isSubmit = key === 'submit';
+        return (
+          <Pressable
+            key={key}
+            style={({ pressed }) => [
+              styles.key,
+              {
+                borderColor: colors.border,
+                backgroundColor: colors.surface,
+              },
+              compact && styles.keyCompact,
+              isSubmit && {
+                borderColor: colors.borderStrong,
+                backgroundColor: colors.surfaceAlt,
+              },
+              (isSubmit && submitDisabled) && styles.keyDisabled,
+              pressed && { backgroundColor: colors.surfaceSoft },
+            ]}
+            disabled={isSubmit && submitDisabled}
+            onPress={() => {
+              if (key === 'back') {
+                onBackspace();
+                return;
+              }
+              if (key === 'submit') {
+                onSubmit?.();
+                return;
+              }
+              onDigit(key);
+            }}
+          >
+            {isBack ? (
+              <Ionicons name="backspace-outline" size={22} color={colors.text} />
+            ) : isSubmit ? (
+              submitLabel ? (
+                <Text style={styles.keySubmitLabel}>{submitLabel}</Text>
+              ) : (
+                <View
+                  style={[
+                    styles.keySubmitBubble,
+                    {
+                      borderColor: 'rgba(128, 204, 255, 0.7)',
+                      backgroundColor: colors.signal,
+                    },
+                    submitDisabled && styles.keySubmitBubbleDisabled,
+                  ]}
+                >
+                  <Ionicons name={submitIcon as never} size={16} color="#EFF7FF" />
+                </View>
+              )
             ) : (
-              <View style={[styles.keySubmitBubble, submitDisabled && styles.keySubmitBubbleDisabled]}>
-                <Ionicons name={submitIcon as never} size={16} color="#EFF7FF" />
-              </View>
-            )
-          ) : (
-            <Text style={styles.keyText}>{key}</Text>
-          )}
-        </Pressable>
-      );
-    })}
-  </View>
-);
+              <Text style={[styles.keyText, { color: colors.text }]}>{key}</Text>
+            )}
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+};
 
 export const WalletTextField: React.FC<TextFieldProps> = ({
   children,
@@ -257,13 +386,26 @@ export const WalletTextField: React.FC<TextFieldProps> = ({
   right,
   style,
   large = false,
-}) => (
-  <View style={[styles.textField, large && styles.textFieldLarge, style]}>
-    {left}
-    <View style={styles.textFieldCenter}>{children}</View>
-    {right}
-  </View>
-);
+}) => {
+  const colors = useWalletColors();
+  return (
+    <View
+      style={[
+        styles.textField,
+        {
+          borderColor: colors.border,
+          backgroundColor: colors.surface,
+        },
+        large && styles.textFieldLarge,
+        style,
+      ]}
+    >
+      {left}
+      <View style={styles.textFieldCenter}>{children}</View>
+      {right}
+    </View>
+  );
+};
 
 export const WalletHeroCard: React.FC<{
   addressText?: string;
@@ -287,11 +429,11 @@ export const WalletHeroCard: React.FC<{
   </View>
 );
 
-export const buildWalletScreenStyles = () =>
+export const buildWalletScreenStyles = (colors: WalletColors = WALLET_COLORS) =>
   StyleSheet.create({
     screen: {
       flex: 1,
-      backgroundColor: WALLET_COLORS.background,
+      backgroundColor: colors.background,
     },
     safeArea: {
       flex: 1,

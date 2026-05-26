@@ -4,7 +4,7 @@ import type { NetworkKey } from '../../config/network';
 export type AppLanguage = LocaleLanguage;
 export type ThemePreference = 'dark' | 'light' | 'system';
 export type ResolvedTheme = 'dark' | 'light';
-export type AppCurrency = 'bnb' | 'btc' | 'usd';
+export type AppCurrency = 'usd' | 'vnd';
 export type AppNetwork = Extract<NetworkKey, 'eth' | 'chainora'>;
 
 export type AppSettings = {

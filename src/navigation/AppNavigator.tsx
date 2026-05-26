@@ -16,6 +16,8 @@ import ScanCardScreen from '../screens/ScanCardScreen';
 import EcdhBackupScreen from '../screens/EcdhBackupScreen.tsx';
 import SettingsScreen from '../screens/SettingsScreen';
 import GeneralScreen from '../screens/GeneralScreen';
+import LanguageSettingsScreen from '../screens/LanguageSettingsScreen';
+import CurrencySettingsScreen from '../screens/CurrencySettingsScreen';
 import ChangePinScreen from '../screens/ChangePinScreen';
 import QRScannerScreen from '../screens/QRScannerScreen';
 import SendTransactionScreen from '../screens/SendTransactionScreen';
@@ -39,10 +41,10 @@ import { ROUTES } from './routes/routes';
 enableScreens(true);
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
-const APP_SURFACE_BACKGROUND = '#08111B';
 
 export const AppNavigator: React.FC = () => {
   const { t, resolvedTheme, themeTokens } = useSettings();
+  const appSurfaceBackground = themeTokens.background;
 
   React.useEffect(() => {
     return walletRelaySessionManager.subscribe(snapshot => {
@@ -63,7 +65,6 @@ export const AppNavigator: React.FC = () => {
     [ROUTES.ActivatePin]: { title: t('headerCreatePinTitle'), subtitle: t('headerCreatePinSubtitle') },
     [ROUTES.EcdhBackup]: { title: t('headerEcdhTitle'), subtitle: t('headerEcdhSubtitle') },
     [ROUTES.Settings]: { title: t('headerSettingsTitle'), subtitle: t('headerSettingsSubtitle') },
-    [ROUTES.General]: { title: t('headerGeneralTitle'), subtitle: t('headerGeneralSubtitle') },
     [ROUTES.ChangePin]: { title: t('headerChangePinTitle'), subtitle: t('headerChangePinSubtitle') },
     [ROUTES.ActivateSuccess]: { title: t('headerActivateSuccessTitle') },
   };
@@ -73,8 +74,8 @@ export const AppNavigator: React.FC = () => {
     colors: {
       ...(resolvedTheme === 'dark' ? DarkTheme.colors : DefaultTheme.colors),
       primary: themeTokens.primary,
-      background: APP_SURFACE_BACKGROUND,
-      card: APP_SURFACE_BACKGROUND,
+      background: appSurfaceBackground,
+      card: appSurfaceBackground,
       text: themeTokens.foreground,
       border: themeTokens.border,
       notification: themeTokens.primary,
@@ -96,7 +97,7 @@ export const AppNavigator: React.FC = () => {
 
   return (
     <NavigationContainer ref={navigationRef} theme={navigationTheme}>
-      <View style={styles.navigatorRoot}>
+      <View style={[styles.navigatorRoot, { backgroundColor: appSurfaceBackground }]}>
         <Stack.Navigator
           initialRouteName={ROUTES.Welcome}
           screenOptions={{ header: renderStackHeader }}
@@ -121,14 +122,36 @@ export const AppNavigator: React.FC = () => {
             component={ScanCardScreen}
             options={{ headerShown: false, animation: 'none' }}
           />
-          <Stack.Screen name={ROUTES.EcdhBackup} component={EcdhBackupScreen} />
+          <Stack.Screen
+            name={ROUTES.EcdhBackup}
+            component={EcdhBackupScreen}
+            options={{ headerShown: false }}
+          />
           <Stack.Screen
             name={ROUTES.Settings}
             component={SettingsScreen}
             options={{ headerShown: false }}
           />
-          <Stack.Screen name={ROUTES.General} component={GeneralScreen} />
-          <Stack.Screen name={ROUTES.ChangePin} component={ChangePinScreen} />
+          <Stack.Screen
+            name={ROUTES.General}
+            component={GeneralScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name={ROUTES.LanguageSettings}
+            component={LanguageSettingsScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name={ROUTES.CurrencySettings}
+            component={CurrencySettingsScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name={ROUTES.ChangePin}
+            component={ChangePinScreen}
+            options={{ headerShown: false }}
+          />
           <Stack.Screen
             name={ROUTES.QRScanner}
             component={QRScannerScreen}
@@ -198,6 +221,5 @@ export const AppNavigator: React.FC = () => {
 const styles = StyleSheet.create({
   navigatorRoot: {
     flex: 1,
-    backgroundColor: APP_SURFACE_BACKGROUND,
   },
 });

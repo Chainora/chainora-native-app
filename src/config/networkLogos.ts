@@ -6,8 +6,8 @@ const WALLET_HOME_NETWORK_LOGOS: Partial<Record<WalletHomeNetworkKey, ImageSourc
   ethMainnet: require('../assets/tokens/ethMainnet.png'),
   bscMainnet: require('../assets/tokens/bscMainnet.png'),
   polygonMainnet: require('../assets/tokens/polygonMainnet.png'),
-  baseMainnet: require('../assets/tokens/baseMainnet.png'),
   arbitrumMainnet: require('../assets/tokens/arbitrumMainnet.png'),
+  optimismMainnet: require('../assets/tokens/optimismMainnet.png'),
 };
 
 export const getNetworkLogoSource = (networkKey: NetworkKey): ImageSourcePropType | undefined =>

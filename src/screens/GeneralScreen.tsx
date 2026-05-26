@@ -51,7 +51,7 @@ const OptionGroup: React.FC<{
 );
 
 const GeneralScreen: React.FC<Props> = ({ navigation }) => {
-  const { settings, resolvedTheme, setCurrency, setLanguage, setNetwork, setTheme, t } = useSettings();
+  const { settings, resolvedTheme, setNetwork, setTheme, t } = useSettings();
 
   return (
     <View style={screenBase.screen}>
@@ -65,27 +65,6 @@ const GeneralScreen: React.FC<Props> = ({ navigation }) => {
           <WalletTopBar title={t('headerGeneralTitle')} onBack={() => navigation.goBack()} />
 
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-            <OptionGroup
-              title={t('generalLanguage')}
-              selected={settings.language}
-              onSelect={value => setLanguage(value as 'en' | 'vi')}
-              options={[
-                { value: 'en', label: t('languageEnglish') },
-                { value: 'vi', label: t('languageVietnamese') },
-              ]}
-            />
-
-            <OptionGroup
-              title={t('generalCurrency')}
-              selected={settings.currency}
-              onSelect={value => setCurrency(value as 'bnb' | 'btc' | 'usd')}
-              options={[
-                { value: 'bnb', label: t('currencyBnb') },
-                { value: 'btc', label: t('currencyBtc') },
-                { value: 'usd', label: t('currencyUsd') },
-              ]}
-            />
-
             <OptionGroup
               title={t('generalTheme')}
               selected={settings.theme}

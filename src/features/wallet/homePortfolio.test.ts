@@ -1,3 +1,5 @@
+/// <reference types="jest" />
+
 import {
   buildPortfolioAssetSnapshot,
   calculatePortfolioDayChange,
@@ -14,9 +16,21 @@ import type { RecentActivity } from './recentActivityStorage';
 describe('homePortfolio', () => {
   it('sorts assets by usd value descending', () => {
     const assets = sortPortfolioAssets([
-      buildPortfolioAssetSnapshot({ network: NETWORKS.polygonMainnet, balanceFormatted: '100.0000' }),
-      buildPortfolioAssetSnapshot({ network: NETWORKS.ethMainnet, balanceFormatted: '1.2500' }),
-      buildPortfolioAssetSnapshot({ network: NETWORKS.bscMainnet, balanceFormatted: '0.5000' }),
+      buildPortfolioAssetSnapshot({
+        network: NETWORKS.polygonMainnet,
+        balanceFormatted: '100.0000',
+        usdPrice: 0.74,
+      }),
+      buildPortfolioAssetSnapshot({
+        network: NETWORKS.ethMainnet,
+        balanceFormatted: '1.2500',
+        usdPrice: 3498.24,
+      }),
+      buildPortfolioAssetSnapshot({
+        network: NETWORKS.bscMainnet,
+        balanceFormatted: '0.5000',
+        usdPrice: 611.42,
+      }),
     ]);
 
     expect(assets.map(asset => asset.network.key)).toEqual([
@@ -28,8 +42,16 @@ describe('homePortfolio', () => {
 
   it('sums portfolio totals from all chains', () => {
     const assets = [
-      buildPortfolioAssetSnapshot({ network: NETWORKS.ethMainnet, balanceFormatted: '1.0000' }),
-      buildPortfolioAssetSnapshot({ network: NETWORKS.baseMainnet, balanceFormatted: '0.5000' }),
+      buildPortfolioAssetSnapshot({
+        network: NETWORKS.ethMainnet,
+        balanceFormatted: '1.0000',
+        usdPrice: 3498.24,
+      }),
+      buildPortfolioAssetSnapshot({
+        network: NETWORKS.optimismMainnet,
+        balanceFormatted: '0.5000',
+        usdPrice: 3498.24,
+      }),
     ];
 
     expect(sumPortfolioUsdValue(assets)).toBeCloseTo(5247.36, 2);
@@ -53,14 +75,14 @@ describe('homePortfolio', () => {
       {
         id: '2',
         walletAddress: '0x1',
-        networkKey: 'baseMainnet',
+        networkKey: 'optimismMainnet',
         kind: 'receive',
         transactionHash: '0xdef',
         fromAddress: '0x2',
         toAddress: '0x1',
         amountDisplay: '0.2',
-        currencySymbol: 'ETH',
-        networkName: 'Base',
+        currencySymbol: 'OP',
+        networkName: 'Optimism',
         createdAt: '2026-05-21T10:00:00.000Z',
       },
     ];

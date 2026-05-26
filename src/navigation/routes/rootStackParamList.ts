@@ -13,6 +13,8 @@ export type RootStackParamList = {
   [ROUTES.EcdhBackup]: undefined;
   [ROUTES.Settings]: undefined;
   [ROUTES.General]: undefined;
+  [ROUTES.LanguageSettings]: undefined;
+  [ROUTES.CurrencySettings]: undefined;
   [ROUTES.ChangePin]: undefined;
   [ROUTES.Home]: {
     ethAddress: string;

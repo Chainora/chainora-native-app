@@ -35,6 +35,8 @@ type PinInputProps = {
   variant?: 'screen' | 'card';
   heroIconName?: React.ComponentProps<typeof Ionicons>['name'];
   animateHero?: boolean;
+  showHero?: boolean;
+  squareIndicators?: boolean;
   progressCurrent?: number;
   progressTotal?: number;
   progressLabel?: string;
@@ -125,6 +127,8 @@ export const PinInput: React.FC<PinInputProps> = ({
   variant = 'card',
   heroIconName = 'wifi-outline',
   animateHero = true,
+  showHero = true,
+  squareIndicators = false,
   progressCurrent,
   progressTotal,
   progressLabel,
@@ -173,6 +177,7 @@ export const PinInput: React.FC<PinInputProps> = ({
                 key={index}
                 style={[
                   styles.progressSegment,
+                  squareIndicators && styles.progressSegmentSquare,
                   progressCurrent > index && styles.progressSegmentOn,
                 ]}
               />
@@ -182,7 +187,7 @@ export const PinInput: React.FC<PinInputProps> = ({
       ) : null}
 
       <View style={styles.header}>
-        <Hero iconName={heroIconName} animateHero={animateHero} />
+        {showHero ? <Hero iconName={heroIconName} animateHero={animateHero} /> : null}
         {title ? <Text style={[styles.title, variant === 'screen' && styles.titleScreen]}>{title}</Text> : null}
         {subtitle ? (
           <Text style={[styles.subtitle, variant === 'screen' && styles.subtitleScreen]}>{subtitle}</Text>
@@ -194,7 +199,10 @@ export const PinInput: React.FC<PinInputProps> = ({
       <View style={styles.pinBlock}>
         <View style={styles.dotsRow}>
           {Array.from({ length }, (_, index) => (
-            <View key={index} style={[styles.dot, index < filled && styles.dotFilled]} />
+            <View
+              key={index}
+              style={[styles.dot, squareIndicators && styles.dotSquare, index < filled && styles.dotFilled]}
+            />
           ))}
         </View>
 
@@ -261,6 +269,9 @@ const styles = StyleSheet.create({
     height: 6,
     borderRadius: 999,
     backgroundColor: '#1B2536',
+  },
+  progressSegmentSquare: {
+    borderRadius: 2,
   },
   progressSegmentOn: {
     backgroundColor: PIN_COLORS.signal,
@@ -340,6 +351,9 @@ const styles = StyleSheet.create({
     borderWidth: 1.8,
     borderColor: '#2C384C',
     backgroundColor: '#0D1320',
+  },
+  dotSquare: {
+    borderRadius: 3,
   },
   dotFilled: {
     borderColor: PIN_COLORS.signalBright,

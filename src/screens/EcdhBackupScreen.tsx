@@ -1,17 +1,14 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { StatusBar, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { PinInput } from '../components/ui/PinInput';
-import { PinGhostButton, PinNoteCard } from '../components/ui/pinTheme';
 import {
   DISPLAY_FONT,
   WALLET_COLORS,
-  WalletAuras,
   WalletButton,
-  WalletHeroCard,
   WalletPanel,
   WalletSectionLabel,
   WalletTopBar,
@@ -47,6 +44,8 @@ const roleKeyByStage: Record<'tap1' | 'tap2' | 'tap3' | 'tap4', 'ecdhRoleMainCar
   tap4: 'ecdhRoleBackupCard',
 };
 
+type TapStageKey = keyof typeof roleKeyByStage;
+
 const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
   const { isEnabled } = useNfcEnabled();
   const { resolvedTheme, t } = useSettings();
@@ -64,56 +63,61 @@ const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
   const [sourceLinkProof, setSourceLinkProof] = useState<Uint8Array | null>(null);
   const [envelope, setEnvelope] = useState<Uint8Array | null>(null);
 
+  const introTimeline = useMemo(
+    () => [
+      { step: '1', title: t('ecdhIntroTimeline1Title'), subtitle: t('ecdhIntroTimeline1Subtitle') },
+      { step: '2', title: t('ecdhIntroTimeline2Title'), subtitle: t('ecdhIntroTimeline2Subtitle') },
+      { step: '3', title: t('ecdhIntroTimeline3Title'), subtitle: t('ecdhIntroTimeline3Subtitle') },
+      { step: '4', title: t('ecdhIntroTimeline4Title'), subtitle: t('ecdhIntroTimeline4Subtitle') },
+    ],
+    [t],
+  );
+
   const stages = useMemo(
     () => ({
       tap1: {
         step: 1,
-        title: 'Tap main card to unlock',
-        subtitle: 'Enter the main card PIN, then hold the card still for 2-3 seconds.',
-        role: 'MAIN CARD',
+        title: t('ecdhTap1Title'),
+        subtitle: t('ecdhTap1Subtitle'),
         needsPin: true,
         pinValue: mainPin,
         setPinValue: setMainPin,
-        trail: ['Read card', 'Verify PIN', 'Ready'],
+        trail: [t('ecdhTrailReadCard'), t('ecdhTrailVerifyPin'), t('ecdhTrailReady')],
       },
       tap2: {
         step: 2,
-        title: 'Tap backup card to prepare',
-        subtitle: 'The backup card creates its own key and proves it is ready for import.',
-        role: 'BACKUP CARD',
+        title: t('ecdhTap2Title'),
+        subtitle: t('ecdhTap2Subtitle'),
         needsPin: true,
         pinValue: secondaryPin,
         setPinValue: setSecondaryPin,
-        trail: ['Read card', 'Create key', 'Verify'],
+        trail: [t('ecdhTrailReadCard'), t('ecdhTrailCreateKey'), t('ecdhTrailVerify')],
       },
       tap3: {
         step: 3,
-        title: 'Tap main card again to export',
-        subtitle: 'The main card seals the wallet payload so only the prepared backup card can open it.',
-        role: 'MAIN CARD',
+        title: t('ecdhTap3Title'),
+        subtitle: t('ecdhTap3Subtitle'),
         needsPin: false,
         pinValue: mainPin,
         setPinValue: setMainPin,
-        trail: ['Seal wallet', 'Encrypt', 'Transfer'],
+        trail: [t('ecdhTrailSealWallet'), t('ecdhTrailEncrypt'), t('ecdhTrailTransfer')],
       },
       tap4: {
         step: 4,
-        title: 'Final tap on the backup card',
-        subtitle: 'The backup card opens the package on-chip and stores the recovery copy safely.',
-        role: 'BACKUP CARD',
+        title: t('ecdhTap4Title'),
+        subtitle: t('ecdhTap4Subtitle'),
         needsPin: false,
         pinValue: secondaryPin,
         setPinValue: setSecondaryPin,
-        trail: ['Receive', 'Check', 'Store'],
+        trail: [t('ecdhTrailReceive'), t('ecdhTrailCheck'), t('ecdhTrailStore')],
       },
     }),
-    [mainPin, secondaryPin],
+    [mainPin, secondaryPin, t],
   );
 
   const progressStage = stage === 'success' ? 4 : stage === 'intro' ? 0 : stages[stage].step;
   const currentTap = stage === 'intro' || stage === 'success' ? null : stages[stage];
-  const canAdvance =
-    !currentTap || !currentTap.needsPin || currentTap.pinValue.length === PIN_LENGTH;
+  const canAdvance = !currentTap || !currentTap.needsPin || currentTap.pinValue.length === PIN_LENGTH;
 
   const executeCurrentTap = useCallback(async (): Promise<WalletActionResult> => {
     if (stage === 'tap1') {
@@ -181,7 +185,7 @@ const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
     if (stage === 'intro') {
       setStage('tap1');
       setErrorMessage(null);
-      setStatusMessage('Tap 1 of 4. Unlock the main card.');
+      setStatusMessage(t('ecdhStatusTap1'));
       return;
     }
 
@@ -214,19 +218,19 @@ const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
 
         if (stage === 'tap1') {
           setStage('tap2');
-          setStatusMessage('Tap 2 of 4. Prepare the backup card.');
+          setStatusMessage(t('ecdhStatusTap2'));
           navigation.goBack();
           return;
         }
         if (stage === 'tap2') {
           setStage('tap3');
-          setStatusMessage('Tap 3 of 4. Export from the main card.');
+          setStatusMessage(t('ecdhStatusTap3'));
           navigation.goBack();
           return;
         }
         if (stage === 'tap3') {
           setStage('tap4');
-          setStatusMessage('Tap 4 of 4. Import on the backup card.');
+          setStatusMessage(t('ecdhStatusTap4'));
           navigation.goBack();
           return;
         }
@@ -237,7 +241,7 @@ const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
       },
     });
     navigation.navigate(ROUTES.ScanCard, { flowId });
-  }, [currentTap, navigation, stage, t]);
+  }, [currentTap, executeCurrentTap, isEnabled, navigation, showToast, stage, t]);
 
   return (
     <View style={screenBase.screen}>
@@ -246,128 +250,97 @@ const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
         backgroundColor={WALLET_COLORS.background}
       />
       <SafeAreaView style={screenBase.safeArea} edges={['top', 'bottom']}>
-        <WalletAuras />
         <View style={screenBase.content}>
-          <WalletTopBar title={stage === 'success' ? 'Backup Complete' : t('headerEcdhTitle')} onBack={() => navigation.goBack()} />
+          <WalletTopBar
+            title={stage === 'success' ? t('ecdhBackupDoneTitle') : t('headerEcdhTitle')}
+            onBack={() => navigation.goBack()}
+          />
 
-          {stage === 'intro' ? (
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-              <Text style={styles.kicker}>SECURE BACKUP · 4 TAPS</Text>
-              <Text style={styles.introTitle}>Backup your card in four taps.</Text>
-              <Text style={styles.introSubtitle}>
-                Private keys never leave the cards. Your phone only relays sealed data from the main card to the backup card.
-              </Text>
+          <View style={styles.stageRoot}>
+            {stage === 'intro' ? (
+              <View style={styles.introStage}>
+                <View style={styles.introBody}>
+                  <Text style={styles.kicker}>{t('ecdhIntroKicker')}</Text>
+                  <Text style={styles.introTitle}>{t('ecdhIntroTitle')}</Text>
+                  <Text style={styles.introSubtitle}>{t('ecdhIntroSubtitle')}</Text>
 
-              <View style={styles.cardsRow}>
-                <WalletHeroCard addressText="Main card" style={styles.heroHalf} />
-                <WalletHeroCard addressText="Backup card" style={styles.heroHalf} />
-              </View>
+                  <WalletPanel style={styles.deviceCard}>
+                    <Text style={styles.deviceCardTitle}>{t('ecdhIntroCardsTitle')}</Text>
+                    <Text style={styles.deviceCardBody}>{t('ecdhIntroCardsBody')}</Text>
+                  </WalletPanel>
 
-              <WalletPanel style={styles.timelineCard}>
-                {[
-                  { step: '1', title: 'Unlock main card', subtitle: 'Main card PIN + tap' },
-                  { step: '2', title: 'Prepare backup card', subtitle: 'Backup card PIN + tap' },
-                  { step: '3', title: 'Export sealed backup', subtitle: 'Main card tap again' },
-                  { step: '4', title: 'Import sealed backup', subtitle: 'Final backup card tap' },
-                ].map(item => (
-                  <View key={item.step} style={styles.timelineRow}>
-                    <View style={styles.timelineBullet}>
-                      <Text style={styles.timelineBulletText}>{item.step}</Text>
-                    </View>
-                    <View style={styles.timelineBody}>
-                      <Text style={styles.timelineTitle}>{item.title}</Text>
-                      <Text style={styles.timelineSubtitle}>{item.subtitle}</Text>
-                    </View>
-                  </View>
-                ))}
-              </WalletPanel>
+                  <WalletPanel style={styles.timelineCard}>
+                    {introTimeline.map(item => (
+                      <View key={item.step} style={styles.timelineRow}>
+                        <View style={styles.timelineBullet}>
+                          <Text style={styles.timelineBulletText}>{item.step}</Text>
+                        </View>
+                        <View style={styles.timelineBody}>
+                          <Text style={styles.timelineTitle}>{item.title}</Text>
+                          <Text style={styles.timelineSubtitle}>{item.subtitle}</Text>
+                        </View>
+                      </View>
+                    ))}
+                  </WalletPanel>
 
-              <WalletPanel style={styles.noteCard}>
-                <Ionicons name="lock-closed-outline" size={16} color={WALLET_COLORS.signal} />
-                <Text style={styles.noteText}>
-                  Keep both cards near you. If the flow is interrupted, the transfer package is discarded automatically.
-                </Text>
-              </WalletPanel>
-
-              <View style={styles.actions}>
-                <WalletButton label="Start Backup" onPress={openNextStage} />
-                <WalletButton label="I don't have a backup card yet" variant="secondary" onPress={() => navigation.goBack()} />
-              </View>
-            </ScrollView>
-          ) : stage === 'success' ? (
-            <View style={styles.successWrap}>
-              <View style={styles.progressRow}>
-                {[1, 2, 3, 4].map(index => (
-                  <View key={index} style={[styles.progressSegment, styles.progressSegmentDone]} />
-                ))}
-              </View>
-
-              <View style={styles.successMark}>
-                <Ionicons name="checkmark" size={38} color={WALLET_COLORS.success} />
-              </View>
-              <Text style={styles.successTitle}>Both cards now unlock the same wallet.</Text>
-              <Text style={styles.successBody}>
-                Keep the backup card somewhere safe. Your main card can travel with you; the backup card should stay offline and protected.
-              </Text>
-
-              <WalletPanel style={styles.pairCard}>
-                <View style={styles.pairRow}>
-                  <View style={styles.pairSwatch}>
-                    <Text style={styles.pairSwatchText}>M</Text>
-                  </View>
-                  <View style={styles.pairText}>
-                    <Text style={styles.pairTitle}>Main card</Text>
-                    <Text style={styles.pairSubtitle}>Carry with you</Text>
-                  </View>
-                  <Ionicons name="checkmark-circle" size={18} color={WALLET_COLORS.success} />
+                  <WalletPanel style={styles.noteCard}>
+                    <Ionicons name="lock-closed-outline" size={16} color={WALLET_COLORS.signal} />
+                    <Text style={styles.noteText}>{t('ecdhIntroNote')}</Text>
+                  </WalletPanel>
                 </View>
-                <View style={styles.pairDivider} />
-                <View style={styles.pairRow}>
-                  <View style={styles.pairSwatch}>
-                    <Text style={styles.pairSwatchText}>B</Text>
-                  </View>
-                  <View style={styles.pairText}>
-                    <Text style={styles.pairTitle}>Backup card</Text>
-                    <Text style={styles.pairSubtitle}>Store in a safe place</Text>
-                  </View>
-                  <Ionicons name="checkmark-circle" size={18} color={WALLET_COLORS.success} />
-                </View>
-              </WalletPanel>
 
-              <View style={styles.actions}>
-                <WalletButton label={t('commonDone')} onPress={() => navigation.goBack()} />
+                <View style={styles.actions}>
+                  <WalletButton label={t('ecdhIntroStart')} onPress={openNextStage} />
+                </View>
               </View>
-            </View>
-          ) : (
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-              {!currentTap?.needsPin ? (
-                <>
+            ) : stage === 'success' ? (
+              <View style={styles.successWrap}>
+                <View style={styles.successSummary}>
                   <View style={styles.progressRow}>
                     {[1, 2, 3, 4].map(index => (
-                  <View
-                    key={index}
-                    style={[
-                      styles.progressSegment,
-                      progressStage >= index && styles.progressSegmentDone,
-                      progressStage === index && styles.progressSegmentActive,
-                    ]}
-                  />
+                      <View key={index} style={[styles.progressSegment, styles.progressSegmentDone]} />
                     ))}
                   </View>
 
-              <WalletSectionLabel label={`Tap ${currentTap?.step}/4 · ${currentTap?.role}`} />
-              <View style={styles.tapHero}>
-                <View style={styles.tapIcon}>
-                  <Ionicons name="wifi-outline" size={34} color={WALLET_COLORS.signal} />
-                </View>
-                <Text style={styles.tapTitle}>{currentTap?.title}</Text>
-                <Text style={styles.tapSubtitle}>{currentTap?.subtitle}</Text>
-              </View>
-            </>
-          ) : null}
+                  <View style={styles.successMark}>
+                    <Ionicons name="checkmark" size={34} color={WALLET_COLORS.success} />
+                  </View>
+                  <Text style={styles.successTitle}>{t('ecdhSuccessTitle')}</Text>
+                  <Text style={styles.successBody}>{t('ecdhSuccessBody')}</Text>
 
-              {currentTap?.needsPin ? (
+                  <WalletPanel style={styles.pairCard}>
+                    <View style={styles.pairRow}>
+                      <View style={styles.pairSwatch}>
+                        <Text style={styles.pairSwatchText}>M</Text>
+                      </View>
+                      <View style={styles.pairText}>
+                        <Text style={styles.pairTitle}>{t('ecdhRoleMainCard')}</Text>
+                        <Text style={styles.pairSubtitle}>{t('ecdhSuccessMainCarry')}</Text>
+                      </View>
+                      <Ionicons name="checkmark" size={16} color={WALLET_COLORS.success} />
+                    </View>
+                    <View style={styles.pairDivider} />
+                    <View style={styles.pairRow}>
+                      <View style={styles.pairSwatch}>
+                        <Text style={styles.pairSwatchText}>B</Text>
+                      </View>
+                      <View style={styles.pairText}>
+                        <Text style={styles.pairTitle}>{t('ecdhRoleBackupCard')}</Text>
+                        <Text style={styles.pairSubtitle}>{t('ecdhSuccessBackupStore')}</Text>
+                      </View>
+                      <Ionicons name="checkmark" size={16} color={WALLET_COLORS.success} />
+                    </View>
+                  </WalletPanel>
+                </View>
+
+                <View style={styles.actions}>
+                  <WalletButton label={t('commonDone')} onPress={() => navigation.goBack()} />
+                </View>
+              </View>
+            ) : currentTap ? (
+              currentTap.needsPin ? (
                 <PinInput
+                  style={styles.pinStageInput}
                   value={currentTap.pinValue}
                   onDigit={handleDigit}
                   onBackspace={handleBackspace}
@@ -376,6 +349,8 @@ const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
                   title={currentTap.title}
                   subtitle={currentTap.subtitle}
                   ctaLabel={t('ecdhPrimaryAction')}
+                  showHero={false}
+                  squareIndicators
                   heroIconName="wifi-outline"
                   progressCurrent={currentTap.step}
                   progressTotal={4}
@@ -385,13 +360,51 @@ const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
                   contentSlot={
                     <View style={styles.roleChipWrap}>
                       <View style={styles.roleChip}>
-                        <Text style={styles.roleChipText}>
-                          {t(roleKeyByStage[stage as 'tap1' | 'tap2' | 'tap3' | 'tap4'])}
-                        </Text>
+                        <Text style={styles.roleChipText}>{t(roleKeyByStage[stage as TapStageKey])}</Text>
                       </View>
                     </View>
                   }
-                  footerSlot={
+                  afterActionSlot={(
+                    <WalletPanel style={styles.pinHintCard}>
+                      <Text style={styles.pinHintText}>{t('ecdhPinFooterNote')}</Text>
+                    </WalletPanel>
+                  )}
+                />
+              ) : (
+                <View style={styles.tapStage}>
+                  <View style={styles.tapDetails}>
+                    <View style={styles.progressRow}>
+                      {[1, 2, 3, 4].map(index => (
+                        <View
+                          key={index}
+                          style={[
+                            styles.progressSegment,
+                            progressStage >= index && styles.progressSegmentDone,
+                            progressStage === index && styles.progressSegmentActive,
+                          ]}
+                        />
+                      ))}
+                    </View>
+
+                    <WalletSectionLabel
+                      label={`${t('ecdhTapLabel')} ${currentTap.step}/4 - ${t(roleKeyByStage[stage as TapStageKey])}`}
+                    />
+                    <View style={styles.tapHero}>
+                      <View style={styles.tapIcon}>
+                        <Ionicons name="wifi-outline" size={32} color={WALLET_COLORS.signal} />
+                      </View>
+                      <Text style={styles.tapTitle}>{currentTap.title}</Text>
+                      <Text style={styles.tapSubtitle}>{currentTap.subtitle}</Text>
+                    </View>
+
+                    <WalletPanel style={styles.scanCard}>
+                      <View style={styles.scanCore}>
+                        <Ionicons name="card-outline" size={24} color={WALLET_COLORS.text} />
+                      </View>
+                      <Text style={styles.scanTitle}>{t('ecdhScanTitle')}</Text>
+                      <Text style={styles.scanSubtitle}>{t('ecdhScanSubtitle')}</Text>
+                    </WalletPanel>
+
                     <WalletPanel style={styles.trailCard}>
                       {currentTap.trail.map(segment => (
                         <View key={segment} style={styles.trailItem}>
@@ -400,55 +413,22 @@ const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
                         </View>
                       ))}
                     </WalletPanel>
-                  }
-                  afterActionSlot={
-                    <>
-                      <PinNoteCard text={t('ecdhPinFooterNote')} iconName="card-outline" />
-                      <PinGhostButton label={t('ecdhCancelAction')} onPress={() => navigation.goBack()} />
-                    </>
-                  }
-                />
-              ) : (
-                <WalletPanel style={styles.scanCard}>
-                  <View style={styles.scanTarget}>
-                    <View style={styles.scanRingOne} />
-                    <View style={styles.scanRingTwo} />
-                    <View style={styles.scanRingThree} />
-                    <View style={styles.scanCore}>
-                      <Ionicons name="card-outline" size={28} color={WALLET_COLORS.text} />
-                    </View>
+
+                    <Text style={styles.statusText}>{statusMessage}</Text>
+                    <Text style={styles.errorText}>{errorMessage || ' '}</Text>
                   </View>
-                  <Text style={styles.scanTitle}>Hold the card near the back of the phone</Text>
-                  <Text style={styles.scanSubtitle}>Keep it steady while the encrypted backup transfer completes.</Text>
-                </WalletPanel>
-              )}
-
-              {!currentTap?.needsPin ? (
-                <>
-                  <WalletPanel style={styles.trailCard}>
-                    {currentTap?.trail.map(segment => (
-                      <View key={segment} style={styles.trailItem}>
-                        <View style={styles.trailDot} />
-                        <Text style={styles.trailText}>{segment}</Text>
-                      </View>
-                    ))}
-                  </WalletPanel>
-
-                  <Text style={styles.statusText}>{statusMessage}</Text>
-                  <Text style={styles.errorText}>{errorMessage || ' '}</Text>
 
                   <View style={styles.actions}>
                     <WalletButton
-                      label="Continue With NFC"
+                      label={t('ecdhScanContinue')}
                       onPress={openNextStage}
                       disabled={!canAdvance}
                     />
-                    <WalletButton label="Cancel Backup" variant="ghost" onPress={() => navigation.goBack()} />
                   </View>
-                </>
-              ) : null}
-            </ScrollView>
-          )}
+                </View>
+              )
+            ) : null}
+          </View>
         </View>
       </SafeAreaView>
     </View>
@@ -456,97 +436,116 @@ const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  scrollContent: {
-    paddingTop: 16,
-    paddingBottom: 24,
-    gap: 18,
+  stageRoot: {
+    flex: 1,
+    paddingTop: 12,
+  },
+  introStage: {
+    flex: 1,
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  introBody: {
+    gap: 10,
   },
   kicker: {
     color: '#62BBFF',
     fontSize: 10,
     fontWeight: '700',
-    letterSpacing: 1.4,
+    letterSpacing: 1.2,
   },
   introTitle: {
     color: WALLET_COLORS.text,
-    fontSize: 32,
-    lineHeight: 36,
+    fontSize: 28,
+    lineHeight: 32,
     fontWeight: '800',
     fontFamily: DISPLAY_FONT,
-    letterSpacing: -0.8,
+    letterSpacing: -0.7,
   },
   introSubtitle: {
     color: WALLET_COLORS.textMuted,
-    fontSize: 14,
-    lineHeight: 21,
+    fontSize: 13,
+    lineHeight: 18,
   },
-  cardsRow: {
-    flexDirection: 'row',
-    gap: 12,
+  deviceCard: {
+    padding: 12,
+    gap: 6,
   },
-  heroHalf: {
-    flex: 1,
+  deviceCardTitle: {
+    color: WALLET_COLORS.text,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  deviceCardBody: {
+    color: WALLET_COLORS.textSoft,
+    fontSize: 12,
+    lineHeight: 17,
   },
   timelineCard: {
-    padding: 14,
-    gap: 12,
+    padding: 12,
+    gap: 8,
   },
   timelineRow: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 10,
     alignItems: 'center',
   },
   timelineBullet: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: WALLET_COLORS.signalSoft,
+    width: 24,
+    height: 24,
+    borderRadius: 7,
+    backgroundColor: WALLET_COLORS.surfaceSoft,
     borderWidth: 1,
-    borderColor: WALLET_COLORS.signalBorder,
+    borderColor: WALLET_COLORS.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
   timelineBulletText: {
     color: WALLET_COLORS.text,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
   },
   timelineBody: {
     flex: 1,
-    gap: 3,
+    gap: 2,
   },
   timelineTitle: {
     color: WALLET_COLORS.text,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
   },
   timelineSubtitle: {
     color: WALLET_COLORS.textSoft,
-    fontSize: 12,
+    fontSize: 11,
   },
   noteCard: {
-    padding: 14,
+    padding: 10,
     flexDirection: 'row',
-    gap: 10,
+    gap: 8,
     alignItems: 'flex-start',
   },
   noteText: {
     flex: 1,
     color: WALLET_COLORS.textMuted,
-    fontSize: 12,
-    lineHeight: 18,
+    fontSize: 11,
+    lineHeight: 16,
   },
   actions: {
-    gap: 10,
+    gap: 8,
+  },
+  pinStageInput: {
+    flex: 1,
+    paddingTop: 10,
+    paddingBottom: 4,
   },
   progressRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 6,
   },
   progressSegment: {
     flex: 1,
     height: 4,
-    borderRadius: 999,
+    borderRadius: 2,
     backgroundColor: '#1B2536',
   },
   progressSegmentDone: {
@@ -556,133 +555,118 @@ const styles = StyleSheet.create({
     shadowColor: WALLET_COLORS.signal,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.4,
-    shadowRadius: 10,
+    shadowRadius: 9,
+  },
+  tapStage: {
+    flex: 1,
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  tapDetails: {
+    gap: 10,
   },
   tapHero: {
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
   },
   tapIcon: {
-    width: 86,
-    height: 86,
-    borderRadius: 28,
+    width: 74,
+    height: 74,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: WALLET_COLORS.signalBorder,
-    backgroundColor: WALLET_COLORS.signalSoft,
+    borderColor: WALLET_COLORS.border,
+    backgroundColor: WALLET_COLORS.surfaceAlt,
     alignItems: 'center',
     justifyContent: 'center',
   },
   tapTitle: {
     color: WALLET_COLORS.text,
-    fontSize: 28,
-    lineHeight: 32,
+    fontSize: 24,
+    lineHeight: 28,
     fontWeight: '800',
     fontFamily: DISPLAY_FONT,
-    letterSpacing: -0.6,
+    letterSpacing: -0.5,
     textAlign: 'center',
   },
   tapSubtitle: {
     color: WALLET_COLORS.textMuted,
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 13,
+    lineHeight: 18,
     textAlign: 'center',
-    paddingHorizontal: 12,
-  },
-  keypadCard: {
-    paddingHorizontal: 14,
-    paddingVertical: 18,
+    paddingHorizontal: 8,
   },
   scanCard: {
-    paddingVertical: 18,
-    paddingHorizontal: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
     alignItems: 'center',
-    gap: 14,
-  },
-  scanTarget: {
-    width: 180,
-    height: 180,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  scanRingOne: {
-    position: 'absolute',
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    borderWidth: 1,
-    borderColor: 'rgba(79, 180, 255, 0.14)',
-  },
-  scanRingTwo: {
-    position: 'absolute',
-    width: 124,
-    height: 124,
-    borderRadius: 62,
-    borderWidth: 1,
-    borderColor: 'rgba(79, 180, 255, 0.2)',
-  },
-  scanRingThree: {
-    position: 'absolute',
-    width: 92,
-    height: 92,
-    borderRadius: 46,
-    borderWidth: 1,
-    borderColor: 'rgba(79, 180, 255, 0.32)',
+    gap: 8,
   },
   scanCore: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 56,
+    height: 56,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: WALLET_COLORS.signalBorder,
+    borderColor: WALLET_COLORS.border,
     backgroundColor: WALLET_COLORS.surfaceAlt,
     alignItems: 'center',
     justifyContent: 'center',
   },
   scanTitle: {
     color: WALLET_COLORS.text,
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '700',
     textAlign: 'center',
   },
   scanSubtitle: {
     color: WALLET_COLORS.textMuted,
-    fontSize: 13,
-    lineHeight: 19,
+    fontSize: 12,
+    lineHeight: 17,
     textAlign: 'center',
   },
   trailCard: {
-    padding: 14,
-    gap: 10,
+    padding: 10,
+    gap: 7,
   },
   trailItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
   },
   trailDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 5,
+    height: 5,
+    borderRadius: 1,
     backgroundColor: WALLET_COLORS.signal,
   },
   trailText: {
     color: WALLET_COLORS.textMuted,
-    fontSize: 12,
+    fontSize: 11,
+  },
+  pinHintCard: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    marginTop: 8,
+  },
+  pinHintText: {
+    color: WALLET_COLORS.textSoft,
+    fontSize: 11,
+    lineHeight: 16,
   },
   roleChipWrap: {
     alignItems: 'center',
     marginBottom: 2,
   },
   roleChip: {
-    borderRadius: 999,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: WALLET_COLORS.signalBorder,
-    backgroundColor: WALLET_COLORS.signalSoft,
+    borderColor: WALLET_COLORS.border,
+    backgroundColor: WALLET_COLORS.surfaceAlt,
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
   roleChipText: {
-    color: '#8CD0FF',
+    color: WALLET_COLORS.textMuted,
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 1,
@@ -692,24 +676,27 @@ const styles = StyleSheet.create({
     color: WALLET_COLORS.textSoft,
     fontSize: 12,
     textAlign: 'center',
-    minHeight: 18,
+    minHeight: 16,
   },
   errorText: {
     color: WALLET_COLORS.danger,
     fontSize: 12,
     textAlign: 'center',
-    minHeight: 22,
+    minHeight: 18,
   },
   successWrap: {
     flex: 1,
-    justifyContent: 'center',
-    gap: 18,
-    paddingBottom: 18,
+    justifyContent: 'space-between',
+    gap: 10,
+    paddingBottom: 8,
+  },
+  successSummary: {
+    gap: 10,
   },
   successMark: {
-    width: 108,
-    height: 108,
-    borderRadius: 54,
+    width: 90,
+    height: 90,
+    borderRadius: 18,
     alignSelf: 'center',
     borderWidth: 1,
     borderColor: 'rgba(52, 211, 153, 0.32)',
@@ -719,39 +706,39 @@ const styles = StyleSheet.create({
   },
   successTitle: {
     color: WALLET_COLORS.text,
-    fontSize: 30,
-    lineHeight: 34,
+    fontSize: 24,
+    lineHeight: 28,
     fontWeight: '800',
     fontFamily: DISPLAY_FONT,
     textAlign: 'center',
-    letterSpacing: -0.7,
+    letterSpacing: -0.6,
   },
   successBody: {
     color: WALLET_COLORS.textMuted,
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 13,
+    lineHeight: 18,
     textAlign: 'center',
   },
   pairCard: {
-    padding: 14,
+    padding: 12,
   },
   pairRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingVertical: 10,
+    gap: 10,
+    paddingVertical: 8,
   },
   pairSwatch: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 30,
+    height: 30,
+    borderRadius: 9,
     backgroundColor: WALLET_COLORS.surfaceSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
   pairSwatchText: {
     color: WALLET_COLORS.text,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
   },
   pairText: {
@@ -760,12 +747,12 @@ const styles = StyleSheet.create({
   },
   pairTitle: {
     color: WALLET_COLORS.text,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
   },
   pairSubtitle: {
     color: WALLET_COLORS.textSoft,
-    fontSize: 12,
+    fontSize: 11,
   },
   pairDivider: {
     height: 1,
@@ -774,3 +761,4 @@ const styles = StyleSheet.create({
 });
 
 export default EcdhBackupScreen;
+
