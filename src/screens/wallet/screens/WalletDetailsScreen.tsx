@@ -1,1 +1,1 @@
-export { default } from '../../WalletDetailsScreen';
+export { WalletDetailsScreen as default } from '../../../features/wallet';

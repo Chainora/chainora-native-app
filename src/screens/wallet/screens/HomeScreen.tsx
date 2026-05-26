@@ -1,1 +1,1 @@
-export { default } from '../../HomeScreen';
+export { HomeScreen as default } from '../../../features/wallet';

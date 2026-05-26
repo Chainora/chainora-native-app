@@ -1,4 +1,11 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type AuthSession = {
@@ -10,7 +17,7 @@ export type AuthSession = {
 
 const STORAGE_KEY = '@chainora/authSession';
 const SESSION_PENDING_TTL_MS = 10 * 60 * 1000; // 10 minutes
-const SESSION_ACTIVE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const SESSION_ACTIVE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 export type AuthContextValue = {
   session: AuthSession | null;
@@ -23,21 +30,29 @@ export type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 const nowIso = () => new Date().toISOString();
-const addMillis = (millis: number) => new Date(Date.now() + millis).toISOString();
+const addMillis = (millis: number) =>
+  new Date(Date.now() + millis).toISOString();
 
 const normalizeSession = (input: unknown): AuthSession | null => {
   if (!input || typeof input !== 'object') {
     return null;
   }
 
-  const candidate = input as Partial<AuthSession> & { address?: string; signature?: string };
+  const candidate = input as Partial<AuthSession> & {
+    address?: string;
+    signature?: string;
+  };
   if (!candidate.address || typeof candidate.address !== 'string') {
     return null;
   }
 
   const address = candidate.address.toLowerCase();
-  const issuedAt = typeof candidate.issuedAt === 'string' ? candidate.issuedAt : nowIso();
-  const expiresAt = typeof candidate.expiresAt === 'string' ? candidate.expiresAt : addMillis(SESSION_PENDING_TTL_MS);
+  const issuedAt =
+    typeof candidate.issuedAt === 'string' ? candidate.issuedAt : nowIso();
+  const expiresAt =
+    typeof candidate.expiresAt === 'string'
+      ? candidate.expiresAt
+      : addMillis(SESSION_PENDING_TTL_MS);
   const authenticated =
     typeof candidate.authenticated === 'boolean'
       ? candidate.authenticated
@@ -51,7 +66,9 @@ const normalizeSession = (input: unknown): AuthSession | null => {
   };
 };
 
-export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
+export const AuthProvider: React.FC<React.PropsWithChildren> = ({
+  children,
+}) => {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [loaded, setLoaded] = useState(false);
 
@@ -86,9 +103,11 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
       return;
     }
 
-    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(session)).catch(storageError => {
-      console.warn('[Auth] Failed to persist session', storageError);
-    });
+    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(session)).catch(
+      storageError => {
+        console.warn('[Auth] Failed to persist session', storageError);
+      },
+    );
   }, [session, loaded]);
 
   const clearSession = useCallback(async () => {
@@ -107,7 +126,11 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
       const currentExpiration = current ? Date.parse(current.expiresAt) : 0;
       const now = Date.now();
 
-      if (current && current.address === normalized && currentExpiration > now) {
+      if (
+        current &&
+        current.address === normalized &&
+        currentExpiration > now
+      ) {
         if (typeof current.authenticated !== 'boolean') {
           const migrated = normalizeSession({ ...current });
           if (migrated) {
@@ -133,14 +156,16 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
   const completeSession = useCallback(
     async (addressHint?: string): Promise<AuthSession> => {
       const fallbackAddress = addressHint?.toLowerCase().trim();
-      const activeSession = session ?? (fallbackAddress
-        ? {
-            address: fallbackAddress,
-            authenticated: false,
-            issuedAt: nowIso(),
-            expiresAt: addMillis(SESSION_PENDING_TTL_MS),
-          }
-        : null);
+      const activeSession =
+        session ??
+        (fallbackAddress
+          ? {
+              address: fallbackAddress,
+              authenticated: false,
+              issuedAt: nowIso(),
+              expiresAt: addMillis(SESSION_PENDING_TTL_MS),
+            }
+          : null);
 
       if (!activeSession) {
         throw new Error('No session active');
@@ -161,7 +186,9 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
   const value = useMemo<AuthContextValue>(
     () => ({
       session,
-      isAuthenticated: Boolean(session?.authenticated && Date.parse(session.expiresAt) > Date.now()),
+      isAuthenticated: Boolean(
+        session?.authenticated && Date.parse(session.expiresAt) > Date.now(),
+      ),
       initializeSession,
       completeSession,
       clearSession,

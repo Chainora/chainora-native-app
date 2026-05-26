@@ -1,7 +1,9 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Toast, type ToastType } from '../../components/Toast';
+import { Toast } from '../../components/Toast';
+
+import type { ToastType } from './types';
 
 type ToastContextValue = {
   showToast: (message: string, type?: ToastType) => void;

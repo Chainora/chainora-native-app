@@ -10,6 +10,7 @@ After screen changes, update this file with affected screens, user flows, and si
 - Screen components coordinate feature hooks, services, and dialogs.
 
 ## Latest Update
+- `src/screens/wallet/*` is now a route-entry layer only and re-exports feature-owned wallet implementations from `src/features/wallet`.
 - `QRScannerScreen` now supports create-pool QR signing flow (`chainora-native-wallet:create-pool`) in addition to auth/username flows.
 - Added scanned payload details rendering for create-pool variables and dynamic success messaging.
 - Reset/progress logic now guards optional `sessionId` to avoid invalid auth-progress calls for non-auth QR features.

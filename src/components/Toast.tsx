@@ -1,10 +1,9 @@
 import React, { useEffect, useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import type { ToastType } from '../features/toast/types';
 import { useSettings } from '../features/settings';
 import type { ThemeTokens } from '../types/theme/colors';
-
-export type ToastType = 'info' | 'error' | 'success';
 
 type ToastProps = {
   message: string | null;

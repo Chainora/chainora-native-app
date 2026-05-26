@@ -16,6 +16,7 @@ Keep updates short and focused on: changed areas, verification commands, and cav
 - `src/components/`: reusable UI components
 - `src/services/`: card, transaction, sync services
 - `src/features/`: settings/auth/nfc/domain hooks
+- Wallet UI implementation now lives in `src/features/wallet/*`; `src/screens/wallet/*` is route-wrapper only.
 - `src/navigation/`: route names and stack params
 - `src/locales/`: translation keys
 
@@ -23,6 +24,12 @@ Keep updates short and focused on: changed areas, verification commands, and cav
 - `yarn -s tsc --noEmit`
 - `yarn start`
 - `yarn android`
+
+## Session 2026-05-26 wallet-feature-ownership refactor
+Summary: Moved wallet home/send/receive/manage screen implementation under `src/features/wallet`, kept `src/screens/wallet` as thin route wrappers, extracted shared wallet hooks/utils/components, and moved `ToastType` out of the UI component module.
+Changed files: src/features/wallet/**, src/screens/wallet/**, src/components/Toast.tsx, src/features/toast/**, src/screens/ScanCardScreen.tsx, src/screens/auth/hooks/useScanCardNfcLifecycle.ts, src/services/scanCardFlowRegistry.ts
+Validation: `yarn -s tsc --noEmit` passed; `yarn test` passed; `yarn lint` still fails on pre-existing unrelated issues in `src/lib/nfc/isoDepClient.ts`, `src/services/transaction/signatureUtils.ts`, and `src/utils/encoding.ts`.
+Next steps: Manually verify wallet home/activity, send, receive, token-manage, and add-network flows on device/emulator.
 
 ## Session 2026-05-24 agent-doc ui exactness guardrail
 Summary: Tightened agent instructions so UI/screen-only requests stay scoped to the named screen, preserve flow/business invariants, reuse existing design tokens/primitives, and avoid off-pattern redesigns or hardcoded copy changes.

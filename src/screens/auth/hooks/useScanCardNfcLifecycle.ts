@@ -3,7 +3,7 @@ import { Alert, Linking } from 'react-native';
 import NfcManager from 'react-native-nfc-manager';
 
 import type { LocaleKey } from '../../../locales';
-import type { ToastType } from '../../../components/Toast';
+import type { ToastType } from '../../../features/toast';
 
 type TranslateFn = (key: LocaleKey) => string;
 

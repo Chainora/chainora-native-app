@@ -1,4 +1,4 @@
-import type { ToastType } from '../components/Toast';
+import type { ToastType } from '../features/toast';
 import type { WalletActionResult } from './cardService';
 
 export type ScanMode = 'init' | 'signin';

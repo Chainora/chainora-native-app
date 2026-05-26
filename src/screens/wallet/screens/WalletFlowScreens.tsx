@@ -5,4 +5,4 @@ export {
   SendPickScreen,
   TokenManageScreen,
   TouchSignScreen,
-} from '../../WalletFlowScreens';
+} from '../../../features/wallet';
