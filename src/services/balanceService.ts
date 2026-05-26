@@ -80,19 +80,13 @@ export const fetchWalletBalance = async (
   const walletAddress = getAddress(address);
   const client = getPublicViemClient(network);
 
-  const tokenConfig = network.key === 'chainora' && network.stablecoinAddress
+  const tokenConfig = network.portfolioTokenAddress
     ? {
-      tokenAddress: network.stablecoinAddress,
-      defaultDecimals: network.stablecoinDecimals ?? 18,
-      label: 'stablecoin',
+      tokenAddress: network.portfolioTokenAddress,
+      defaultDecimals: network.portfolioTokenDecimals ?? 18,
+      label: 'portfolio-token',
     }
-    : network.portfolioTokenAddress
-      ? {
-        tokenAddress: network.portfolioTokenAddress,
-        defaultDecimals: network.portfolioTokenDecimals ?? 18,
-        label: 'portfolio-token',
-      }
-      : null;
+    : null;
 
   if (tokenConfig) {
     const tokenBalance = await readErc20Balance({

@@ -16,3 +16,4 @@ After locale edits, update this file with added/removed keys and affected screen
 
 ## Recent Locale Changes
 - Added `sendTotalLabel` for Send review and TouchSign transaction summaries.
+- Updated EcdhBackup copy for plain-language backup flow and added `ecdhStep1Label`-`ecdhStep4Label`, `ecdhIntroNeedPins`.

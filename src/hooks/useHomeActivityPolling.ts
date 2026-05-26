@@ -38,8 +38,11 @@ export const useHomeActivityPolling = ({
   const mountedRef = useRef(true);
   const activitySignatureRef = useRef('');
   const activityInFlightRef = useRef(false);
+  const activityInFlightPromiseRef = useRef<Promise<void> | null>(null);
   const activityQueuedRef = useRef(false);
-  const activitySyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activitySyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   useEffect(() => {
     return () => {
@@ -59,28 +62,47 @@ export const useHomeActivityPolling = ({
     setActivities(next);
   }, []);
 
+  const refreshActivitiesFromStorage = useCallback(async () => {
+    const cached = await getRecentActivitiesByWalletAcrossNetworks(
+      ethAddress,
+      networkKeys,
+    );
+    if (mountedRef.current) {
+      setActivitiesIfChanged(mergePortfolioActivities(cached));
+    }
+  }, [ethAddress, networkKeys, setActivitiesIfChanged]);
+
   const loadRecentActivity = useCallback(async () => {
     if (activityInFlightRef.current) {
       activityQueuedRef.current = true;
+      await activityInFlightPromiseRef.current;
       return;
     }
 
     activityInFlightRef.current = true;
-    try {
-      const cached = await getRecentActivitiesByWalletAcrossNetworks(ethAddress, networkKeys);
-      if (mountedRef.current) {
-        setActivitiesIfChanged(mergePortfolioActivities(cached));
-      }
 
-      await Promise.allSettled(networks.map(network => syncWalletActivities(ethAddress, network)));
-      const next = await getRecentActivitiesByWalletAcrossNetworks(ethAddress, networkKeys);
-      if (mountedRef.current) {
-        setActivitiesIfChanged(mergePortfolioActivities(next));
-      }
+    const run = (async () => {
+      await refreshActivitiesFromStorage();
+
+      await Promise.allSettled(
+        networks.map(network =>
+          syncWalletActivities(ethAddress, network, {
+            onActivitiesAdded: refreshActivitiesFromStorage,
+          }),
+        ),
+      );
+      await refreshActivitiesFromStorage();
+    })();
+
+    activityInFlightPromiseRef.current = run;
+
+    try {
+      await run;
     } catch (error) {
       console.warn('[Home] Failed to load recent activity', error);
     } finally {
       activityInFlightRef.current = false;
+      activityInFlightPromiseRef.current = null;
       if (activityQueuedRef.current) {
         activityQueuedRef.current = false;
         setTimeout(() => {
@@ -90,7 +112,7 @@ export const useHomeActivityPolling = ({
         }, 0);
       }
     }
-  }, [ethAddress, networkKeys, networks, setActivitiesIfChanged]);
+  }, [ethAddress, networks, refreshActivitiesFromStorage]);
 
   const scheduleActivitySync = useCallback(() => {
     if (activitySyncTimerRef.current) {

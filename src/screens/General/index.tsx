@@ -3,9 +3,11 @@ import { Pressable, ScrollView, StatusBar, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { getWalletHomeNetworks } from '@config/network';
 import { useSettings } from '@hooks/useSettings';
 import type { RootStackParamList } from '@navigation/routes/rootStackParamList';
 import { ROUTES } from '@navigation/routes/routes';
+import type { AppNetwork } from '@store/settings';
 import {
   WALLET_COLORS,
   WalletAuras,
@@ -54,6 +56,10 @@ const OptionGroup: React.FC<{
 
 const GeneralScreen: React.FC<Props> = ({ navigation }) => {
   const { settings, resolvedTheme, setNetwork, setTheme, t } = useSettings();
+  const networkOptions = getWalletHomeNetworks().map(network => ({
+    value: network.key,
+    label: network.name,
+  }));
 
   return (
     <View style={screenBase.screen}>
@@ -87,11 +93,8 @@ const GeneralScreen: React.FC<Props> = ({ navigation }) => {
             <OptionGroup
               title={t('generalNetwork')}
               selected={settings.network}
-              onSelect={value => setNetwork(value as 'eth' | 'chainora')}
-              options={[
-                { value: 'chainora', label: t('networkChainoraTestnet') },
-                { value: 'eth', label: t('networkEth') },
-              ]}
+              onSelect={value => setNetwork(value as AppNetwork)}
+              options={networkOptions}
             />
 
             <WalletPanel style={styles.helperCard}>

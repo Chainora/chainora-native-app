@@ -33,7 +33,7 @@ export const styles = StyleSheet.create({
     lineHeight: 32,
     fontWeight: '800',
     fontFamily: DISPLAY_FONT,
-    letterSpacing: -0.7,
+    letterSpacing: 0,
   },
   introSubtitle: {
     color: WALLET_COLORS.textMuted,
@@ -42,7 +42,7 @@ export const styles = StyleSheet.create({
   },
   deviceCard: {
     padding: 12,
-    gap: 6,
+    gap: 10,
   },
   deviceCardTitle: {
     color: WALLET_COLORS.text,
@@ -53,6 +53,29 @@ export const styles = StyleSheet.create({
     color: WALLET_COLORS.textSoft,
     fontSize: 12,
     lineHeight: 17,
+  },
+  needGrid: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  needItem: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: WALLET_COLORS.border,
+    backgroundColor: WALLET_COLORS.surfaceAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingHorizontal: 6,
+  },
+  needText: {
+    color: WALLET_COLORS.text,
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '700',
+    textAlign: 'center',
   },
   timelineCard: {
     padding: 12,
@@ -81,6 +104,22 @@ export const styles = StyleSheet.create({
   timelineBody: {
     flex: 1,
     gap: 2,
+  },
+  timelineMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 6,
+  },
+  timelineStepLabel: {
+    color: WALLET_COLORS.textSoft,
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  timelineRoleLabel: {
+    color: WALLET_COLORS.signal,
+    fontSize: 10,
+    fontWeight: '700',
   },
   timelineTitle: {
     color: WALLET_COLORS.text,
@@ -130,6 +169,38 @@ export const styles = StyleSheet.create({
     shadowOpacity: 0.4,
     shadowRadius: 9,
   },
+  stepHeader: {
+    gap: 10,
+    marginBottom: 12,
+  },
+  stepGuideCard: {
+    padding: 14,
+    gap: 8,
+  },
+  stepGuideTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  stepGuideLabel: {
+    color: WALLET_COLORS.textSoft,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  stepGuideTitle: {
+    color: WALLET_COLORS.text,
+    fontSize: 22,
+    lineHeight: 27,
+    fontWeight: '800',
+    fontFamily: DISPLAY_FONT,
+    letterSpacing: 0,
+  },
+  stepGuideBody: {
+    color: WALLET_COLORS.textMuted,
+    fontSize: 13,
+    lineHeight: 18,
+  },
   tapStage: {
     flex: 1,
     justifyContent: 'space-between',
@@ -158,7 +229,7 @@ export const styles = StyleSheet.create({
     lineHeight: 28,
     fontWeight: '800',
     fontFamily: DISPLAY_FONT,
-    letterSpacing: -0.5,
+    letterSpacing: 0,
     textAlign: 'center',
   },
   tapSubtitle: {
@@ -240,10 +311,9 @@ export const styles = StyleSheet.create({
   },
   roleChipText: {
     color: WALLET_COLORS.textMuted,
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '700',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
+    letterSpacing: 0,
   },
   statusText: {
     color: WALLET_COLORS.textSoft,
@@ -284,7 +354,7 @@ export const styles = StyleSheet.create({
     fontWeight: '800',
     fontFamily: DISPLAY_FONT,
     textAlign: 'center',
-    letterSpacing: -0.6,
+    letterSpacing: 0,
   },
   successBody: {
     color: WALLET_COLORS.textMuted,

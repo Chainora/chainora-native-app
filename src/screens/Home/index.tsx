@@ -104,7 +104,8 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
   const [isAppActive, setIsAppActive] = useState(
     AppState.currentState === 'active',
   );
-  const [isManualRefreshing, setIsManualRefreshing] = useState(false);
+  const [isManualAssetRefreshing, setIsManualAssetRefreshing] = useState(false);
+  const [isManualActivityRefreshing, setIsManualActivityRefreshing] = useState(false);
 
   const mountedRef = useRef(true);
   const wasAppActiveRef = useRef(isAppActive);
@@ -249,21 +250,46 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
   }, [ethAddress, navigation]);
 
   const handleManualRefresh = useCallback(() => {
-    if (isManualRefreshing) {
+    if (activeTab === 'assets') {
+      if (assetsLoading || isManualAssetRefreshing) {
+        return;
+      }
+
+      setIsManualAssetRefreshing(true);
+      refreshPortfolio()
+        .catch(error => {
+          console.warn('[Home] Manual asset refresh failed', error);
+        })
+        .finally(() => {
+          if (mountedRef.current) {
+            setIsManualAssetRefreshing(false);
+          }
+        });
       return;
     }
 
-    setIsManualRefreshing(true);
-    Promise.all([refreshPortfolio(), loadRecentActivity()])
+    if (isManualActivityRefreshing) {
+      return;
+    }
+
+    setIsManualActivityRefreshing(true);
+    loadRecentActivity()
       .catch(error => {
-        console.warn('[Home] Manual refresh failed', error);
+        console.warn('[Home] Manual activity refresh failed', error);
       })
       .finally(() => {
         if (mountedRef.current) {
-          setIsManualRefreshing(false);
+          setIsManualActivityRefreshing(false);
         }
       });
-  }, [isManualRefreshing, loadRecentActivity, refreshPortfolio]);
+  }, [
+    activeTab,
+    assetsLoading,
+    isManualActivityRefreshing,
+    isManualAssetRefreshing,
+    loadRecentActivity,
+    refreshPortfolio,
+  ]);
 
   const dayChangePillStyle = useMemo(() => {
     if (dayChangeLabel.direction === 'up') {
@@ -288,7 +314,9 @@ const HomeScreen: React.FC<Props> = ({ route, navigation }) => {
     [insets.bottom, screenStyles.listScrollContent],
   );
 
-  const refreshBusy = assetsLoading || isManualRefreshing;
+  const refreshBusy = activeTab === 'assets'
+    ? assetsLoading || isManualAssetRefreshing
+    : isManualActivityRefreshing;
 
   return (
     <View style={screenBase.screen}>

@@ -20,7 +20,6 @@ import {
   WalletTopBar,
 } from '@components/ui/walletDesign';
 import { getNetworkConfig, type WalletHomeNetworkKey } from '@config/network';
-import { useImportedNetworkSaver } from '@hooks/useImportedNetworkSaver';
 import { useSettings } from '@hooks/useSettings';
 import { useWalletHomeNetworks } from '@hooks/useWalletHomeNetworks';
 import type { RootStackParamList } from '@navigation/routes/rootStackParamList';
@@ -38,8 +37,6 @@ const AddTokenScreen: React.FC<AddTokenProps> = ({ navigation }) => {
   const colors = useWalletColors();
   const screenBase = useMemo(() => createAddTokenScreenBase(colors), [colors]);
   const walletHomeNetworks = useWalletHomeNetworks();
-  const saveImportedNetwork = useImportedNetworkSaver();
-  const [tab, setTab] = useState<'token' | 'network'>('token');
   const [selectedTokenNetworkKey, setSelectedTokenNetworkKey] =
     useState<WalletHomeNetworkKey | null>(
       walletHomeNetworks[0]?.key as WalletHomeNetworkKey,
@@ -48,15 +45,8 @@ const AddTokenScreen: React.FC<AddTokenProps> = ({ navigation }) => {
   const [name, setName] = useState('');
   const [symbol, setSymbol] = useState('');
   const [decimals, setDecimals] = useState('');
-  const [networkName, setNetworkName] = useState('');
-  const [networkSymbol, setNetworkSymbol] = useState('');
-  const [rpcUrl, setRpcUrl] = useState('');
-  const [saving, setSaving] = useState(false);
 
-  const canSave =
-    tab === 'token'
-      ? Boolean(address && name && symbol && decimals)
-      : Boolean(networkName && rpcUrl && networkSymbol && !saving);
+  const canSave = Boolean(address && name && symbol && decimals);
 
   useEffect(() => {
     if (walletHomeNetworks.length === 0) {
@@ -80,44 +70,11 @@ const AddTokenScreen: React.FC<AddTokenProps> = ({ navigation }) => {
       return;
     }
 
-    if (tab === 'token') {
-      Alert.alert(
-        t('walletImportTokenSavedTitle'),
-        t('walletImportTokenSavedBody'),
-      );
-      return;
-    }
-
-    setSaving(true);
-    saveImportedNetwork({
-      name: networkName,
-      rpcUrl,
-      currencySymbol: networkSymbol,
-    })
-      .then(() => {
-        Alert.alert(
-          t('walletImportNetworkSavedTitle'),
-          t('walletImportNetworkSavedBody'),
-        );
-        navigation.goBack();
-      })
-      .catch(error => {
-        const message = error instanceof Error ? error.message : String(error);
-        Alert.alert(t('walletImportNetworkSaveFailedTitle'), message);
-      })
-      .finally(() => {
-        setSaving(false);
-      });
-  }, [
-    canSave,
-    navigation,
-    networkName,
-    networkSymbol,
-    rpcUrl,
-    saveImportedNetwork,
-    t,
-    tab,
-  ]);
+    Alert.alert(
+      t('walletImportTokenSavedTitle'),
+      t('walletImportTokenSavedBody'),
+    );
+  }, [canSave, t]);
 
   return (
     <View style={screenBase.screen}>
@@ -127,30 +84,6 @@ const AddTokenScreen: React.FC<AddTokenProps> = ({ navigation }) => {
             title={t('walletImportTitle')}
             onBack={() => navigation.goBack()}
           />
-
-          <View style={styles.tabSwitch}>
-            {(['token', 'network'] as const).map(option => (
-              <Pressable
-                key={option}
-                style={styles.tabSwitchItem}
-                onPress={() => setTab(option)}
-              >
-                <Text
-                  style={[
-                    styles.tabSwitchText,
-                    tab === option && styles.tabSwitchTextOn,
-                  ]}
-                >
-                  {option === 'token'
-                    ? t('walletImportTabToken')
-                    : t('walletImportTabNetwork')}
-                </Text>
-                {tab === option ? (
-                  <View style={styles.tabSwitchIndicator} />
-                ) : null}
-              </Pressable>
-            ))}
-          </View>
 
           <ScrollView
             showsVerticalScrollIndicator={false}
@@ -169,160 +102,110 @@ const AddTokenScreen: React.FC<AddTokenProps> = ({ navigation }) => {
               </Text>
             </WalletPanel>
 
-            {tab === 'token' ? (
-              <>
-                <View style={styles.fieldGroup}>
-                  <WalletSectionLabel label={t('walletImportNetworkLabel')} />
-                  <WalletTextField
-                    left={
-                      selectedTokenNetworkKey ? (
-                        <WalletNetworkCoin
-                          network={getNetworkConfig(selectedTokenNetworkKey)}
-                          size={20}
-                        />
-                      ) : null
+            <View style={styles.fieldGroup}>
+              <WalletSectionLabel label={t('walletImportNetworkLabel')} />
+              <WalletTextField
+                left={
+                  selectedTokenNetworkKey ? (
+                    <WalletNetworkCoin
+                      network={getNetworkConfig(selectedTokenNetworkKey)}
+                      size={20}
+                    />
+                  ) : null
+                }
+              >
+                <Text style={styles.networkPillText}>
+                  {selectedTokenNetworkKey
+                    ? getNetworkConfig(selectedTokenNetworkKey).name
+                    : '-'}
+                </Text>
+              </WalletTextField>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.chipRowCompact}
+              >
+                {walletHomeNetworks.map(network => (
+                  <Pressable
+                    key={network.key}
+                    style={[
+                      styles.filterChip,
+                      selectedTokenNetworkKey === network.key &&
+                        styles.filterChipOn,
+                    ]}
+                    onPress={() =>
+                      setSelectedTokenNetworkKey(
+                        network.key as WalletHomeNetworkKey,
+                      )
                     }
                   >
-                    <Text style={styles.networkPillText}>
-                      {selectedTokenNetworkKey
-                        ? getNetworkConfig(selectedTokenNetworkKey).name
-                        : '-'}
-                    </Text>
-                  </WalletTextField>
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.chipRowCompact}
-                  >
-                    {walletHomeNetworks.map(network => (
-                      <Pressable
-                        key={network.key}
-                        style={[
-                          styles.filterChip,
-                          selectedTokenNetworkKey === network.key &&
-                            styles.filterChipOn,
-                        ]}
-                        onPress={() =>
-                          setSelectedTokenNetworkKey(
-                            network.key as WalletHomeNetworkKey,
-                          )
-                        }
-                      >
-                        <WalletNetworkCoin network={network} size={28} />
-                      </Pressable>
-                    ))}
-                  </ScrollView>
-                </View>
+                    <WalletNetworkCoin network={network} size={28} />
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </View>
 
-                <View style={styles.fieldGroup}>
-                  <WalletSectionLabel
-                    label={t('walletImportContractAddressLabel')}
-                  />
-                  <WalletTextField>
-                    <TextInput
-                      placeholder="0x..."
-                      placeholderTextColor={colors.textLow}
-                      value={address}
-                      onChangeText={setAddress}
-                      autoCapitalize="none"
-                      style={styles.fieldInput}
-                    />
-                  </WalletTextField>
-                </View>
+            <View style={styles.fieldGroup}>
+              <WalletSectionLabel
+                label={t('walletImportContractAddressLabel')}
+              />
+              <WalletTextField>
+                <TextInput
+                  placeholder="0x..."
+                  placeholderTextColor={colors.textLow}
+                  value={address}
+                  onChangeText={setAddress}
+                  autoCapitalize="none"
+                  style={styles.fieldInput}
+                />
+              </WalletTextField>
+            </View>
 
-                <View style={styles.fieldGroup}>
-                  <WalletSectionLabel label={t('walletImportNameLabel')} />
-                  <WalletTextField>
-                    <TextInput
-                      placeholder={t('walletImportNamePlaceholder')}
-                      placeholderTextColor={colors.textLow}
-                      value={name}
-                      onChangeText={setName}
-                      style={styles.fieldInput}
-                    />
-                  </WalletTextField>
-                </View>
+            <View style={styles.fieldGroup}>
+              <WalletSectionLabel label={t('walletImportNameLabel')} />
+              <WalletTextField>
+                <TextInput
+                  placeholder={t('walletImportNamePlaceholder')}
+                  placeholderTextColor={colors.textLow}
+                  value={name}
+                  onChangeText={setName}
+                  style={styles.fieldInput}
+                />
+              </WalletTextField>
+            </View>
 
-                <View style={styles.fieldGroup}>
-                  <WalletSectionLabel label={t('walletImportTickerLabel')} />
-                  <WalletTextField>
-                    <TextInput
-                      placeholder={t('walletImportTickerPlaceholder')}
-                      placeholderTextColor={colors.textLow}
-                      value={symbol}
-                      onChangeText={text => setSymbol(text.toUpperCase())}
-                      style={styles.fieldInput}
-                    />
-                  </WalletTextField>
-                </View>
+            <View style={styles.fieldGroup}>
+              <WalletSectionLabel label={t('walletImportTickerLabel')} />
+              <WalletTextField>
+                <TextInput
+                  placeholder={t('walletImportTickerPlaceholder')}
+                  placeholderTextColor={colors.textLow}
+                  value={symbol}
+                  onChangeText={text => setSymbol(text.toUpperCase())}
+                  style={styles.fieldInput}
+                />
+              </WalletTextField>
+            </View>
 
-                <View style={styles.fieldGroup}>
-                  <WalletSectionLabel label={t('walletImportDecimalsLabel')} />
-                  <WalletTextField>
-                    <TextInput
-                      placeholder="18"
-                      placeholderTextColor={colors.textLow}
-                      value={decimals}
-                      onChangeText={text =>
-                        setDecimals(text.replace(/[^\d]/g, '').slice(0, 2))
-                      }
-                      keyboardType="number-pad"
-                      style={styles.fieldInput}
-                    />
-                  </WalletTextField>
-                </View>
-              </>
-            ) : (
-              <>
-                <View style={styles.fieldGroup}>
-                  <WalletSectionLabel
-                    label={t('walletImportNetworkNameLabel')}
-                  />
-                  <WalletTextField>
-                    <TextInput
-                      placeholder={t('walletImportNetworkNamePlaceholder')}
-                      placeholderTextColor={colors.textLow}
-                      value={networkName}
-                      onChangeText={setNetworkName}
-                      style={styles.fieldInput}
-                    />
-                  </WalletTextField>
-                </View>
-                <View style={styles.fieldGroup}>
-                  <WalletSectionLabel
-                    label={t('walletImportNetworkSymbolLabel')}
-                  />
-                  <WalletTextField>
-                    <TextInput
-                      placeholder={t('walletImportNetworkSymbolPlaceholder')}
-                      placeholderTextColor={colors.textLow}
-                      value={networkSymbol}
-                      onChangeText={text =>
-                        setNetworkSymbol(text.toUpperCase())
-                      }
-                      style={styles.fieldInput}
-                    />
-                  </WalletTextField>
-                </View>
-                <View style={styles.fieldGroup}>
-                  <WalletSectionLabel label={t('walletImportRpcUrlLabel')} />
-                  <WalletTextField>
-                    <TextInput
-                      placeholder="https://..."
-                      placeholderTextColor={colors.textLow}
-                      value={rpcUrl}
-                      onChangeText={setRpcUrl}
-                      autoCapitalize="none"
-                      style={styles.fieldInput}
-                    />
-                  </WalletTextField>
-                </View>
-              </>
-            )}
+            <View style={styles.fieldGroup}>
+              <WalletSectionLabel label={t('walletImportDecimalsLabel')} />
+              <WalletTextField>
+                <TextInput
+                  placeholder="18"
+                  placeholderTextColor={colors.textLow}
+                  value={decimals}
+                  onChangeText={text =>
+                    setDecimals(text.replace(/[^\d]/g, '').slice(0, 2))
+                  }
+                  keyboardType="number-pad"
+                  style={styles.fieldInput}
+                />
+              </WalletTextField>
+            </View>
           </ScrollView>
 
           <WalletButton
-            label={saving ? t('walletImportSaving') : t('walletImportSave')}
+            label={t('walletImportSave')}
             disabled={!canSave}
             onPress={handleSave}
           />

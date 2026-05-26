@@ -13,7 +13,6 @@ import {
   WALLET_COLORS,
   WalletButton,
   WalletPanel,
-  WalletSectionLabel,
   WalletTopBar,
 } from '@components/ui/walletDesign';
 import { useEcdhBackupActions } from '@hooks/useEcdhBackupActions';
@@ -29,23 +28,32 @@ type Props = NativeStackScreenProps<
   RootStackParamList,
   typeof ROUTES.EcdhBackup
 >;
-type StageKey = 'intro' | 'tap1' | 'tap2' | 'tap3' | 'tap4' | 'success';
+type TapStageKey = 'tap1' | 'tap2' | 'tap3' | 'tap4';
+type StageKey = 'intro' | TapStageKey | 'success';
+type RoleLocaleKey = 'ecdhRoleMainCard' | 'ecdhRoleBackupCard';
+type StepLabelLocaleKey =
+  | 'ecdhStep1Label'
+  | 'ecdhStep2Label'
+  | 'ecdhStep3Label'
+  | 'ecdhStep4Label';
 
 const PIN_LENGTH = 4;
 const formatFailure = (message: string, statusWord?: string) =>
   statusWord ? `${message} (SW: ${statusWord})` : message;
 
-const roleKeyByStage: Record<
-  'tap1' | 'tap2' | 'tap3' | 'tap4',
-  'ecdhRoleMainCard' | 'ecdhRoleBackupCard'
-> = {
+const roleKeyByStage: Record<TapStageKey, RoleLocaleKey> = {
   tap1: 'ecdhRoleMainCard',
   tap2: 'ecdhRoleBackupCard',
   tap3: 'ecdhRoleMainCard',
   tap4: 'ecdhRoleBackupCard',
 };
 
-type TapStageKey = keyof typeof roleKeyByStage;
+const stepLabelKeyByStage: Record<TapStageKey, StepLabelLocaleKey> = {
+  tap1: 'ecdhStep1Label',
+  tap2: 'ecdhStep2Label',
+  tap3: 'ecdhStep3Label',
+  tap4: 'ecdhStep4Label',
+};
 
 const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
   const { isEnabled } = useNfcEnabled();
@@ -68,25 +76,54 @@ const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
   );
   const [envelope, setEnvelope] = useState<Uint8Array | null>(null);
 
+  const introNeedItems = useMemo(
+    () => [
+      {
+        key: 'main-card',
+        icon: 'card-outline' as const,
+        label: t('ecdhRoleMainCard'),
+      },
+      {
+        key: 'backup-card',
+        icon: 'albums-outline' as const,
+        label: t('ecdhRoleBackupCard'),
+      },
+      {
+        key: 'pins',
+        icon: 'keypad-outline' as const,
+        label: t('ecdhIntroNeedPins'),
+      },
+    ],
+    [t],
+  );
+
   const introTimeline = useMemo(
     () => [
       {
         step: '1',
+        stepLabel: t('ecdhStep1Label'),
+        roleLabel: t('ecdhRoleMainCard'),
         title: t('ecdhIntroTimeline1Title'),
         subtitle: t('ecdhIntroTimeline1Subtitle'),
       },
       {
         step: '2',
+        stepLabel: t('ecdhStep2Label'),
+        roleLabel: t('ecdhRoleBackupCard'),
         title: t('ecdhIntroTimeline2Title'),
         subtitle: t('ecdhIntroTimeline2Subtitle'),
       },
       {
         step: '3',
+        stepLabel: t('ecdhStep3Label'),
+        roleLabel: t('ecdhRoleMainCard'),
         title: t('ecdhIntroTimeline3Title'),
         subtitle: t('ecdhIntroTimeline3Subtitle'),
       },
       {
         step: '4',
+        stepLabel: t('ecdhStep4Label'),
+        roleLabel: t('ecdhRoleBackupCard'),
         title: t('ecdhIntroTimeline4Title'),
         subtitle: t('ecdhIntroTimeline4Subtitle'),
       },
@@ -98,68 +135,85 @@ const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
     () => ({
       tap1: {
         step: 1,
+        stepLabel: t(stepLabelKeyByStage.tap1),
+        roleKey: roleKeyByStage.tap1,
         title: t('ecdhTap1Title'),
         subtitle: t('ecdhTap1Subtitle'),
         needsPin: true,
         pinValue: mainPin,
         setPinValue: setMainPin,
-        trail: [
-          t('ecdhTrailReadCard'),
-          t('ecdhTrailVerifyPin'),
-          t('ecdhTrailReady'),
-        ],
       },
       tap2: {
         step: 2,
+        stepLabel: t(stepLabelKeyByStage.tap2),
+        roleKey: roleKeyByStage.tap2,
         title: t('ecdhTap2Title'),
         subtitle: t('ecdhTap2Subtitle'),
         needsPin: true,
         pinValue: secondaryPin,
         setPinValue: setSecondaryPin,
-        trail: [
-          t('ecdhTrailReadCard'),
-          t('ecdhTrailCreateKey'),
-          t('ecdhTrailVerify'),
-        ],
       },
       tap3: {
         step: 3,
+        stepLabel: t(stepLabelKeyByStage.tap3),
+        roleKey: roleKeyByStage.tap3,
         title: t('ecdhTap3Title'),
         subtitle: t('ecdhTap3Subtitle'),
         needsPin: false,
         pinValue: mainPin,
         setPinValue: setMainPin,
-        trail: [
-          t('ecdhTrailSealWallet'),
-          t('ecdhTrailEncrypt'),
-          t('ecdhTrailTransfer'),
-        ],
       },
       tap4: {
         step: 4,
+        stepLabel: t(stepLabelKeyByStage.tap4),
+        roleKey: roleKeyByStage.tap4,
         title: t('ecdhTap4Title'),
         subtitle: t('ecdhTap4Subtitle'),
         needsPin: false,
         pinValue: secondaryPin,
         setPinValue: setSecondaryPin,
-        trail: [
-          t('ecdhTrailReceive'),
-          t('ecdhTrailCheck'),
-          t('ecdhTrailStore'),
-        ],
       },
     }),
     [mainPin, secondaryPin, t],
   );
 
-  const progressStage =
-    stage === 'success' ? 4 : stage === 'intro' ? 0 : stages[stage].step;
   const currentTap =
     stage === 'intro' || stage === 'success' ? null : stages[stage];
   const canAdvance =
     !currentTap ||
     !currentTap.needsPin ||
     currentTap.pinValue.length === PIN_LENGTH;
+
+  const renderProgressRow = (activeStep: number) => (
+    <View style={styles.progressRow}>
+      {[1, 2, 3, 4].map(index => (
+        <View
+          key={index}
+          style={[
+            styles.progressSegment,
+            activeStep >= index && styles.progressSegmentDone,
+            activeStep === index && styles.progressSegmentActive,
+          ]}
+        />
+      ))}
+    </View>
+  );
+
+  const renderStepGuide = (tap: NonNullable<typeof currentTap>) => (
+    <View style={styles.stepHeader}>
+      {renderProgressRow(tap.step)}
+      <WalletPanel style={styles.stepGuideCard}>
+        <View style={styles.stepGuideTopRow}>
+          <Text style={styles.stepGuideLabel}>{tap.stepLabel}</Text>
+          <View style={styles.roleChip}>
+            <Text style={styles.roleChipText}>{t(tap.roleKey)}</Text>
+          </View>
+        </View>
+        <Text style={styles.stepGuideTitle}>{tap.title}</Text>
+        <Text style={styles.stepGuideBody}>{tap.subtitle}</Text>
+      </WalletPanel>
+    </View>
+  );
 
   const executeCurrentTap =
     useCallback(async (): Promise<WalletActionResult> => {
@@ -356,9 +410,18 @@ const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
                     <Text style={styles.deviceCardTitle}>
                       {t('ecdhIntroCardsTitle')}
                     </Text>
-                    <Text style={styles.deviceCardBody}>
-                      {t('ecdhIntroCardsBody')}
-                    </Text>
+                    <View style={styles.needGrid}>
+                      {introNeedItems.map(item => (
+                        <View key={item.key} style={styles.needItem}>
+                          <Ionicons
+                            name={item.icon}
+                            size={16}
+                            color={WALLET_COLORS.signal}
+                          />
+                          <Text style={styles.needText}>{item.label}</Text>
+                        </View>
+                      ))}
+                    </View>
                   </WalletPanel>
 
                   <WalletPanel style={styles.timelineCard}>
@@ -370,6 +433,14 @@ const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
                           </Text>
                         </View>
                         <View style={styles.timelineBody}>
+                          <View style={styles.timelineMetaRow}>
+                            <Text style={styles.timelineStepLabel}>
+                              {item.stepLabel}
+                            </Text>
+                            <Text style={styles.timelineRoleLabel}>
+                              {item.roleLabel}
+                            </Text>
+                          </View>
                           <Text style={styles.timelineTitle}>{item.title}</Text>
                           <Text style={styles.timelineSubtitle}>
                             {item.subtitle}
@@ -377,15 +448,6 @@ const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
                         </View>
                       </View>
                     ))}
-                  </WalletPanel>
-
-                  <WalletPanel style={styles.noteCard}>
-                    <Ionicons
-                      name="lock-closed-outline"
-                      size={16}
-                      color={WALLET_COLORS.signal}
-                    />
-                    <Text style={styles.noteText}>{t('ecdhIntroNote')}</Text>
                   </WalletPanel>
                 </View>
 
@@ -399,17 +461,7 @@ const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
             ) : stage === 'success' ? (
               <View style={styles.successWrap}>
                 <View style={styles.successSummary}>
-                  <View style={styles.progressRow}>
-                    {[1, 2, 3, 4].map(index => (
-                      <View
-                        key={index}
-                        style={[
-                          styles.progressSegment,
-                          styles.progressSegmentDone,
-                        ]}
-                      />
-                    ))}
-                  </View>
+                  {renderProgressRow(4)}
 
                   <View style={styles.successMark}>
                     <Ionicons
@@ -480,70 +532,17 @@ const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
                   onBackspace={handleBackspace}
                   onSubmit={openNextStage}
                   submitDisabled={!canAdvance}
-                  title={currentTap.title}
-                  subtitle={currentTap.subtitle}
+                  headerSlot={renderStepGuide(currentTap)}
                   ctaLabel={t('ecdhPrimaryAction')}
                   showHero={false}
                   squareIndicators
-                  heroIconName="wifi-outline"
-                  progressCurrent={currentTap.step}
-                  progressTotal={4}
-                  progressLabel={`${t('commonStep')} ${currentTap.step}/4`}
                   supportingText={statusMessage}
                   errorMessage={errorMessage}
-                  contentSlot={
-                    <View style={styles.roleChipWrap}>
-                      <View style={styles.roleChip}>
-                        <Text style={styles.roleChipText}>
-                          {t(roleKeyByStage[stage as TapStageKey])}
-                        </Text>
-                      </View>
-                    </View>
-                  }
-                  afterActionSlot={
-                    <WalletPanel style={styles.pinHintCard}>
-                      <Text style={styles.pinHintText}>
-                        {t('ecdhPinFooterNote')}
-                      </Text>
-                    </WalletPanel>
-                  }
                 />
               ) : (
                 <View style={styles.tapStage}>
                   <View style={styles.tapDetails}>
-                    <View style={styles.progressRow}>
-                      {[1, 2, 3, 4].map(index => (
-                        <View
-                          key={index}
-                          style={[
-                            styles.progressSegment,
-                            progressStage >= index &&
-                              styles.progressSegmentDone,
-                            progressStage === index &&
-                              styles.progressSegmentActive,
-                          ]}
-                        />
-                      ))}
-                    </View>
-
-                    <WalletSectionLabel
-                      label={`${t('ecdhTapLabel')} ${currentTap.step}/4 - ${t(
-                        roleKeyByStage[stage as TapStageKey],
-                      )}`}
-                    />
-                    <View style={styles.tapHero}>
-                      <View style={styles.tapIcon}>
-                        <Ionicons
-                          name="wifi-outline"
-                          size={32}
-                          color={WALLET_COLORS.signal}
-                        />
-                      </View>
-                      <Text style={styles.tapTitle}>{currentTap.title}</Text>
-                      <Text style={styles.tapSubtitle}>
-                        {currentTap.subtitle}
-                      </Text>
-                    </View>
+                    {renderStepGuide(currentTap)}
 
                     <WalletPanel style={styles.scanCard}>
                       <View style={styles.scanCore}>
@@ -557,15 +556,6 @@ const EcdhBackupScreen: React.FC<Props> = ({ navigation }) => {
                       <Text style={styles.scanSubtitle}>
                         {t('ecdhScanSubtitle')}
                       </Text>
-                    </WalletPanel>
-
-                    <WalletPanel style={styles.trailCard}>
-                      {currentTap.trail.map(segment => (
-                        <View key={segment} style={styles.trailItem}>
-                          <View style={styles.trailDot} />
-                          <Text style={styles.trailText}>{segment}</Text>
-                        </View>
-                      ))}
                     </WalletPanel>
 
                     <Text style={styles.statusText}>{statusMessage}</Text>

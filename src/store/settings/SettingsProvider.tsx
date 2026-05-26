@@ -3,8 +3,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { useColorScheme } from 'react-native';
 
 import { translate, type LocaleKey } from '@locales';
-import { setActiveNetwork } from '@config/network';
-import { loadImportedNetworks } from '@services/storage/importedNetworkStorage';
+import { isWalletHomeNetworkKey, setActiveNetwork } from '@config/network';
 import { resolveThemeTokens } from '@app-types/theme/colors';
 import type {
   AppCurrency,
@@ -21,7 +20,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   language: 'en',
   currency: 'usd',
   theme: 'system',
-  network: 'chainora',
+  network: 'ethMainnet',
 };
 
 type SettingsContextValue = {
@@ -37,6 +36,15 @@ type SettingsContextValue = {
 };
 
 const SettingsContext = createContext<SettingsContextValue | undefined>(undefined);
+
+const parseStoredNetwork = (value: unknown): AppNetwork => {
+  if (typeof value !== 'string') {
+    return DEFAULT_SETTINGS.network;
+  }
+
+  const normalized = value.trim();
+  return isWalletHomeNetworkKey(normalized) ? normalized : DEFAULT_SETTINGS.network;
+};
 
 const parseStoredSettings = (raw: string | null): AppSettings => {
   if (!raw) {
@@ -55,7 +63,7 @@ const parseStoredSettings = (raw: string | null): AppSettings => {
         parsed.theme === 'dark' || parsed.theme === 'light' || parsed.theme === 'system'
           ? parsed.theme
           : 'system',
-      network: parsed.network === 'eth' ? 'eth' : 'chainora',
+      network: parseStoredNetwork(parsed.network),
     };
   } catch {
     return DEFAULT_SETTINGS;
@@ -71,18 +79,14 @@ export const SettingsProvider: React.FC<React.PropsWithChildren> = ({ children }
     let mounted = true;
 
     const loadSettings = async () => {
-      const [raw] = await Promise.all([
-        AsyncStorage.getItem(STORAGE_KEY),
-        loadImportedNetworks().catch(error => {
-          console.warn('[Settings] Failed to load imported networks', error);
-        }),
-      ]);
+      const raw = await AsyncStorage.getItem(STORAGE_KEY);
       if (!mounted) {
         return;
       }
       const parsed = parseStoredSettings(raw);
       setActiveNetwork(parsed.network);
       setSettings(parsed);
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(parsed)).catch(() => undefined);
       setHydrated(true);
     };
 
